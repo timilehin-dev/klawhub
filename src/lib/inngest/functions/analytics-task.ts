@@ -1,7 +1,7 @@
 import { inngest } from "../client";
 import { analyzeData } from "@/lib/agents/analyst";
 import { postToThread, addReaction, removeReaction, uploadBinaryFile } from "@/lib/slack/client";
-import { updateTask } from "@/lib/db";
+import { updateTask, trackSkillUsage } from "@/lib/db";
 import type { SandboxResponse } from "@/types";
 
 interface AnalyticsEventData {
@@ -23,7 +23,7 @@ export const analyticsWorkflow = inngest.createFunction(
   { id: "analytics-task", name: "Analytics Task", retries: 2 },
   { event: "slack/analytics.requested" },
   async ({ event, step }): Promise<void> => {
-    const { slackChannelId, slackThreadTs, taskId } =
+    const { slackChannelId, slackThreadTs, slackUserId, taskId } =
       event.data as AnalyticsEventData;
 
     // Step 1: Run analysis
@@ -51,22 +51,32 @@ export const analyticsWorkflow = inngest.createFunction(
         );
       }
 
+      const outcome = exec.success ? "success" : "error";
+
       await updateTask(taskId, {
-        status: "done",
+        status: exec.success ? "done" : "error",
         result: {
           stdout: (exec.stdout || "").slice(0, 2000),
           insights: String(result.insights),
         },
       });
 
-      try { await removeReaction(slackChannelId, slackThreadTs, "chart_with_upwards_trend"); } catch { /* ok */ }
-      await addReaction(slackChannelId, slackThreadTs, "white_check_mark");
+      try {
+        await removeReaction(slackChannelId, slackThreadTs, "chart_with_upwards_trend");
+      } catch { /* ok */ }
+      await addReaction(
+        slackChannelId,
+        slackThreadTs,
+        exec.success ? "white_check_mark" : "warning"
+      );
 
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `📊 *Analysis Complete*\n\n${String(result.insights).slice(0, 2000)}\n${exec.output_file ? "\n_Chart uploaded above._" : ""}\n_Reply in this thread for follow-up analysis._`
+        `*Analysis ${exec.success ? "Complete" : "Failed"}*\n\n${String(result.insights).slice(0, 2000)}\n${exec.output_file ? "\n_Chart uploaded above._" : ""}\n_Reply in this thread for follow-up analysis._`
       );
+
+      await trackSkillUsage("analytics", slackUserId, slackChannelId, event.data.messageText, outcome);
     });
   }
 );

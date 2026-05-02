@@ -1,13 +1,15 @@
 import { llm } from "@/lib/llm";
 import { webSearch } from "@/lib/tools/web-search";
 
-const PM_PROMPT = `You are the PM Agent of Klawhub. You write technical specifications for software tools.
+const PM_PROMPT = `You are the PM Agent of Klawhub. You write clear, actionable technical specifications.
 
 RULES:
-1. ALWAYS write a spec. Never ask for more details — make reasonable assumptions.
+1. ALWAYS write a spec — never ask for more details. Make reasonable assumptions.
 2. Keep specs under 200 words. Be specific about inputs, outputs, logic, and libraries.
-3. Choose Python for data/API tasks, JavaScript for web/UI tasks.
-4. If the request references real APIs, include the actual endpoints.
+3. Choose Python for data/API/automation tasks. Choose JavaScript for web/UI tasks.
+4. If the request references real APIs, include actual endpoints and authentication notes.
+5. Specify edge cases and basic error handling expectations.
+6. Note any external dependencies that need to be installed.
 
 Format:
 LANGUAGE: <python or javascript>
@@ -15,8 +17,11 @@ SPEC:
 <concise technical spec>`;
 
 export async function createSpec(request: string, userContext: string) {
-  // Search for relevant API docs or references
-  const searchResults = await webSearch(request.split(" ").slice(0, 8).join(" "), 3);
+  // Build a richer search query from the full request
+  const searchQuery = request.length > 100
+    ? request.slice(0, 100)
+    : request;
+  const searchResults = await webSearch(searchQuery, 3);
 
   const messages = [
     { role: "system" as const, content: PM_PROMPT },

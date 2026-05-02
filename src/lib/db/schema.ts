@@ -10,7 +10,7 @@ export const runs = pgTable("runs", {
   slackThreadTs: text("slack_thread_ts"),
   request: text("request").notNull(),
   status: text("status")
-    .$type<"pending" | "pm" | "coding" | "qa" | "done" | "error">()
+    .$type<"pending" | "pm" | "pending_approval" | "coding" | "qa" | "done" | "error">()
     .default("pending"),
   pmSpec: text("pm_spec"),
   code: text("code"),
@@ -31,7 +31,7 @@ export const tasks = pgTable("tasks", {
   type: text("type").$type<"document" | "research" | "analytics">().notNull(),
   request: text("request").notNull(),
   status: text("status")
-    .$type<"pending" | "processing" | "done" | "error">()
+    .$type<"pending" | "pending_approval" | "processing" | "done" | "error">()
     .default("pending"),
   result: jsonb("result"),
   outputFilename: text("output_filename"),
@@ -59,6 +59,18 @@ export const skills = pgTable("skills", {
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// ── Skill Usage: tracks skill invocations for learning ──
+
+export const skillUsage = pgTable("skill_usage", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  skillName: text("skill_name").notNull(),
+  slackUserId: text("slack_user_id").notNull(),
+  slackChannelId: text("slack_channel_id").notNull(),
+  request: text("request").notNull(),
+  outcome: text("outcome").$type<"success" | "error">().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
 // ── Intent list for classifier ──

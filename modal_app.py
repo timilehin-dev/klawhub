@@ -4,13 +4,22 @@ import tempfile
 import os
 import json
 import base64
+import glob
+import hmac
+import hashlib
+import time
 import requests
+from fastapi import Request, HTTPException
 from bs4 import BeautifulSoup
 
 app = modal.App("klawhub-sandbox")
 
+# ── Secrets ──
+webhook_secret = modal.Secret.from_name("klawhub-webhook-secret", create_if_missing=True)
+
 image = (
     modal.Image.debian_slim(python_version="3.11")
+    .apt_install("nodejs")  # Enable JavaScript execution
     .pip_install(
         "fastapi[standard]",
         "requests",
@@ -23,6 +32,26 @@ image = (
         "reportlab",
     )
 )
+
+
+# ─────────────────────────────────────────────
+# Auth Middleware
+# ─────────────────────────────────────────────
+
+def verify_request(request: Request) -> bool:
+    """Verify requests using a shared webhook secret."""
+    provided = request.headers.get("X-Webhook-Secret", "")
+    expected = os.environ.get("MODAL_WEBHOOK_SECRET", "")
+
+    if not expected:
+        # No secret configured — allow (dev mode)
+        return True
+
+    if not provided:
+        return False
+
+    return hmac.compare_digest(provided, expected)
+
 
 # ─────────────────────────────────────────────
 # Code Execution
@@ -41,13 +70,18 @@ def execute_code(code: str, language: str = "python"):
             f.write(code)
             filepath = f.name
 
-        result = subprocess.run(cmd + [filepath], capture_output=True, text=True, timeout=30)
-        os.unlink(filepath)
+        try:
+            result = subprocess.run(cmd + [filepath], capture_output=True, text=True, timeout=30)
+        finally:
+            try:
+                os.unlink(filepath)
+            except OSError:
+                pass
 
         return {
             "success": result.returncode == 0,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "stdout": result.stdout[:10000],
+            "stderr": result.stderr[:5000],
             "error": None if result.returncode == 0 else f"Exit code {result.returncode}",
         }
 
@@ -70,20 +104,17 @@ def read_web_page(url: str):
 
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Remove scripts, styles, nav, footer
+        # Remove scripts, styles, nav, footer, header, aside
         for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
             tag.decompose()
 
-        # Extract text from main content
         text = soup.get_text(separator="\n", strip=True)
-
-        # Clean up excessive whitespace
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         content = "\n".join(lines)
 
         return {
             "success": True,
-            "content": content[:8000],  # Cap at 8k chars
+            "content": content[:8000],
             "title": soup.title.string if soup.title else "",
         }
 
@@ -109,24 +140,21 @@ def generate_document(data: dict):
 
             doc = Document()
 
-            # Set default font
             style = doc.styles["Normal"]
             font = style.font
             font.name = "Calibri"
             font.size = Pt(11)
 
-            # Title
             title_para = doc.add_heading(title, level=0)
             title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # Sections
             for section in sections:
                 if section.get("heading"):
                     doc.add_heading(section["heading"], level=1)
                 if section.get("body"):
                     doc.add_paragraph(section["body"])
 
-            filepath = f"/tmp/{_safe_filename(title)}.docx"
+            filepath = f"/tmp/{_safe_filename(title)}_{int(time.time())}.docx"
             doc.save(filepath)
 
         elif format_type == "pdf":
@@ -135,21 +163,24 @@ def generate_document(data: dict):
             from reportlab.lib.units import inch
             from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 
-            filepath = f"/tmp/{_safe_filename(title)}.pdf"
-            doc = SimpleDocTemplate(filepath, pagesize=letter, leftMargin=0.75*inch, rightMargin=0.75*inch)
+            filepath = f"/tmp/{_safe_filename(title)}_{int(time.time())}.pdf"
+            doc = SimpleDocTemplate(
+                filepath, pagesize=letter,
+                leftMargin=0.75*inch, rightMargin=0.75*inch,
+            )
 
             styles = getSampleStyleSheet()
             title_style = ParagraphStyle(
                 "CustomTitle", parent=styles["Title"],
-                fontSize=24, spaceAfter=20, alignment=1
+                fontSize=24, spaceAfter=20, alignment=1,
             )
             heading_style = ParagraphStyle(
                 "CustomHeading", parent=styles["Heading2"],
-                fontSize=14, spaceBefore=16, spaceAfter=8
+                fontSize=14, spaceBefore=16, spaceAfter=8,
             )
             body_style = ParagraphStyle(
                 "CustomBody", parent=styles["Normal"],
-                fontSize=11, leading=16, spaceAfter=8
+                fontSize=11, leading=16, spaceAfter=8,
             )
 
             story = [Paragraph(title, title_style), Spacer(1, 20)]
@@ -164,7 +195,6 @@ def generate_document(data: dict):
         else:
             return {"success": False, "error": f"Unsupported format: {format_type}"}
 
-        # Read file and encode
         with open(filepath, "rb") as f:
             file_b64 = base64.b64encode(f.read()).decode()
 
@@ -184,30 +214,46 @@ def generate_document(data: dict):
 # Data Analytics
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=120, memory=512)
+def _cleanup_stale_charts(prefix: str = ""):
+    """Remove old chart PNGs to avoid stale data from previous runs."""
+    pattern = f"/tmp/{prefix}*.png" if prefix else "/tmp/*.png"
+    try:
+        for f in glob.glob(pattern):
+            # Only delete files older than 60 seconds (from previous runs)
+            if os.path.getmtime(f) < time.time() - 60:
+                os.unlink(f)
+    except OSError:
+        pass
+
+
+@app.function(image=image, timeout=120, memory=512, secrets=[webhook_secret])
 def run_analytics(data: dict):
     code = data.get("code", "")
 
     if not code:
         return {"success": False, "error": "No code provided"}
 
-    # Prepend matplotlib config to user code
+    # Clean stale charts from previous runs
+    _cleanup_stale_charts()
+
     preamble = """
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import io, os, sys
+import io, os, sys, time
 
 plt.rcParams['figure.dpi'] = 150
 plt.rcParams['savefig.bbox'] = 'tight'
 plt.rcParams['font.size'] = 10
+
+# Use timestamp in filenames to avoid collisions
+_chart_ts = str(int(time.time()))
 """
     full_code = preamble + "\n" + code
 
     try:
-        # Check if code uses plt.savefig
         has_chart = "plt.savefig" in code or "savefig" in code
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -217,36 +263,40 @@ plt.rcParams['font.size'] = 10
         env = os.environ.copy()
         env["MPLBACKEND"] = "Agg"
 
-        result = subprocess.run(
-            ["python3", filepath],
-            capture_output=True, text=True, timeout=60, env=env,
-        )
-        os.unlink(filepath)
+        try:
+            result = subprocess.run(
+                ["python3", filepath],
+                capture_output=True, text=True, timeout=60, env=env,
+            )
+        finally:
+            try:
+                os.unlink(filepath)
+            except OSError:
+                pass
 
         output_file = None
         filename = None
 
-        # Find generated charts
         if has_chart:
-            import glob
-            charts = glob.glob("/tmp/*.png") + glob.glob("/tmp/chart*.png")
-            if charts:
-                # Use the most recently modified chart
-                charts.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                with open(charts[0], "rb") as f:
+            # Find charts created during this run (recent files)
+            charts = glob.glob("/tmp/*.png")
+            recent = [c for c in charts if os.path.getmtime(c) > time.time() - 120]
+            if recent:
+                recent.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                with open(recent[0], "rb") as f:
                     output_file = base64.b64encode(f.read()).decode()
-                filename = os.path.basename(charts[0])
-                # Clean up
-                for c in charts:
+                filename = os.path.basename(recent[0])
+                # Clean up all generated charts
+                for c in recent:
                     try:
                         os.unlink(c)
-                    except:
+                    except OSError:
                         pass
 
         return {
             "success": result.returncode == 0,
-            "stdout": result.stdout[:4000],
-            "stderr": result.stderr[:2000],
+            "stdout": result.stdout[:10000],
+            "stderr": result.stderr[:5000],
             "error": None if result.returncode == 0 else f"Exit code {result.returncode}",
             "output_file": output_file,
             "filename": filename,
@@ -262,23 +312,24 @@ plt.rcParams['font.size'] = 10
 # Unified Entry Point
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=120)
+@app.function(image=image, timeout=120, secrets=[webhook_secret])
 @modal.fastapi_endpoint(method="POST")
-def execute(request: dict):
-    task_type = request.get("type", "code")
+async def execute(request: Request):
+    # Verify auth
+    if not verify_request(request):
+        raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
+
+    payload = await request.json()
+    task_type = payload.get("type", "code")
 
     if task_type == "code":
-        return execute_code.remote(request["code"], request.get("language", "python"))
-
+        return execute_code.remote(payload["code"], payload.get("language", "python"))
     elif task_type == "web_read":
-        return read_web_page.remote(request["url"])
-
+        return read_web_page.remote(payload["url"])
     elif task_type == "document":
-        return generate_document.remote(request)
-
+        return generate_document.remote(payload)
     elif task_type == "analytics":
-        return run_analytics.remote(request)
-
+        return run_analytics.remote(payload)
     else:
         return {"success": False, "error": f"Unknown task type: {task_type}"}
 

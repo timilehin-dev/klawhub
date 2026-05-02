@@ -32,6 +32,34 @@ export async function postToThread(
   });
 }
 
+export async function updateMessage(
+  channel: string,
+  ts: string,
+  text: string,
+  options?: { blocks?: unknown[] }
+) {
+  return getSlack().chat.update({
+    channel,
+    ts,
+    text,
+    ...options,
+  });
+}
+
+export async function postEphemeral(
+  channel: string,
+  userId: string,
+  text: string,
+  options?: { blocks?: unknown[] }
+) {
+  return getSlack().chat.postEphemeral({
+    channel,
+    user: userId,
+    text,
+    ...options,
+  });
+}
+
 export async function addReaction(channel: string, timestamp: string, emoji: string) {
   return getSlack().reactions.add({ channel, timestamp, name: emoji });
 }

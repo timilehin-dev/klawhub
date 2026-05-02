@@ -2,8 +2,19 @@ import { inngest } from "../client";
 import { createSpec } from "@/lib/agents/pm";
 import { writeCode, fixCode } from "@/lib/agents/engineer";
 import { testCode } from "@/lib/agents/qa";
-import { memoryRead } from "@/lib/tools/memory";
-import { postToThread, addReaction, removeReaction, uploadFile } from "@/lib/slack/client";
+import { memoryRead, trackSkillUsage } from "@/lib/db";
+import {
+  postToThread,
+  updateMessage,
+  addReaction,
+  removeReaction,
+  uploadFile,
+} from "@/lib/slack/client";
+import {
+  approvalBlocks,
+  replaceActionsWithDecision,
+  retryBlocks,
+} from "@/lib/slack/blocks";
 import { updateRun } from "@/lib/db";
 import type { SandboxResponse } from "@/types";
 
@@ -27,26 +38,95 @@ export const buildSquadWorkflow = inngest.createFunction(
       const userContext = await memoryRead(slackUserId, "preference");
       const spec = await createSpec(messageText, userContext);
 
-      await updateRun(runId, { status: "pm", pmSpec: spec.spec, codeLanguage: spec.language });
+      await updateRun(runId, {
+        status: "pm",
+        pmSpec: spec.spec,
+        codeLanguage: spec.language,
+      });
 
-      await postToThread(
-        slackChannelId,
-        slackThreadTs,
-        `📋 *PM Agent* — Specification ready\n_Language: ${spec.language}_\n\n${spec.spec}`
-      );
       return spec;
     });
 
-    // Step 2: Engineer writes code
-    const codeResult = await step.run("engineer-code", async () => {
-      const result = await writeCode(specResult.spec, specResult.language);
+    // Step 2: Post spec for approval + wait for decision
+    const approval = await step.run("wait-for-approval", async () => {
+      const blocks = approvalBlocks(
+        "PM Agent — Specification Ready",
+        `*Language:* ${specResult.language}\n\n${specResult.spec}`,
+        runId,
+        "build_spec"
+      );
 
-      await updateRun(runId, { status: "coding", code: result.code });
+      const msg = await postToThread(
+        slackChannelId,
+        slackThreadTs,
+        `*PM Agent* — Specification ready for review`,
+        { blocks }
+      );
+
+      await updateRun(runId, { status: "pending_approval" });
+
+      return { messageTs: (msg as any).ts, blocks };
+    });
+
+    // Step 3: Wait for approve/reject event (24h timeout)
+    const decision = await step.waitForEvent("wait-for-build-approval", {
+      event: "app/approval.decided",
+      timeout: "24h",
+      match: "data.referenceId",
+    });
+
+    if (!decision || decision.data.decision === "rejected") {
+      await step.run("handle-rejection", async () => {
+        const rejectorId = decision?.data.userId || "unknown";
+        const updatedBlocks = replaceActionsWithDecision(
+          approval.blocks,
+          "rejected",
+          rejectorId
+        );
+
+        // Update the spec message to show rejection
+        if (approval.messageTs) {
+          await updateMessage(
+            slackChannelId,
+            approval.messageTs,
+            `*PM Agent* — Specification was *rejected*`,
+            { blocks: updatedBlocks }
+          );
+        }
+
+        await updateRun(runId, { status: "error" });
+        await trackSkillUsage("build", slackUserId, slackChannelId, messageText, "error");
+      });
+      return;
+    }
+
+    // Step 4: Engineer writes code
+    const codeResult = await step.run("engineer-code", async () => {
+      const approverId = decision.data.userId || "unknown";
+      const updatedBlocks = replaceActionsWithDecision(
+        approval.blocks,
+        "approved",
+        approverId
+      );
+
+      if (approval.messageTs) {
+        await updateMessage(
+          slackChannelId,
+          approval.messageTs,
+          `*PM Agent* — Specification *approved*`,
+          { blocks: updatedBlocks }
+        );
+      }
+
+      await updateRun(runId, { status: "coding" });
+
+      const result = await writeCode(specResult.spec, specResult.language);
+      await updateRun(runId, { code: result.code });
 
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `👨‍💻 *Engineer Agent* — Code written (${specResult.language})`
+        `*Engineer Agent* — Code written (${specResult.language})`
       );
 
       const ext = specResult.language === "javascript" ? "js" : "py";
@@ -61,14 +141,14 @@ export const buildSquadWorkflow = inngest.createFunction(
       return result;
     });
 
-    // Step 3: QA Test 1
+    // Step 5: QA Test 1
     const test1 = await step.run("qa-test-1", async () => {
       const result = await testCode(codeResult.code, specResult.language, specResult.spec);
 
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `🧪 *QA Agent* — Test 1\n${result.passed ? "✅ PASS" : "❌ FAIL"}\n\n${result.evaluation.slice(0, 2000)}`
+        `*QA Agent* — Test 1\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation.slice(0, 2000)}`
       );
       return result;
     });
@@ -76,7 +156,7 @@ export const buildSquadWorkflow = inngest.createFunction(
     let finalCode = codeResult.code;
     let finalTest = test1;
 
-    // Step 4: Fix if needed (once)
+    // Step 6: Fix if needed (once)
     if (!test1.passed) {
       const fixResult = await step.run("engineer-fix", async () => {
         const exec = test1.execution as SandboxResponse;
@@ -84,8 +164,7 @@ export const buildSquadWorkflow = inngest.createFunction(
         const fixed = await fixCode(codeResult.code, error, specResult.spec);
 
         await updateRun(runId, { code: fixed.code });
-
-        await postToThread(slackChannelId, slackThreadTs, `👨‍💻 *Engineer Agent* — Fixing issues...`);
+        await postToThread(slackChannelId, slackThreadTs, `*Engineer Agent* — Fixing issues...`);
 
         const ext = specResult.language === "javascript" ? "js" : "py";
         await uploadFile(
@@ -100,20 +179,20 @@ export const buildSquadWorkflow = inngest.createFunction(
 
       finalCode = fixResult.code;
 
-      // Step 5: QA Test 2
+      // Step 7: QA Test 2
       finalTest = await step.run("qa-test-2", async () => {
         const result = await testCode(finalCode, specResult.language, specResult.spec);
 
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `🧪 *QA Agent* — Test 2\n${result.passed ? "✅ PASS" : "❌ FAIL"}\n\n${result.evaluation.slice(0, 2000)}`
+          `*QA Agent* — Test 2\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation.slice(0, 2000)}`
         );
         return result;
       });
     }
 
-    // Step 6: Deliver
+    // Step 8: Deliver
     await step.run("deliver", async () => {
       const status = finalTest.passed ? "done" : "error";
       const exec = finalTest.execution as SandboxResponse;
@@ -128,15 +207,34 @@ export const buildSquadWorkflow = inngest.createFunction(
         finalOutput: finalTest.evaluation,
       });
 
-      try { await removeReaction(slackChannelId, slackThreadTs, "gear"); } catch { /* ok */ }
-      await addReaction(slackChannelId, slackThreadTs, finalTest.passed ? "white_check_mark" : "warning");
+      try {
+        await removeReaction(slackChannelId, slackThreadTs, "gear");
+      } catch { /* ok */ }
+      await addReaction(
+        slackChannelId,
+        slackThreadTs,
+        finalTest.passed ? "white_check_mark" : "warning"
+      );
+
+      const deliverBlocks = finalTest.passed
+        ? []
+        : retryBlocks(runId, slackChannelId, slackThreadTs, slackUserId, messageText);
 
       await postToThread(
         slackChannelId,
         slackThreadTs,
         finalTest.passed
-          ? `🚀 *Build Squad — Delivered*\n\nYour tool is ready and tested. Check the files above.\n_Reply in this thread if you need changes._`
-          : `⚠️ *Build Squad — Delivered with Issues*\n\nQA flagged issues. Check the output above.\n_Reply in this thread if you want a retry._`
+          ? `*Build Squad — Delivered*\n\nYour tool is ready and tested. Check the files above.\n_Reply in this thread if you need changes._`
+          : `*Build Squad — Delivered with Issues*\n\nQA flagged issues. Check the output above.`,
+        finalTest.passed ? undefined : { blocks: deliverBlocks }
+      );
+
+      await trackSkillUsage(
+        "build",
+        slackUserId,
+        slackChannelId,
+        messageText,
+        finalTest.passed ? "success" : "error"
       );
     });
   }

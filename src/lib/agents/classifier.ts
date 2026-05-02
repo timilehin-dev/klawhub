@@ -1,14 +1,8 @@
 import { llm } from "@/lib/llm";
+import { getActiveSkills } from "@/lib/db";
 import type { ClassificationResult, Intent } from "@/types";
 
-const CLASSIFIER_PROMPT = `You are Klawhub, an AI coworker in Slack. Classify the user's message into EXACTLY ONE category:
-
-1. BUILD — User wants software, scripts, tools, apps, automations, or web apps created
-2. DOCUMENT — User wants a document: report, proposal, invoice, contract, letter, resume, summary, brief, SOP, or any written deliverable
-3. RESEARCH — User wants information investigated: market research, competitor analysis, topic exploration, finding data, or learning about something
-4. ANALYTICS — User wants data analyzed: charts, graphs, statistics, data processing, metrics, KPIs, trends, or business intelligence
-5. CHAT — General conversation, greetings, questions, feedback, or non-task messages
-6. UNCLEAR — Request is too vague to classify
+const BASE_CLASSIFIER_PROMPT = `You are Klawhub, an AI coworker in Slack. Classify the user's message into EXACTLY ONE category:
 
 Rules:
 - If BUILD: return ONLY: BUILD: [the request]
@@ -20,6 +14,21 @@ Rules:
 
 Be decisive. Never explain your reasoning. Never combine categories.`;
 
+async function buildClassifierPrompt(): Promise<string> {
+  let skillSection = "";
+  try {
+    const activeSkills = await getActiveSkills();
+    if (activeSkills.length > 0) {
+      skillSection = "\n\nYour active skills (use these to inform classification):\n" +
+        activeSkills.map((s) => `- **${s.name}**: ${s.description}`).join("\n") +
+        "\n\nMatch requests to the closest skill above.";
+    }
+  } catch {
+    // If DB is down, classify without skills — non-blocking
+  }
+  return BASE_CLASSIFIER_PROMPT + skillSection;
+}
+
 const INTENT_PATTERN: Record<Intent, RegExp> = {
   build: /^BUILD:\s*(.+)/im,
   document: /^DOCUMENT:\s*(.+)/im,
@@ -30,8 +39,10 @@ const INTENT_PATTERN: Record<Intent, RegExp> = {
 };
 
 export async function classify(userMessage: string): Promise<ClassificationResult> {
+  const systemPrompt = await buildClassifierPrompt();
+
   const messages = [
-    { role: "system" as const, content: CLASSIFIER_PROMPT },
+    { role: "system" as const, content: systemPrompt },
     { role: "user" as const, content: userMessage },
   ];
 

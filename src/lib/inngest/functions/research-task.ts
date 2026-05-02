@@ -2,8 +2,7 @@ import { inngest } from "../client";
 import { conductResearch } from "@/lib/agents/researcher";
 import { memoryWrite } from "@/lib/tools/memory";
 import { postToThread, addReaction, removeReaction } from "@/lib/slack/client";
-import { updateTask } from "@/lib/db";
-import type { WebSearchResult } from "@/types";
+import { updateTask, trackSkillUsage } from "@/lib/db";
 
 interface ResearchEventData {
   slackChannelId: string;
@@ -28,27 +27,38 @@ export const researchWorkflow = inngest.createFunction(
 
     // Step 2: Post findings
     await step.run("deliver-findings", async () => {
-      const sources = result.sources as WebSearchResult[];
+      const sources = result.sources;
       const sourceList = sources
-        .map((s: WebSearchResult, i: number) => `${i + 1}. <${s.url}|${s.title}>`)
+        .map((s, i) => `${i + 1}. <${s.url}|${s.title}>`)
         .join("\n");
 
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `🔍 *Research Complete*\n\n${String(result.findings).slice(0, 3000)}\n\n📚 *Sources:*\n${sourceList}`
+        `*Research Complete*\n\n${String(result.findings).slice(0, 3000)}\n\n*Sources:*\n${sourceList}`
       );
 
-      // Save to memory
-      await memoryWrite(slackUserId, `Researched: ${messageText.slice(0, 100)}`, "research");
+      // Save to memory for future context
+      await memoryWrite(
+        slackUserId,
+        `Researched: ${messageText.slice(0, 100)}`,
+        "research"
+      );
 
       await updateTask(taskId, {
         status: "done",
-        result: { findings: String(result.findings).slice(0, 1000), sources },
+        result: {
+          findings: String(result.findings).slice(0, 1000),
+          sources,
+        },
       });
 
-      try { await removeReaction(slackChannelId, slackThreadTs, "mag"); } catch { /* ok */ }
+      try {
+        await removeReaction(slackChannelId, slackThreadTs, "mag");
+      } catch { /* ok */ }
       await addReaction(slackChannelId, slackThreadTs, "white_check_mark");
+
+      await trackSkillUsage("research", slackUserId, slackChannelId, messageText, "success");
     });
   }
 );

@@ -2,16 +2,17 @@ import { llm } from "@/lib/llm";
 import { sandbox } from "@/lib/tools/sandbox";
 import type { SandboxResponse } from "@/types";
 
-const ANALYST_PROMPT = `You are the Data Analyst Agent of Klawhub. You analyze data and generate business-grade visualizations.
+const ANALYST_PROMPT = `You are the Data Analyst Agent of Klawhub. You write Python analysis code and generate business-grade visualizations.
 
 RULES:
 1. Write Python code using pandas, matplotlib, and seaborn as needed.
 2. Always set matplotlib.use('Agg') before importing pyplot.
-3. Save charts as PNG files to /tmp/ with descriptive filenames.
+3. Save charts as PNG files to /tmp/ with descriptive filenames (use timestamp to avoid collisions).
 4. Include statistical insights: trends, outliers, correlations.
 5. Keep code under 100 lines. Focus on actionable insights.
 6. Print summary statistics and key findings to stdout.
-7. Return ONLY the Python code inside a markdown code block.`;
+7. Return ONLY the Python code inside a markdown code block.
+8. Clean up any /tmp files from previous runs before saving new ones.`;
 
 const INTERPRET_PROMPT = `You interpret data analysis results and provide business insights.
 
@@ -35,12 +36,18 @@ export async function analyzeData(request: string, data?: string) {
   const codeMatch = codeResponse.match(/```(?:python)?\n?([\s\S]*?)```/);
   const code = codeMatch?.[1]?.trim() || codeResponse.trim();
 
-  const execution = await sandbox({ type: "analytics", code }) as SandboxResponse & { output_file?: string; filename?: string };
+  const execution = (await sandbox({ type: "analytics", code })) as SandboxResponse & {
+    output_file?: string;
+    filename?: string;
+  };
 
   // Interpret results
   const interpMessages = [
     { role: "system" as const, content: INTERPRET_PROMPT },
-    { role: "user" as const, content: `Request: ${request}\n\nOutput:\n${execution.stdout || ""}\n${execution.stderr ? `Errors: ${execution.stderr}` : ""}` },
+    {
+      role: "user" as const,
+      content: `Request: ${request}\n\nOutput:\n${execution.stdout || ""}\n${execution.stderr ? `Errors: ${execution.stderr}` : ""}`,
+    },
   ];
   const insights = await llm.chat(interpMessages, { temperature: 0.4, maxTokens: 800 });
 
