@@ -15,7 +15,9 @@ from bs4 import BeautifulSoup
 app = modal.App("klawhub-sandbox")
 
 # ── Secrets ──
-webhook_secret = modal.Secret.from_name("klawhub-webhook-secret", create_if_missing=True)
+# Create this secret first:  modal secret create klawhub-webhook-secret
+# Then set MODAL_WEBHOOK_SECRET to the same value in your Vercel env.
+webhook_secret = modal.Secret.from_name("klawhub-webhook-secret")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
