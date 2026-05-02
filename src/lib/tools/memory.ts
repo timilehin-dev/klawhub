@@ -43,5 +43,5 @@ export async function memoryRead(slackUserId: string, query: string): Promise<st
 
 export async function memoryForget(slackUserId: string): Promise<number> {
   const result = await deleteUserMemories(slackUserId);
-  return result.rowCount ?? 0;
+  return Array.isArray(result) ? result.length : 0;
 }
