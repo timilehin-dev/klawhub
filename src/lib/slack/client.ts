@@ -1,18 +1,30 @@
 import { WebClient } from "@slack/web-api";
 
-if (!process.env.SLACK_BOT_TOKEN) {
-  throw new Error("SLACK_BOT_TOKEN is not set");
+let _slack: WebClient | null = null;
+
+function getSlack(): WebClient {
+  if (!_slack) {
+    const token = process.env.SLACK_BOT_TOKEN;
+    if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
+    _slack = new WebClient(token);
+  }
+  return _slack;
 }
 
-export const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
+// Lazy getter — avoids throwing at build time
+export const slack = new Proxy({} as WebClient, {
+  get(_, prop) {
+    return (getSlack() as any)[prop];
+  },
+});
 
 export async function postToThread(
   channel: string,
   threadTs: string,
   text: string,
-  options?: { blocks?: any[] }
+  options?: { blocks?: unknown[] }
 ) {
-  return slack.chat.postMessage({
+  return getSlack().chat.postMessage({
     channel,
     thread_ts: threadTs,
     text,
@@ -21,11 +33,11 @@ export async function postToThread(
 }
 
 export async function addReaction(channel: string, timestamp: string, emoji: string) {
-  return slack.reactions.add({
-    channel,
-    timestamp,
-    name: emoji,
-  });
+  return getSlack().reactions.add({ channel, timestamp, name: emoji });
+}
+
+export async function removeReaction(channel: string, timestamp: string, emoji: string) {
+  return getSlack().reactions.remove({ channel, timestamp, name: emoji });
 }
 
 export async function uploadFile(
@@ -35,10 +47,26 @@ export async function uploadFile(
   filename: string,
   title: string
 ) {
-  return slack.files.uploadV2({
+  return getSlack().files.uploadV2({
     channel_id: channel,
     thread_ts: threadTs,
     content,
+    filename,
+    title,
+  });
+}
+
+export async function uploadBinaryFile(
+  channel: string,
+  threadTs: string,
+  fileBuffer: Buffer,
+  filename: string,
+  title: string
+) {
+  return getSlack().files.uploadV2({
+    channel_id: channel,
+    thread_ts: threadTs,
+    file: fileBuffer as unknown as string,
     filename,
     title,
   });

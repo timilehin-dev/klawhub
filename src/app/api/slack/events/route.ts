@@ -1,26 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac } from "crypto";
+import { verifySlackRequest } from "@/lib/slack/verify";
+import { slack, postToThread, addReaction } from "@/lib/slack/client";
+import { classify } from "@/lib/agents/classifier";
+import { createRun, createTask } from "@/lib/db";
+import { memoryWrite } from "@/lib/tools/memory";
 import { inngest } from "@/lib/inngest/client";
-import { db } from "@/lib/db";
-import { runs } from "@/lib/db/schema";
-import { slack } from "@/lib/slack/client";
-import { agents } from "@/lib/agents";
-
-function verifySlackRequest(req: NextRequest, body: string): boolean {
-  const timestamp = req.headers.get("x-slack-request-timestamp");
-  const signature = req.headers.get("x-slack-signature");
-  const secret = process.env.SLACK_SIGNING_SECRET;
-
-  if (!timestamp || !signature || !secret) return false;
-  const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - parseInt(timestamp)) > 300) return false;
-
-  const sigBaseString = `v0:${timestamp}:${body}`;
-  const mySignature = "v0=" + createHmac("sha256", secret).update(sigBaseString).digest("hex");
-  return signature === mySignature;
-}
 
 const processedEvents = new Set<string>();
+const MAX_DEDUP = 100;
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -35,119 +22,122 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ challenge: payload.challenge });
   }
 
-  if (payload.type === "event_callback") {
-    const event = payload.event;
-    const eventId = payload.event_id || `${event.ts}-${event.user}`;
+  if (payload.type !== "event_callback") {
+    return NextResponse.json({ ok: true });
+  }
 
-    if (processedEvents.has(eventId)) {
+  const event = payload.event;
+  const eventId = payload.event_id || `${event.ts || ""}-${event.user || ""}`;
+
+  if (processedEvents.has(eventId)) return NextResponse.json({ ok: true });
+  processedEvents.add(eventId);
+  if (processedEvents.size > MAX_DEDUP) {
+    const first = processedEvents.values().next().value;
+    if (first) processedEvents.delete(first);
+  }
+
+  if (event.bot_id || event.subtype === "bot_message") return NextResponse.json({ ok: true });
+
+  const isMention = event.type === "app_mention";
+  const isDM = event.type === "message" && event.channel_type === "im";
+  if (!isMention && !isDM) return NextResponse.json({ ok: true });
+
+  const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
+  if (!text) return NextResponse.json({ ok: true });
+
+  const userId = event.user as string;
+  const channelId = event.channel as string;
+  const threadTs = event.ts as string;
+
+  if (text.length > 4000) {
+    await slack.chat.postMessage({
+      channel: channelId,
+      thread_ts: threadTs,
+      text: "⚠️ That message is too long. Please keep requests under 4000 characters.",
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  try {
+    const classification = await classify(text);
+
+    // CHAT
+    if (classification.type === "chat") {
+      await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
+      await slack.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: classification.response || "" });
       return NextResponse.json({ ok: true });
     }
-    processedEvents.add(eventId);
 
-    if (processedEvents.size > 100) {
-      const first = processedEvents.values().next().value;
-      processedEvents.delete(first);
-    }
-
-    if (event.bot_id || event.subtype === "bot_message") {
+    // UNCLEAR
+    if (classification.type === "unclear") {
+      await slack.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `🤔 ${classification.question || "Could you clarify what you need?"}` });
       return NextResponse.json({ ok: true });
     }
 
-    const isAppMention = event.type === "app_mention";
-    const isDirectMessage = event.type === "message" && event.channel_type === "im";
+    const requestText = classification.extractedRequest || text;
 
-    if (!isAppMention && !isDirectMessage) {
-      return NextResponse.json({ ok: true });
-    }
-
-    const text = event.text || "";
-    const cleanText = text.replace(/<@[^>]+>/g, "").trim();
-
-    if (!cleanText) {
-      return NextResponse.json({ ok: true });
-    }
-
-    try {
-      // CLASSIFY the message first
-      const classification = await agents.general.classify(cleanText);
-
-      if (classification.type === "chat") {
-        // Simple chat response, no build squad
-        await slack.chat.postMessage({
-          channel: event.channel,
-          thread_ts: event.ts,
-          text: classification.response,
-        });
-        return NextResponse.json({ ok: true });
-      }
-
-      if (classification.type === "unclear") {
-        // Ask for clarification
-        await slack.chat.postMessage({
-          channel: event.channel,
-          thread_ts: event.ts,
-          text: `🤔 ${classification.question}`,
-        });
-        return NextResponse.json({ ok: true });
-      }
-
-      // BUILD — activate the squad
-      const buildRequest = classification.extractedRequest;
-
-      try {
-        await slack.reactions.add({
-          channel: event.channel,
-          timestamp: event.ts,
-          name: "gear",
-        });
-      } catch (reactErr: any) {
-        if (reactErr.data?.error === "already_reacted") {
-          console.log("[SLACK] Already reacted, continuing...");
-        } else {
-          throw reactErr;
-        }
-      }
+    // BUILD
+    if (classification.type === "build") {
+      try { await addReaction(channelId, threadTs, "gear"); } catch { /* ok */ }
 
       await slack.chat.postMessage({
-        channel: event.channel,
-        thread_ts: event.ts,
-        text: `⚙️ Build Squad activated!\n_Request: ${buildRequest}_\n\nPM Agent is analyzing...`,
+        channel: channelId, thread_ts: threadTs,
+        text: `⚙️ *Build Squad activated!*\n_Request: ${requestText}_\n\nPM Agent is analyzing...`,
       });
 
-      const [run] = await db
-        .insert(runs)
-        .values({
-          slackUserId: event.user,
-          slackChannelId: event.channel,
-          slackThreadTs: event.ts,
-          request: buildRequest,
-          status: "pending",
-        })
-        .returning();
+      const [run] = await createRun({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs, request: requestText });
 
       await inngest.send({
         name: "slack/build.requested",
-        data: {
-          slackChannelId: event.channel,
-          slackThreadTs: event.ts,
-          slackUserId: event.user,
-          messageText: buildRequest,
-          runId: run.id,
-        },
+        data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: requestText, runId: run.id },
       });
-
-      console.log(`[SLACK] Build requested by ${event.user}: ${buildRequest.slice(0, 50)}...`);
-    } catch (error) {
-      console.error("[SLACK] Error handling event:", error);
-
-      try {
-        await slack.chat.postMessage({
-          channel: event.channel,
-          thread_ts: event.ts,
-          text: "❌ Something went wrong. Check the logs.",
-        });
-      } catch {}
+      return NextResponse.json({ ok: true });
     }
+
+    // DOCUMENT
+    if (classification.type === "document") {
+      try { await addReaction(channelId, threadTs, "page_facing_up"); } catch { /* ok */ }
+      await slack.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `📄 *Generating document...*\n_Request: ${requestText}_` });
+
+      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs, type: "document", request: requestText });
+      await inngest.send({
+        name: "slack/document.requested",
+        data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: requestText, taskId: task.id },
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    // RESEARCH
+    if (classification.type === "research") {
+      try { await addReaction(channelId, threadTs, "mag"); } catch { /* ok */ }
+      await slack.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `🔍 *Researching...*\n_Topic: ${requestText}_` });
+
+      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs, type: "research", request: requestText });
+      await inngest.send({
+        name: "slack/research.requested",
+        data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: requestText, taskId: task.id },
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    // ANALYTICS
+    if (classification.type === "analytics") {
+      try { await addReaction(channelId, threadTs, "chart_with_upwards_trend"); } catch { /* ok */ }
+      await slack.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `📊 *Analyzing data...*\n_Request: ${requestText}_` });
+
+      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs, type: "analytics", request: requestText });
+      await inngest.send({
+        name: "slack/analytics.requested",
+        data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: requestText, taskId: task.id },
+      });
+      return NextResponse.json({ ok: true });
+    }
+  } catch (error) {
+    console.error("[EVENTS] Error:", error);
+    await slack.chat.postMessage({
+      channel: channelId, thread_ts: threadTs,
+      text: "❌ Something went wrong processing your request. Please try again.",
+    }).catch(() => {});
   }
 
   return NextResponse.json({ ok: true });

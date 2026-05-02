@@ -1,3 +1,3 @@
 import { Inngest } from "inngest";
 
-export const inngest = new Inngest({ id: "klawhub-build-squad" });
+export const inngest = new Inngest({ id: "klawhub-coworker" });

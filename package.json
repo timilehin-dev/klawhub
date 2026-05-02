@@ -1,6 +1,6 @@
 {
   "name": "klawhub-v2",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,9 +11,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@slack/events-api": "^3.0.0",
     "@slack/web-api": "^7.0.0",
-    "@vercel/functions": "^1.0.0",
     "drizzle-orm": "^0.38.0",
     "inngest": "^3.0.0",
     "next": "^15.0.0",
