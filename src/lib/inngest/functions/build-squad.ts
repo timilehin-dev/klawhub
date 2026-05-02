@@ -2,7 +2,8 @@ import { inngest } from "../client";
 import { createSpec } from "@/lib/agents/pm";
 import { writeCode, fixCode } from "@/lib/agents/engineer";
 import { testCode } from "@/lib/agents/qa";
-import { memoryRead, trackSkillUsage } from "@/lib/db";
+import { trackSkillUsage } from "@/lib/db";
+import { memoryRead } from "@/lib/tools/memory";
 import {
   postToThread,
   updateMessage,
