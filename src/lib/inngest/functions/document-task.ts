@@ -12,6 +12,7 @@ import {
   replaceActionsWithDecision,
 } from "@/lib/slack/blocks";
 import { updateTask, trackSkillUsage } from "@/lib/db";
+import { buildUserContext } from "@/lib/tools/memory";
 
 interface DocumentEventData {
   slackChannelId: string;
@@ -28,10 +29,11 @@ export const documentWorkflow = inngest.createFunction(
     const { slackChannelId, slackThreadTs, slackUserId, messageText, taskId } =
       event.data as DocumentEventData;
 
-    // Step 1: Generate outline for approval
+    // Step 1: Build user context + generate outline
     const outline = await step.run("generate-outline", async () => {
+      const userContext = await buildUserContext(slackUserId);
       await updateTask(taskId, { status: "pending_approval" });
-      return generateOutline(messageText);
+      return generateOutline(messageText, userContext);
     });
 
     // Step 2: Post outline for approval + wait
@@ -99,7 +101,7 @@ export const documentWorkflow = inngest.createFunction(
       return;
     }
 
-    // Step 4: Generate full document
+    // Step 4: Generate full document (with user context)
     const result = await step.run("generate-document", async () => {
       const approverId = decision.data.userId || "unknown";
       const updatedBlocks = replaceActionsWithDecision(
@@ -117,8 +119,9 @@ export const documentWorkflow = inngest.createFunction(
         );
       }
 
+      const userContext = await buildUserContext(slackUserId);
       await updateTask(taskId, { status: "processing" });
-      return generateDocument(messageText);
+      return generateDocument(messageText, userContext);
     });
 
     // Step 5: Deliver

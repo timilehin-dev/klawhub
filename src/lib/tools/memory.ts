@@ -1,11 +1,27 @@
-import { saveMemory, readMemory } from "@/lib/db";
+import {
+  saveMemory,
+  readMemory,
+  getRecentMemories,
+  deleteUserMemories,
+  autoPruneMemory,
+} from "@/lib/db";
 
 /**
- * Escape SQL LIKE pattern wildcards in user input.
- * Prevents % and _ in user queries from being treated as wildcards.
+ * Build a concise user context string from recent memories.
+ * Used by agents to personalize their responses.
  */
-function escapeLikePattern(str: string): string {
-  return str.replace(/[%_\\]/g, "\\$&");
+export async function buildUserContext(slackUserId: string): Promise<string> {
+  try {
+    const recentMem = await getRecentMemories(slackUserId, undefined, 8);
+    if (recentMem.length === 0) return "";
+
+    const formatted = recentMem
+      .map((m) => `[${m.category}] ${m.content}`)
+      .join("\n");
+    return formatted.slice(0, 800); // cap to avoid bloating prompts
+  } catch {
+    return ""; // non-critical
+  }
 }
 
 export async function memoryWrite(
@@ -14,6 +30,8 @@ export async function memoryWrite(
   category = "general"
 ): Promise<string> {
   await saveMemory(slackUserId, content.slice(0, 1000), category);
+  // Auto-prune in background (non-blocking)
+  autoPruneMemory(slackUserId, category).catch(() => {});
   return "Memory saved.";
 }
 
@@ -23,4 +41,7 @@ export async function memoryRead(slackUserId: string, query: string): Promise<st
   return rows.map((r: { content: string }) => r.content).join("\n");
 }
 
-export { escapeLikePattern };
+export async function memoryForget(slackUserId: string): Promise<number> {
+  const result = await deleteUserMemories(slackUserId);
+  return result.rowCount ?? 0;
+}

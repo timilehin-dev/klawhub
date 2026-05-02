@@ -48,10 +48,11 @@ function safeJsonParse(raw: string): Record<string, any> | null {
   return null;
 }
 
-export async function generateDocument(request: string) {
+export async function generateDocument(request: string, userContext = "") {
+  const contextNote = userContext ? `\n\nUser context (use to personalize the document):\n${userContext}` : "";
   const messages = [
     { role: "system" as const, content: DOCSTRUCTURE_PROMPT },
-    { role: "user" as const, content: request },
+    { role: "user" as const, content: request + contextNote },
   ];
 
   const response = await llm.chat(messages, { temperature: 0.4, maxTokens: 3000 });
@@ -83,11 +84,13 @@ export async function generateDocument(request: string) {
 }
 
 /** Generate just the outline for approval (lighter weight). */
-export async function generateOutline(request: string) {
+export async function generateOutline(request: string, userContext = "") {
+  const contextNote = userContext ? `\n\nUser context: ${userContext}` : "";
   const messages = [
     {
       role: "system" as const,
       content: `You are the Document Agent of Klawhub. Given a document request, produce a brief outline.
+
 
 Return ONLY a JSON object:
 {
@@ -100,7 +103,7 @@ Return ONLY a JSON object:
 
 Keep section bodies brief (summaries, not full content). The user will approve the outline before full generation.`,
     },
-    { role: "user" as const, content: request },
+    { role: "user" as const, content: request + contextNote },
   ];
 
   const response = await llm.chat(messages, { temperature: 0.4, maxTokens: 1000 });
