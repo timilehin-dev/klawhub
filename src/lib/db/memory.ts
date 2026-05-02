@@ -66,20 +66,20 @@ export function getMemoryStats(slackUserId: string) {
 /** Check if we need to prune and do it. Call after saving. */
 export async function autoPruneMemory(slackUserId: string, category: string) {
   try {
-    const result = await getDb()
+    const rows: { cnt: number }[] = await getDb()
       .select({ cnt: count() })
       .from(memory)
       .where(and(eq(memory.slackUserId, slackUserId), eq(memory.category, category)));
     
-    const count = result[0]?.cnt || 0;
-    if (count > MAX_MEMORIES_PER_CATEGORY) {
+    const cnt = rows[0]?.cnt || 0;
+    if (cnt > MAX_MEMORIES_PER_CATEGORY) {
       // Delete oldest memories beyond the limit
       const sub = getDb()
         .select({ id: memory.id })
         .from(memory)
         .where(and(eq(memory.slackUserId, slackUserId), eq(memory.category, category)))
         .orderBy(memory.createdAt)
-        .limit(count - MAX_MEMORIES_PER_CATEGORY + 5); // remove extra buffer
+        .limit(cnt - MAX_MEMORIES_PER_CATEGORY + 5); // remove extra buffer
 
       const toDelete = await sub;
       if (toDelete.length > 0) {
