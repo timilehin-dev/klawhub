@@ -1,4 +1,66 @@
 ---
+Task ID: 6
+Agent: Main Agent (Z-Agent)
+Task: Phase 2 fix — install page Slack client_id handling
+
+Work Log:
+- Fixed install page to read NEXT_PUBLIC_SLACK_CLIENT_ID from env
+- When client_id is missing: shows "private beta" notice instead of broken OAuth link
+- When client_id is present: builds proper Slack OAuth v2 URL with bot + user scopes
+- Added NEXT_PUBLIC_SLACK_CLIENT_ID to .env.local.example
+- Updated install page to handle success/error query params from OAuth callback
+- Pushed: commit 06d1178
+
+Stage Summary:
+- Install page no longer crashes with empty client_id
+- Graceful degradation: shows beta notice when not configured
+- Success/error banners after OAuth flow
+
+---
+Task ID: 7
+Agent: Main Agent (Z-Agent)
+Task: Phase 3 — User System (Workspaces, Members, Usage Limits, OAuth, Dashboard API)
+
+Work Log:
+- Added 2 new tables to Drizzle schema: workspaces, workspace_members
+- Created tables + indexes in Supabase via direct SQL migration
+- Created src/lib/db/workspaces.ts — workspace CRUD + member management:
+  - createWorkspace, getWorkspaceByTeamId, getWorkspaceById, updateWorkspace
+  - upsertWorkspaceMember, touchMemberActivity, getWorkspaceMembers
+  - getWorkspaceStats (aggregated runs/tasks/members/schedules for dashboard)
+  - checkWorkspaceUsageLimit (monthly runs+tasks count vs plan limit)
+- Created src/app/api/slack/oauth/route.ts — OAuth callback:
+  - Exchanges code for token via Slack OAuth v2
+  - Creates/updates workspace record
+  - Adds installer as workspace admin with profile info
+  - Redirects to /install?success=1 or /install?error=xxx
+- Created src/app/api/dashboard/stats/route.ts — workspace stats API
+- Created src/app/api/dashboard/usage/route.ts — usage logs + agent breakdown API
+- Created src/app/api/dashboard/activity/route.ts — recent activity + schedules API
+- Created src/lib/slack/workspace.ts — workspace utilities:
+  - ensureMember() — fire-and-forget member tracking from event handler
+  - checkUsageLimit() — pre-dispatch usage limit check
+- Updated src/app/api/slack/events/route.ts:
+  - Calls ensureMember() on every event (non-blocking)
+  - Checks usage limit before dispatching build/document/research/analytics tasks
+  - Shows upgrade prompt when limit is reached
+- Updated src/app/install/page.tsx:
+  - Handles success/error/searchParams from OAuth callback
+  - Success banner with workspace name + "Go to Dashboard" link
+  - Error banner with retry link
+- Updated src/lib/db/index.ts — exported all new workspace functions + types
+- TypeScript: 0 errors, Build: 0 warnings
+- Pushed: commit TBD
+
+Stage Summary:
+- Phase 3 complete. Workspace + member tracking system built end-to-end.
+- DB: workspaces + workspace_members tables created in Supabase
+- OAuth: Full Slack install flow (button → callback → workspace creation → redirect)
+- Usage limits: Monthly run counting with plan-based enforcement in event handler
+- Dashboard API: 3 new endpoints (stats, usage, activity) ready for dashboard UI
+- Zero dead code — every new function is wired and called
+
+---
 Task ID: 5
 Agent: Main Agent (Z-Agent)
 Task: Phase 2 — Professional Web Presence (Landing, Pricing, Install, Dashboard)

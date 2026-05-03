@@ -1,5 +1,5 @@
 export { getDb } from "./connection";
-export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs } from "./schema";
+export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs, workspaces, workspaceMembers } from "./schema";
 export { createRun, updateRun, getRun, getRecentRuns } from "./runs";
 export { createTask, updateTask, getRecentTasks } from "./tasks";
 export {
@@ -33,4 +33,17 @@ export {
   buildKnowledgeContext,
 } from "./knowledge";
 export { logUsage, getUsageStats, getRecentUsageLogs, getAgentUsageBreakdown } from "./usage";
+export {
+  createWorkspace,
+  getWorkspaceByTeamId,
+  getWorkspaceById,
+  updateWorkspace,
+  upsertWorkspaceMember,
+  touchMemberActivity,
+  getWorkspaceMembers,
+  getWorkspaceMemberCount,
+  getWorkspaceStats,
+  checkWorkspaceUsageLimit,
+} from "./workspaces";
 export type { UsageLogInsert, UsageStats } from "./usage";
+export type { WorkspaceStats, UsageLimitResult } from "./workspaces";

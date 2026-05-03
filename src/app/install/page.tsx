@@ -8,6 +8,7 @@ import {
   BarChart3,
   CheckCircle2,
   ExternalLink,
+  AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -94,7 +95,17 @@ const capabilities = [
   },
 ];
 
-export default function InstallPage() {
+export default async function InstallPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+  const success = params.success === "1";
+  const workspace = typeof params.workspace === "string" ? params.workspace : null;
+  const error = typeof params.error === "string" ? params.error : null;
+  const detail = typeof params.detail === "string" ? params.detail : null;
+
   const isConfigured = Boolean(SLACK_CLIENT_ID);
   const oauthUrl = isConfigured ? getSlackOAuthUrl() : null;
 
@@ -104,6 +115,51 @@ export default function InstallPage() {
 
       <section className="pt-32 pb-20 lg:pt-40 lg:pb-28">
         <div className="mx-auto max-w-7xl px-6">
+          {/* Success / Error banners */}
+          {success && (
+            <div className="mx-auto mb-8 max-w-lg rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
+                <CheckCircle2 size={24} className="text-emerald-600" />
+              </div>
+              <p className="text-lg font-semibold text-emerald-900">
+                Klawhub is installed!
+              </p>
+              <p className="mt-1 text-sm text-emerald-700">
+                {workspace
+                  ? `Connected to the "${workspace}" workspace. DM @Klawhub to get started.`
+                  : "Head to Slack and DM @Klawhub to get started."}
+              </p>
+              <Link
+                href="/dashboard"
+                className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
+                Go to Dashboard
+                <ArrowRight size={14} />
+              </Link>
+            </div>
+          )}
+
+          {error && (
+            <div className="mx-auto mb-8 max-w-lg rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+                <AlertCircle size={24} className="text-red-600" />
+              </div>
+              <p className="text-lg font-semibold text-red-900">
+                Installation failed
+              </p>
+              <p className="mt-1 text-sm text-red-700">
+                {detail || error}
+              </p>
+              <Link
+                href="/install"
+                className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
+                Try again
+                <ArrowRight size={14} />
+              </Link>
+            </div>
+          )}
+
           {/* Hero */}
           <div className="mx-auto max-w-3xl text-center">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-4 py-1.5">

@@ -9,6 +9,7 @@ import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
 import { createSchedule } from "@/lib/db";
 import { inngest } from "@/lib/inngest/client";
 import { extractAndStoreKnowledge } from "@/lib/tools/knowledge-extractor";
+import { ensureMember, checkUsageLimit } from "@/lib/slack/workspace";
 
 const processedEvents = new Set<string>();
 const MAX_DEDUP = 100;
@@ -81,6 +82,9 @@ export async function POST(req: NextRequest) {
 
   // Immediate reaction so user sees the bot is alive (fire-and-forget)
   addReaction(channelId, messageTs, "eyes").catch(() => {});
+
+  // Track user as workspace member (fire-and-forget, non-critical)
+  ensureMember(userId).catch(() => {});
 
   try {
     // ── Thread reply detection (follow-ups) ──
@@ -200,6 +204,16 @@ export async function POST(req: NextRequest) {
     // ── Task dispatches (lightweight — just DB insert + Inngest event) ──
     const requestText = classification.extractedRequest || text;
     extractAndStoreKnowledge(userId, text).catch(() => {});
+
+    // Usage limit check (chat/unclear don't count toward limits)
+    const limitCheck = await checkUsageLimit();
+    if (limitCheck && !limitCheck.allowed) {
+      await slack.chat.postMessage({
+        channel: channelId, thread_ts: messageTs,
+        text: `:warning: *Usage limit reached.*\nYou've used ${limitCheck.used}/${limitCheck.limit} agent runs this month. Upgrade your plan at https://klawhub.com/pricing to get more runs.`,
+      });
+      return NextResponse.json({ ok: true });
+    }
 
     if (classification.type === "build") {
       try { await addReaction(channelId, messageTs, "gear"); } catch { /* ok */ }

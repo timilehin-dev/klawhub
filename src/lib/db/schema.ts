@@ -105,6 +105,38 @@ export const knowledge = pgTable("knowledge", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// ── Workspaces: one per Slack workspace that installs Klawhub ──
+
+export const workspaces = pgTable("workspaces", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slackTeamId: text("slack_team_id").notNull().unique(),   // Slack workspace/team ID
+  slackBotUserId: text("slack_bot_user_id").notNull(),      // The bot's user ID in this workspace
+  name: text("name").notNull(),                              // Workspace name from Slack
+  domain: text("domain"),                                    // workspace slug (e.g. "acme-corp")
+  plan: text("plan").$type<"free" | "pro" | "enterprise">().default("free").notNull(),
+  monthlyRunLimit: integer("monthly_run_limit").default(50).notNull(),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  isActive: boolean("is_active").default(true).notNull(),
+  installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// ── Workspace Members: Slack users who have used Klawhub in a workspace ──
+
+export const workspaceMembers = pgTable("workspace_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  slackUserId: text("slack_user_id").notNull(),
+  slackUserName: text("slack_user_name"),                   // display name
+  slackUserEmail: text("slack_user_email"),                 // email (if available)
+  isWorkspaceAdmin: boolean("is_workspace_admin").default(false).notNull(),
+  lastActiveAt: timestamp("last_active_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 // ── Intent list for classifier ──
 export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];
 
