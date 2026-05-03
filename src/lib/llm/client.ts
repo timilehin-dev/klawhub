@@ -1,5 +1,11 @@
+import { logUsage } from "@/lib/db";
+
 type Message = { role: "system" | "user" | "assistant"; content: string };
 type ChatOptions = { temperature?: number; maxTokens?: number };
+type ChatResult = {
+  content: string;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+};
 
 class LLMClient {
   private keys: string[];
@@ -10,7 +16,6 @@ class LLMClient {
   private initialized = false;
 
   constructor() {
-    // Don't throw at module level — collect keys lazily
     this.keys = [];
     this.baseUrl = "";
     this.model = "";
@@ -33,9 +38,20 @@ class LLMClient {
   }
 
   async chat(messages: Message[], options: ChatOptions = {}): Promise<string> {
+    const result = await this.chatWithUsage(messages, options);
+    return result.content;
+  }
+
+  async chatWithUsage(
+    messages: Message[],
+    options: ChatOptions = {},
+    meta?: { agentName?: string; slackUserId?: string; runId?: string; taskId?: string }
+  ): Promise<ChatResult> {
     this.init();
 
+    const startTime = Date.now();
     let lastError: Error | null = null;
+    let usage: ChatResult["usage"];
 
     for (let attempt = 0; attempt < this._maxRetries; attempt++) {
       const key = this.keys[(this.currentKeyIndex + attempt) % this.keys.length];
@@ -66,7 +82,35 @@ class LLMClient {
 
         const data = await response.json();
         this.currentKeyIndex = (this.currentKeyIndex + attempt + 1) % this.keys.length;
-        return data.choices[0].message.content as string;
+
+        const content = data.choices?.[0]?.message?.content as string || "";
+        const rawUsage = data.usage;
+
+        if (rawUsage) {
+          usage = {
+            promptTokens: rawUsage.prompt_tokens || 0,
+            completionTokens: rawUsage.completion_tokens || 0,
+            totalTokens: rawUsage.total_tokens || 0,
+          };
+        }
+
+        // Log usage in background (non-blocking)
+        const durationMs = Date.now() - startTime;
+        logUsage({
+          slackUserId: meta?.slackUserId,
+          agentName: meta?.agentName || "unknown",
+          provider: "ollama",
+          model: this.model,
+          promptTokens: usage?.promptTokens,
+          completionTokens: usage?.completionTokens,
+          totalTokens: usage?.totalTokens,
+          durationMs,
+          success: true,
+          runId: meta?.runId,
+          taskId: meta?.taskId,
+        }).catch(() => {});
+
+        return { content, usage };
       } catch (error) {
         lastError = error as Error;
         if (attempt < this._maxRetries - 1) {
@@ -75,6 +119,20 @@ class LLMClient {
         }
       }
     }
+
+    // Log failure
+    const durationMs = Date.now() - startTime;
+    logUsage({
+      slackUserId: meta?.slackUserId,
+      agentName: meta?.agentName || "unknown",
+      provider: "ollama",
+      model: this.model,
+      durationMs,
+      success: false,
+      errorMessage: lastError?.message?.slice(0, 500),
+      runId: meta?.runId,
+      taskId: meta?.taskId,
+    }).catch(() => {});
 
     throw lastError || new Error("All LLM API keys exhausted");
   }

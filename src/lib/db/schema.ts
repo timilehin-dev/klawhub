@@ -85,6 +85,8 @@ export const schedules = pgTable("schedules", {
   channelId: text("channel_id"),                      // where to post results
   isActive: boolean("is_active").default(true),
   lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
+  lastRunStatus: text("last_run_status").$type<"success" | "error" | "skipped">(),
+  consecutiveSuccesses: integer("consecutive_successes").default(0),
   failCount: integer("fail_count").default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -105,3 +107,22 @@ export const knowledge = pgTable("knowledge", {
 
 // ── Intent list for classifier ──
 export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];
+
+// ── Usage Logs: track every LLM call for observability + billing ──
+
+export const usageLogs = pgTable("usage_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slackUserId: text("slack_user_id"),
+  agentName: text("agent_name").notNull(),
+  provider: text("provider").notNull().default("ollama"),
+  model: text("model").notNull(),
+  promptTokens: integer("prompt_tokens").default(0),
+  completionTokens: integer("completion_tokens").default(0),
+  totalTokens: integer("total_tokens").default(0),
+  durationMs: integer("duration_ms"),
+  success: boolean("success").default(true),
+  errorMessage: text("error_message"),
+  runId: uuid("run_id"),
+  taskId: uuid("task_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});

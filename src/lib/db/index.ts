@@ -1,5 +1,5 @@
 export { getDb } from "./connection";
-export { runs, tasks, memory, skills, skillUsage, schedules, knowledge } from "./schema";
+export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs } from "./schema";
 export { createRun, updateRun, getRun, getRecentRuns } from "./runs";
 export { createTask, updateTask, getRecentTasks } from "./tasks";
 export {
@@ -32,3 +32,5 @@ export {
   getAllKnowledge,
   buildKnowledgeContext,
 } from "./knowledge";
+export { logUsage, getUsageStats, getRecentUsageLogs, getAgentUsageBreakdown } from "./usage";
+export type { UsageLogInsert, UsageStats } from "./usage";
