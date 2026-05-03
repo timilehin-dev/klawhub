@@ -35,6 +35,12 @@ export function Header() {
             </Link>
           ))}
           <Link
+            href="/dashboard"
+            className="text-sm font-medium text-surface-700 transition-colors hover:text-brand-600"
+          >
+            Dashboard
+          </Link>
+          <Link
             href="/install"
             className="rounded-full bg-surface-900 px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-surface-800 hover:shadow-lg"
           >
@@ -66,6 +72,13 @@ export function Header() {
                 {link.label}
               </Link>
             ))}
+            <Link
+              href="/dashboard"
+              onClick={() => setMobileOpen(false)}
+              className="text-sm font-medium text-surface-700 transition-colors hover:text-brand-600"
+            >
+              Dashboard
+            </Link>
             <Link
               href="/install"
               onClick={() => setMobileOpen(false)}

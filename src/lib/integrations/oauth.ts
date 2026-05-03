@@ -1,7 +1,6 @@
 import type { OAuthProviderConfig } from "./providers/registry";
 import { getProviderCredentials } from "./providers/registry";
 import { createIntegration } from "./store";
-import { encrypt } from "./crypto";
 
 /**
  * Build the OAuth authorization URL for a provider.
@@ -91,12 +90,11 @@ export async function completeOAuthFlow(
     ? new Date(Date.now() + tokens.expiresIn * 1000)
     : undefined;
 
-  // Fetch account info from provider
   const accountInfo = await fetchAccountInfo(provider, tokens.accessToken);
 
   const integration = await createIntegration({
     workspaceId,
-    provider: provider.id as "google_drive" | "github" | "notion" | "linear" | "hubspot",
+    provider: provider.id as "google_drive" | "github",
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt,
@@ -119,7 +117,6 @@ async function fetchAccountInfo(
   try {
     switch (provider.id) {
       case "google_drive": {
-        // Use Google userinfo endpoint
         const resp = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
@@ -135,31 +132,6 @@ async function fetchAccountInfo(
         });
         const data = await resp.json();
         return { id: String(data.id), name: data.login, email: data.email };
-      }
-      case "notion": {
-        const resp = await fetch("https://api.notion.com/v1/users/me", {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Notion-Version": "2022-06-28",
-          },
-        });
-        const data = await resp.json();
-        return { id: data.id || data.bot_id, name: data.name };
-      }
-      case "linear": {
-        const resp = await fetch("https://api.linear.app/graphql", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ query: "{ viewer { id name email } }" }),
-        });
-        const data = await resp.json();
-        return { id: data.data?.viewer?.id, name: data.data?.viewer?.name, email: data.data?.viewer?.email };
-      }
-      case "hubspot": {
-        const resp = await fetch("https://api.hubapi.com/oauth/v1/access-tokens/${accessToken}", {});
-        // HubSpot returns user info directly
-        const data = await resp.json();
-        return { id: data.user_id, name: data.user, email: data.email };
       }
       default:
         return { id: "unknown" };

@@ -269,94 +269,7 @@ const githubIssuesTool: ToolDefinition = {
   },
 };
 
-const notionSearchTool: ToolDefinition = {
-  name: "notion_search",
-  description: "Search for pages and content in Notion. Use this to find documents, notes, or database entries stored in the connected Notion workspace.",
-  parameters: {
-    query: { type: "string", description: "Search query for Notion pages", required: true },
-  },
-  async execute(params, ctx) {
-    try {
-      const { notionSearch } = await import("@/lib/integrations/clients");
-      const pages = await notionSearch(requireWorkspace(ctx), params.query);
-      if (pages.length === 0) return "No pages found in Notion matching your query.";
-      return pages.map((p: Record<string, unknown>) => `- ${p.title} (${p.type}) → ${p.url} [edited: ${p.lastEdited}]`).join("\n");
-    } catch (err) { return integrationError("Notion", err); }
-  },
-};
 
-const notionReadPageTool: ToolDefinition = {
-  name: "notion_read_page",
-  description: "Read the full content of a Notion page by its ID. Returns the title and all text content from the page.",
-  parameters: {
-    page_id: { type: "string", description: "The Notion page ID (32-char hex)", required: true },
-  },
-  async execute(params, ctx) {
-    try {
-      const { notionReadPage } = await import("@/lib/integrations/clients");
-      const page = await notionReadPage(requireWorkspace(ctx), params.page_id);
-      return `Title: ${page.title}\nURL: ${page.url}\n\nContent:\n${page.content}`;
-    } catch (err) { return integrationError("Notion", err); }
-  },
-};
-
-const linearIssuesTool: ToolDefinition = {
-  name: "linear_list_issues",
-  description: "List recent issues from Linear. Use this to see current tasks, bugs, and features in the connected Linear workspace.",
-  parameters: {},
-  async execute(_params, ctx) {
-    try {
-      const { linearListIssues } = await import("@/lib/integrations/clients");
-      const issues = await linearListIssues(requireWorkspace(ctx), 15);
-      if (issues.length === 0) return "No issues found in Linear.";
-      return issues.map((i: Record<string, unknown>) => `- ${i.title} [${i.state}] priority:${i.priority} ${i.assignee ? `@${i.assignee}` : ""} → ${i.url}`).join("\n");
-    } catch (err) { return integrationError("Linear", err); }
-  },
-};
-
-const linearSearchTool: ToolDefinition = {
-  name: "linear_search",
-  description: "Search for issues in Linear. Use this to find specific tasks, bugs, or features by keyword.",
-  parameters: {
-    query: { type: "string", description: "Search query for Linear issues", required: true },
-  },
-  async execute(params, ctx) {
-    try {
-      const { linearSearch } = await import("@/lib/integrations/clients");
-      const issues = await linearSearch(requireWorkspace(ctx), params.query);
-      if (issues.length === 0) return "No issues found matching your query.";
-      return issues.map((i: Record<string, unknown>) => `- ${i.title} [${i.state}] → ${i.url}`).join("\n");
-    } catch (err) { return integrationError("Linear", err); }
-  },
-};
-
-const hubspotContactsTool: ToolDefinition = {
-  name: "hubspot_list_contacts",
-  description: "List recent contacts from HubSpot CRM. Use this to see customer/prospect information.",
-  parameters: {},
-  async execute(_params, ctx) {
-    try {
-      const { hubspotListContacts } = await import("@/lib/integrations/clients");
-      const contacts = await hubspotListContacts(requireWorkspace(ctx), 15);
-      if (contacts.length === 0) return "No contacts found in HubSpot.";
-      return contacts.map((c: Record<string, unknown>) => `- ${c.firstName} ${c.lastName} <${c.email}> ${c.company ? `at ${c.company}` : ""}`).join("\n");
-    } catch (err) { return integrationError("HubSpot", err); }
-  },
-};
-
-const hubspotDealsTool: ToolDefinition = {
-  name: "hubspot_list_deals",
-  description: "List recent deals from HubSpot CRM. Use this to see active opportunities and pipeline status.",
-  parameters: {},
-  async execute(_params, ctx) {
-    try {
-      const { hubspotListDeals } = await import("@/lib/integrations/clients");
-      const deals = await hubspotListDeals(requireWorkspace(ctx), 15);
-      if (deals.length === 0) return "No deals found in HubSpot.";
-      return deals.map((d: Record<string, unknown>) => `- ${d.name} [${d.stage}] $${d.amount || "0"} ${d.closeDate ? `closes: ${d.closeDate}` : ""}`).join("\n");
-    } catch (err) { return integrationError("HubSpot", err); }
-  },
-};
 
 // ── Tool Registry ──
 
@@ -373,12 +286,6 @@ export const allTools: ToolDefinition[] = [
   githubSearchTool,
   githubReadFileTool,
   githubIssuesTool,
-  notionSearchTool,
-  notionReadPageTool,
-  linearIssuesTool,
-  linearSearchTool,
-  hubspotContactsTool,
-  hubspotDealsTool,
 ];
 
 export function getToolsByName(names: string[]): ToolDefinition[] {

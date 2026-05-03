@@ -137,11 +137,30 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Redirect to success page
+    // Redirect to success page — set workspace cookie so dashboard can identify the workspace
     const workspaceSlug = workspaceDomain || data.team.id;
-    return NextResponse.redirect(
-      new URL(`/install?success=1&workspace=${encodeURIComponent(workspaceSlug)}`, request.url)
-    );
+    const redirectUrl = new URL(`/install?success=1&workspace=${encodeURIComponent(workspaceSlug)}`, request.url);
+    const response = NextResponse.redirect(redirectUrl);
+
+    // Store workspace ID in an httpOnly cookie (secure in production)
+    if (workspaceId) {
+      response.cookies.set("klawhub_workspace_id", workspaceId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 365, // 1 year
+        path: "/",
+      });
+      // Also store workspace name for display (not httpOnly — readable by client)
+      response.cookies.set("klawhub_workspace_name", workspaceName, {
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 365,
+        path: "/",
+      });
+    }
+
+    return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.redirect(

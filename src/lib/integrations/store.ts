@@ -8,7 +8,7 @@ import type { OAuthProviderConfig } from "./providers/registry";
 
 export interface CreateIntegrationInput {
   workspaceId: string;
-  provider: "google_drive" | "github" | "notion" | "linear" | "hubspot";
+  provider: "google_drive" | "github";
   accessToken: string;
   refreshToken?: string;
   expiresAt?: Date;
@@ -50,7 +50,7 @@ export async function getWorkspaceIntegrations(workspaceId: string) {
     .orderBy(desc(integrations.createdAt));
 }
 
-export async function getIntegrationByProvider(workspaceId: string, provider: "google_drive" | "github" | "notion" | "linear" | "hubspot") {
+export async function getIntegrationByProvider(workspaceId: string, provider: "google_drive" | "github") {
   const rows = await getDb()
     .select()
     .from(integrations)
@@ -121,7 +121,7 @@ export function decryptRefreshToken(integration: { refreshToken: string | null }
 // ── Token Refresh ──
 
 export async function refreshAccessToken(
-  integration: { id: string; provider: "google_drive" | "github" | "notion" | "linear" | "hubspot"; refreshToken: string | null; expiresAt: Date | null },
+  integration: { id: string; provider: "google_drive" | "github"; refreshToken: string | null; expiresAt: Date | null },
   providerConfig: OAuthProviderConfig
 ): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date } | null> {
   const refreshToken = decryptRefreshToken(integration);
@@ -157,7 +157,6 @@ export async function refreshAccessToken(
     if (providerConfig.acceptsJson) {
       data = await resp.json();
     } else {
-      // Some providers return URL-encoded responses
       const text = await resp.text();
       data = Object.fromEntries(new URLSearchParams(text));
     }
@@ -169,7 +168,6 @@ export async function refreshAccessToken(
     const expiresIn = data.expires_in as number | undefined;
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined;
 
-    // Update stored tokens
     await updateIntegrationTokens(
       integration.id,
       newAccessToken,
@@ -196,10 +194,9 @@ function getProviderCredentialsFromConfig(provider: OAuthProviderConfig) {
 // ── Get Valid Access Token (auto-refresh if expired) ──
 
 export async function getValidAccessToken(
-  integration: { id: string; provider: "google_drive" | "github" | "notion" | "linear" | "hubspot"; accessToken: string; refreshToken: string | null; expiresAt: Date | null },
+  integration: { id: string; provider: "google_drive" | "github"; accessToken: string; refreshToken: string | null; expiresAt: Date | null },
   providerConfig: OAuthProviderConfig
 ): Promise<string | null> {
-  // Check if token is expired or about to expire (5 min buffer)
   const now = new Date();
   const buffer = 5 * 60 * 1000; // 5 minutes
   const isExpired = integration.expiresAt

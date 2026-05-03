@@ -18,7 +18,7 @@ export interface OAuthProviderConfig {
 export const providers: Record<string, OAuthProviderConfig> = {
   google_drive: {
     id: "google_drive",
-    name: "Google Drive",
+    name: "Google Workspace",
     logo: "google",
     authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     tokenUrl: "https://oauth2.googleapis.com/token",
@@ -51,59 +51,6 @@ export const providers: Record<string, OAuthProviderConfig> = {
     scopes: ["repo", "read:org", "read:user", "issues", "pull_requests"],
     scopeSeparator: " ",
     acceptsJson: true,
-  },
-
-  notion: {
-    id: "notion",
-    name: "Notion",
-    logo: "notion",
-    authUrl: "https://auth.notion.com/authorize",
-    tokenUrl: "https://api.notion.com/v1/oauth/token",
-    clientIdEnv: "NOTION_CLIENT_ID",
-    clientSecretEnv: "NOTION_CLIENT_SECRET",
-    scopes: [], // Notion scopes are configured at integration creation, not in auth URL
-    scopeSeparator: ",",
-    acceptsJson: false, // Notion uses form-encoded token exchange
-    extraTokenParams: {
-      grant_type: "authorization_code",
-    },
-  },
-
-  linear: {
-    id: "linear",
-    name: "Linear",
-    logo: "linear",
-    authUrl: "https://linear.app/oauth/authorize",
-    tokenUrl: "https://linear.app/oauth/token",
-    clientIdEnv: "LINEAR_CLIENT_ID",
-    clientSecretEnv: "LINEAR_CLIENT_SECRET",
-    scopes: ["read", "write"],
-    scopeSeparator: ",",
-    acceptsJson: true,
-  },
-
-  hubspot: {
-    id: "hubspot",
-    name: "HubSpot",
-    logo: "hubspot",
-    authUrl: "https://app.hubspot.com/oauth/authorize",
-    tokenUrl: "https://api.hubapi.com/oauth/v1/token",
-    clientIdEnv: "HUBSPOT_CLIENT_ID",
-    clientSecretEnv: "HUBSPOT_CLIENT_SECRET",
-    scopes: [
-      "crm.objects.contacts.read",
-      "crm.objects.contacts.write",
-      "crm.objects.companies.read",
-      "crm.objects.companies.write",
-      "crm.objects.deals.read",
-      "crm.objects.deals.write",
-      "crm.schemas.contacts.read",
-    ],
-    scopeSeparator: " ",
-    acceptsJson: false,
-    extraAuthParams: {
-      optional_scope: "",
-    },
   },
 };
 
