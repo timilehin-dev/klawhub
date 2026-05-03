@@ -2,25 +2,21 @@
  * High-level browser actions — wraps the low-level client into
  * tool-callable operations with proper error handling and cleanup.
  *
- * Every action creates a page, performs operations, then closes the page.
- * This ensures no resource leaks even on errors.
+ * Every action uses the new `createPage()` helper which creates a fresh
+ * browser connection per operation — safe on serverless (Vercel).
  */
 
 import {
-  getBrowser,
   createPage,
-  closePage,
   navigateTo,
   clickElement,
   typeText,
   selectOption,
   scrapeText,
-  evaluateScript,
   screenshot,
   waitFor,
-  getHtml,
   getLinks,
-  isBrowserAvailable,
+  isBrowserConfigured,
   getBrowserStatus,
 } from "./client";
 
@@ -33,45 +29,38 @@ function browserUnavailable(): string {
 // ── Public Actions ──
 
 export async function browseUrl(url: string): Promise<string> {
-  const browser = await getBrowser();
-  if (!browser) return browserUnavailable();
+  const result = await createPage();
+  if (!result) return browserUnavailable();
 
-  const page = await createPage();
-  if (!page) return "Failed to create browser page.";
-
+  const { page, cleanup } = result;
   try {
-    const result = await navigateTo(page, url);
+    const nav = await navigateTo(page, url);
     const text = await scrapeText(page);
-    // Truncate to reasonable length for tool output
     const truncated = text.length > 8000 ? text.slice(0, 8000) + "\n\n[... content truncated]" : text;
-    return `Page: ${result.title}\nURL: ${result.url}\nStatus: ${result.statusCode}\n\n${truncated}`;
+    return `Page: ${nav.title}\nURL: ${nav.url}\nStatus: ${nav.statusCode}\n\n${truncated}`;
   } finally {
-    await closePage(page);
+    await cleanup();
   }
 }
 
 export async function browserScreenshot(url: string, options?: { fullPage?: boolean; selector?: string }): Promise<Buffer | null> {
-  const browser = await getBrowser();
-  if (!browser) return null;
+  const result = await createPage();
+  if (!result) return null;
 
-  const page = await createPage();
-  if (!page) return null;
-
+  const { page, cleanup } = result;
   try {
     await navigateTo(page, url, "networkidle2");
     return await screenshot(page, options);
   } finally {
-    await closePage(page);
+    await cleanup();
   }
 }
 
 export async function browserScrape(url: string, selector?: string): Promise<string> {
-  const browser = await getBrowser();
-  if (!browser) return browserUnavailable();
+  const result = await createPage();
+  if (!result) return browserUnavailable();
 
-  const page = await createPage();
-  if (!page) return "Failed to create browser page.";
-
+  const { page, cleanup } = result;
   try {
     await navigateTo(page, url);
     if (selector) {
@@ -81,24 +70,22 @@ export async function browserScrape(url: string, selector?: string): Promise<str
     const truncated = text.length > 10000 ? text.slice(0, 10000) + "\n\n[... content truncated]" : text;
     return truncated;
   } finally {
-    await closePage(page);
+    await cleanup();
   }
 }
 
 export async function browserGetLinks(url: string): Promise<string> {
-  const browser = await getBrowser();
-  if (!browser) return browserUnavailable();
+  const result = await createPage();
+  if (!result) return browserUnavailable();
 
-  const page = await createPage();
-  if (!page) return "Failed to create browser page.";
-
+  const { page, cleanup } = result;
   try {
     await navigateTo(page, url);
     const links = await getLinks(page);
     if (links.length === 0) return "No links found on the page.";
     return links.map((l, i) => `${i + 1}. ${l.text} → ${l.href}`).join("\n");
   } finally {
-    await closePage(page);
+    await cleanup();
   }
 }
 
@@ -106,12 +93,10 @@ export async function browserInteract(
   url: string,
   actions: Array<{ type: "click" | "type" | "select" | "wait" | "scrape"; selector?: string; value?: string }>
 ): Promise<string> {
-  const browser = await getBrowser();
-  if (!browser) return browserUnavailable();
+  const result = await createPage();
+  if (!result) return browserUnavailable();
 
-  const page = await createPage();
-  if (!page) return "Failed to create browser page.";
-
+  const { page, cleanup } = result;
   const results: string[] = [];
 
   try {
@@ -164,26 +149,25 @@ export async function browserInteract(
   } catch (err) {
     return results.join("\n") + `\n\n[ERROR] ${(err as Error).message}`;
   } finally {
-    await closePage(page);
+    await cleanup();
   }
 }
 
 export async function browserEvaluate(url: string, script: string): Promise<string> {
-  const browser = await getBrowser();
-  if (!browser) return browserUnavailable();
+  const result = await createPage();
+  if (!result) return browserUnavailable();
 
-  const page = await createPage();
-  if (!page) return "Failed to create browser page.";
-
+  const { page, cleanup } = result;
   try {
     await navigateTo(page, url);
-    const result = await evaluateScript(page, script);
-    return typeof result === "string" ? result : JSON.stringify(result, null, 2);
+    const { evaluateScript } = await import("./client");
+    const evalResult = await evaluateScript(page, script);
+    return typeof evalResult === "string" ? evalResult : JSON.stringify(evalResult, null, 2);
   } catch (err) {
     return `[ERROR] ${(err as Error).message}`;
   } finally {
-    await closePage(page);
+    await cleanup();
   }
 }
 
-export { isBrowserAvailable, getBrowserStatus };
+export { isBrowserConfigured, getBrowserStatus };

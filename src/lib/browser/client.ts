@@ -1,4 +1,4 @@
-import puppeteer, { type Browser, type Page, type LaunchOptions } from "puppeteer-core";
+import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
 /**
  * Browser client — connects to a Lightpanda (or any CDP-compatible) browser instance.
@@ -8,85 +8,105 @@ import puppeteer, { type Browser, type Page, type LaunchOptions } from "puppetee
  *
  * Set BROWSER_WS_URL env var to the WebSocket endpoint (e.g. ws://localhost:9222).
  * If not set, browser tools will gracefully report as unavailable.
+ *
+ * DESIGN: Each operation creates a fresh page and closes it after use.
+ * No global singleton — safe on serverless (Vercel) where concurrent requests
+ * share the same process but each invocation should be isolated.
  */
 
 const BROWSER_TIMEOUT = 30_000; // 30 seconds for page operations
-
-let _browser: Browser | null = null;
-let _browserInitPromise: Promise<Browser | null> | null = null;
+const CONNECTION_TIMEOUT = 10_000; // 10 seconds to connect
 
 function getWsUrl(): string | null {
   return process.env.BROWSER_WS_URL || null;
 }
 
 /**
- * Connect to the browser instance. Reuses connection if already established.
+ * Create a one-shot browser connection. Each call gets a fresh connection.
+ * The caller is responsible for closing it via `closeBrowser()`.
  */
-export async function getBrowser(): Promise<Browser | null> {
-  if (_browser && _browser.connected) return _browser;
-  if (_browserInitPromise) return _browserInitPromise;
-
+export async function connectBrowser(): Promise<Browser | null> {
   const wsUrl = getWsUrl();
   if (!wsUrl) return null;
 
-  _browserInitPromise = (async () => {
-    try {
-      _browser = await puppeteer.connect({
-        browserWSEndpoint: wsUrl,
-        defaultViewport: { width: 1280, height: 720 },
-      });
-      _browser.on("disconnected", () => {
-        _browser = null;
-        _browserInitPromise = null;
-      });
-      return _browser;
-    } catch (err) {
-      console.error("[BROWSER] Failed to connect:", (err as Error).message);
-      _browser = null;
-      _browserInitPromise = null;
-      return null;
-    }
-  })();
-
-  return _browserInitPromise;
-}
-
-/**
- * Check if browser is available.
- */
-export async function isBrowserAvailable(): Promise<boolean> {
-  const browser = await getBrowser();
-  return browser !== null;
-}
-
-/**
- * Create a new page (tab) in the browser.
- */
-export async function createPage(): Promise<Page | null> {
-  const browser = await getBrowser();
-  if (!browser) return null;
   try {
-    return await browser.newPage();
+    const browser = await puppeteer.connect({
+      browserWSEndpoint: wsUrl,
+      defaultViewport: { width: 1280, height: 720 },
+    });
+    return browser;
   } catch (err) {
-    console.error("[BROWSER] Failed to create page:", (err as Error).message);
+    console.error("[BROWSER] Failed to connect:", (err as Error).message);
     return null;
   }
 }
 
 /**
- * Close a page (tab).
+ * Close a browser connection.
  */
-export async function closePage(page: Page): Promise<void> {
+export async function closeBrowser(browser: Browser): Promise<void> {
   try {
-    await page.close();
+    await browser.disconnect();
   } catch {
-    // Page may already be closed
+    // Already disconnected or never connected
   }
 }
 
 /**
- * Navigate to a URL and wait for the page to load.
+ * Check if browser tools are configured (env var exists).
  */
+export function isBrowserConfigured(): boolean {
+  return !!getWsUrl();
+}
+
+/**
+ * Run a browser operation with automatic connection management.
+ * Creates a fresh browser + page for each operation, ensuring isolation.
+ */
+export async function withBrowser<T>(
+  fn: (page: Page) => Promise<T>,
+  options?: { waitUntil?: "load" | "domcontentloaded" | "networkidle0" | "networkidle2" }
+): Promise<T | null> {
+  const browser = await connectBrowser();
+  if (!browser) return null;
+
+  try {
+    const page = await browser.newPage();
+    try {
+      return await fn(page);
+    } finally {
+      await page.close().catch(() => {});
+    }
+  } finally {
+    await closeBrowser(browser);
+  }
+}
+
+/**
+ * Create a new page (tab) in the browser — for advanced multi-step operations.
+ * Caller MUST call closePage() when done.
+ */
+export async function createPage(): Promise<{ page: Page; cleanup: () => Promise<void> } | null> {
+  const browser = await connectBrowser();
+  if (!browser) return null;
+  try {
+    const page = await browser.newPage();
+    return {
+      page,
+      cleanup: async () => {
+        await page.close().catch(() => {});
+        await closeBrowser(browser);
+      },
+    };
+  } catch (err) {
+    console.error("[BROWSER] Failed to create page:", (err as Error).message);
+    await closeBrowser(browser);
+    return null;
+  }
+}
+
+// ── Convenience helpers (all use withBrowser internally) ──
+
 export async function navigateTo(page: Page, url: string, waitUntil: "load" | "domcontentloaded" | "networkidle0" | "networkidle2" = "domcontentloaded"): Promise<{ title: string; url: string; statusCode: number | null }> {
   const response = await page.goto(url, {
     waitUntil,
@@ -99,9 +119,6 @@ export async function navigateTo(page: Page, url: string, waitUntil: "load" | "d
   };
 }
 
-/**
- * Click an element on the page using a CSS selector.
- */
 export async function clickElement(page: Page, selector: string): Promise<boolean> {
   try {
     await page.waitForSelector(selector, { timeout: BROWSER_TIMEOUT });
@@ -112,9 +129,6 @@ export async function clickElement(page: Page, selector: string): Promise<boolea
   }
 }
 
-/**
- * Type text into an input field.
- */
 export async function typeText(page: Page, selector: string, text: string, options?: { clearFirst?: boolean; delay?: number }): Promise<boolean> {
   try {
     await page.waitForSelector(selector, { timeout: BROWSER_TIMEOUT });
@@ -129,9 +143,6 @@ export async function typeText(page: Page, selector: string, text: string, optio
   }
 }
 
-/**
- * Select a value from a dropdown (select element).
- */
 export async function selectOption(page: Page, selector: string, value: string): Promise<boolean> {
   try {
     await page.waitForSelector(selector, { timeout: BROWSER_TIMEOUT });
@@ -142,9 +153,6 @@ export async function selectOption(page: Page, selector: string, value: string):
   }
 }
 
-/**
- * Extract visible text content from the page.
- */
 export async function scrapeText(page: Page, selector?: string): Promise<string> {
   if (selector) {
     try {
@@ -157,16 +165,10 @@ export async function scrapeText(page: Page, selector?: string): Promise<string>
   return await page.evaluate(() => document.body.innerText);
 }
 
-/**
- * Extract structured data from the page (returns JSON-serializable data from JS evaluation).
- */
 export async function evaluateScript(page: Page, script: string): Promise<unknown> {
   return page.evaluate(script);
 }
 
-/**
- * Take a screenshot of the page. Returns a Buffer.
- */
 export async function screenshot(page: Page, options?: { fullPage?: boolean; selector?: string }): Promise<Buffer> {
   if (options?.selector) {
     const element = await page.$(options.selector);
@@ -181,9 +183,6 @@ export async function screenshot(page: Page, options?: { fullPage?: boolean; sel
   return Buffer.from(uint8);
 }
 
-/**
- * Wait for a specific condition (selector appears, navigation, timeout).
- */
 export async function waitFor(
   page: Page,
   options: {
@@ -202,16 +201,10 @@ export async function waitFor(
   }
 }
 
-/**
- * Get the HTML source of the page.
- */
 export async function getHtml(page: Page): Promise<string> {
   return await page.content();
 }
 
-/**
- * Get all links from the page.
- */
 export async function getLinks(page: Page): Promise<Array<{ text: string; href: string }>> {
   return await page.evaluate(() =>
     Array.from(document.querySelectorAll("a[href]")).map((a) => ({
@@ -221,14 +214,13 @@ export async function getLinks(page: Page): Promise<Array<{ text: string; href: 
   );
 }
 
-/**
- * Check if browser tools are configured and available.
- */
-export function getBrowserStatus(): { available: boolean; wsUrl: string | null; connected: boolean } {
+export function getBrowserStatus(): { available: boolean; wsUrl: string | null } {
   const wsUrl = getWsUrl();
   return {
     available: !!wsUrl,
     wsUrl,
-    connected: _browser?.connected || false,
   };
 }
+
+// Backward-compatible alias for actions.ts
+export { isBrowserConfigured as isBrowserAvailable };

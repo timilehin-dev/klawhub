@@ -10,9 +10,17 @@ import { slack } from "@/lib/slack/client";
  * Checks connected integrations (GitHub, Google Drive) for notable changes
  * and proactively posts updates to Slack channels where the bot is a member.
  *
- * This makes Klawhub proactive instead of purely reactive — it monitors
- * your tools and surfaces important changes without being asked.
+ * SMART POSTING:
+ * - Remembers the last update timestamp per workspace to avoid spam
+ * - Only posts to channels where the bot is actively a member
+ * - Skips if no changes found since last check
+ * - Rate-limited to max 1 post per workspace per heartbeat cycle
  */
+
+// In-memory cache of last update timestamps (survives within a single serverless invocation)
+const lastUpdateCache = new Map<string, number>();
+const CACHE_TTL = 25 * 60 * 1000; // 25 minutes — heartbeat runs every 30 min
+
 export const heartbeatWorkflow = inngest.createFunction(
   { id: "heartbeat", name: "Heartbeat Monitor" },
   { cron: "*/30 * * * *" }, // Every 30 minutes
@@ -111,27 +119,36 @@ export const heartbeatWorkflow = inngest.createFunction(
       if (updates.length > 0) {
         await step.run(`notify-${workspace.id.slice(0, 8)}`, async () => {
           try {
+            // Dedup check: skip if we already posted for this workspace recently
+            const lastPost = lastUpdateCache.get(workspace.id);
+            if (lastPost && Date.now() - lastPost < CACHE_TTL) {
+              return; // Skip — already posted recently
+            }
+
             // Find channels where the bot is a member
             const channels = await slack.conversations.list({
               types: "public_channel,private_channel",
               exclude_archived: true,
-              limit: 20,
+              limit: 100,
             });
 
-            const channelIds = ((channels as any).channels || [])
+            const memberChannels = ((channels as any).channels || [])
               .filter((ch: any) => ch.is_member)
               .map((ch: any) => ch.id);
 
-            if (channelIds.length === 0) return;
+            if (memberChannels.length === 0) return;
 
-            // Post to the first active channel
+            // Post to the first channel where bot is a member
+            // (In future, could be configurable per workspace)
             const message = `:pulse: *Klawhub Heartbeat* — ${workspace.name}\n\n${updates.join("\n\n")}\n\n_I monitor your integrations every 30 minutes. Reply with any questions._`;
 
             await slack.chat.postMessage({
-              channel: channelIds[0],
+              channel: memberChannels[0],
               text: message,
             });
 
+            // Mark as posted
+            lastUpdateCache.set(workspace.id, Date.now());
             totalUpdates += updates.length;
           } catch {
             // Slack posting failed — skip

@@ -174,7 +174,7 @@ export const documentWorkflow = inngest.createFunction(
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `*Document Delivered*\n\n**${result.title}** (${result.format.toUpperCase()})\n${result.sections.length} sections — see the file above.\n_Reply in this thread for revisions._`
+        `*Document Delivered*\n\n*${result.title}* (${result.format.toUpperCase()})\n${result.sections.length} sections — see the file above.\n_Reply in this thread for revisions._`
       );
 
       await trackSkillUsage("document", slackUserId, slackChannelId, messageText, "success");

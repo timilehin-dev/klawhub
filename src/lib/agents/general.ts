@@ -1,8 +1,10 @@
 import { runToolUseLoop } from "@/lib/tools/executor";
+import { runReasoningChain } from "@/lib/agents/reasoning";
 import { generalAgentTools } from "@/lib/tools/registry";
 import { getActiveSkills, getUserSchedules, getUserSkillStats } from "@/lib/db";
 import { buildUserContext } from "@/lib/tools/memory";
 import { buildKnowledgeContext } from "@/lib/db/knowledge";
+import { getWorkspaceByTeamId } from "@/lib/db";
 
 const GENERAL_AGENT_SYSTEM = `You are Klawhub, a multi-agent AI coworker that lives inside Slack. You are NOT a generic chatbot — you are a coordinated system of specialized agents and real tools.
 
@@ -33,6 +35,8 @@ You operate as a skills-and-tools-first system. When a user makes a request, you
 • *Browser Automation* — Browse dynamic pages, scrape with CSS selectors, extract links, interact with forms, take screenshots (requires headless browser)
 • *Memory System* — Remember user preferences, past interactions, and context across sessions
 • *Knowledge Graph* — Structured memory for projects, people, events, standing items
+• *Google Drive* — Search and read files from connected Google Drive
+• *GitHub* — Search code, read files, list issues from connected GitHub
 
 *Advanced Capabilities:*
 • *Multi-step Reasoning* — For complex requests, you can plan → execute → verify → iterate across multiple steps
@@ -65,11 +69,41 @@ When users share information:
 • Use knowledge_search to check if you already know about mentioned entities
 • Acknowledge what you've learned
 
+When users ask you to do something complex (multi-step research, analysis across multiple sources, comparisons):
+• Use your multi-step reasoning capability to plan before executing
+• Break the request into steps and verify each step's result
+• This is triggered automatically for complex requests
+
 Keep responses natural, professional, and helpful. You're a coworker, not a servant.`;
+
+/**
+ * Determines if a request is complex enough to warrant multi-step reasoning chains.
+ * Simple questions, greetings, and single-tool requests use the standard loop.
+ */
+function isComplexRequest(message: string): boolean {
+  const complexitySignals = [
+    /\b(compare|comparison|versus|vs\.?)\b/i,
+    /\b(analyze|analysis|investigate)\b/i,
+    /\b(multi.?step|step.?by.?step|then|after that|finally)\b/i,
+    /\b(and then|first|second|third)\b/i,
+    /\b(research.*and|find.*and.*compare|gather.*and.*synthesize)\b/i,
+    /\b(create.*report|write.*report|build.*dashboard)\b/i,
+    /\b(why|how come|what causes|what leads to)\b/i,
+  ];
+
+  // Count complexity signals
+  const signalCount = complexitySignals.filter((p) => p.test(message)).length;
+
+  // Also check message length — longer messages tend to be more complex
+  const isLongMessage = message.length > 200;
+
+  return signalCount >= 2 || (signalCount >= 1 && isLongMessage);
+}
 
 export async function chatAsAgent(
   slackUserId: string,
-  userMessage: string
+  userMessage: string,
+  options?: { workspaceId?: string }
 ): Promise<string> {
   // Gather all user context in parallel
   const [activeSkills, userSchedules, skillStats, memoryContext, knowledgeContext] = await Promise.all([
@@ -119,10 +153,31 @@ export async function chatAsAgent(
 
   const systemPrompt = GENERAL_AGENT_SYSTEM + contextSection;
 
+  const toolContext = {
+    slackUserId,
+    workspaceId: options?.workspaceId,
+  };
+
+  // Use multi-step reasoning for complex requests
+  if (isComplexRequest(userMessage)) {
+    try {
+      const result = await runReasoningChain(userMessage, {
+        tools: generalAgentTools,
+        context: toolContext,
+        maxSteps: 5,
+        maxRetriesPerStep: 1,
+        temperature: 0.6,
+      });
+      return result;
+    } catch {
+      // If reasoning chain fails, fall back to standard loop
+    }
+  }
+
   return runToolUseLoop(userMessage, {
     systemPrompt,
     tools: generalAgentTools,
-    context: { slackUserId },
+    context: toolContext,
     maxIterations: 6,
     temperature: 0.7,
   });

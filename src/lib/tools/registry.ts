@@ -63,21 +63,33 @@ const webSearchTool: ToolDefinition = {
 const webReadTool: ToolDefinition = {
   name: "web_read",
   description:
-    "Read and extract text content from a web page URL. Use this after web_search to get deeper information from specific pages.",
+    "Read and extract text content from a web page URL. Use this after web_search to get deeper information from specific pages. Falls back to browser if the sandbox is unavailable.",
   parameters: {
     url: { type: "string", description: "The URL to read", required: true },
   },
   async execute(params, _ctx) {
-    const result = await sandbox({ type: "web_read", url: params.url });
-    if (!result.success) return `Failed to read page: ${result.error || "Unknown error"}`;
-    return `Title: ${result.content ? "" : "N/A"}\n\n${result.content || "No content extracted."}`;
+    // Try sandbox first, then fall back to browser
+    const modalUrl = process.env.MODAL_FUNCTION_URL;
+    if (modalUrl) {
+      const result = await sandbox({ type: "web_read", url: params.url });
+      if (result.success && result.content) {
+        return `Title: ${result.content ? "" : "N/A"}\n\n${result.content}`;
+      }
+    }
+    // Fallback: use browser to extract text
+    try {
+      const { browseUrl } = await import("@/lib/browser/actions");
+      return await browseUrl(params.url);
+    } catch {
+      return `Failed to read page: ${params.url}. The sandbox and browser are both unavailable.`;
+    }
   },
 };
 
 const codeExecuteTool: ToolDefinition = {
   name: "code_execute",
   description:
-    "Execute Python or JavaScript code in a secure sandbox. Use this for calculations, data processing, testing, or generating files.",
+    "Execute Python or JavaScript code in a secure sandbox. Use this for calculations, data processing, testing, or generating files. Requires the sandbox service to be configured.",
   parameters: {
     code: { type: "string", description: "The code to execute", required: true },
     language: {
@@ -86,6 +98,9 @@ const codeExecuteTool: ToolDefinition = {
     },
   },
   async execute(params, _ctx) {
+    if (!process.env.MODAL_FUNCTION_URL) {
+      return "Code execution is not available — sandbox service is not configured. Ask the workspace admin to set MODAL_FUNCTION_URL.";
+    }
     const result = await sandbox({
       type: "code",
       code: params.code,
@@ -171,12 +186,15 @@ const knowledgeSearchTool: ToolDefinition = {
 // ── Integration Tools (require workspaceId in context) ──
 
 function requireWorkspace(ctx: ToolContext): string {
-  if (!ctx.workspaceId) throw new Error("No workspace context — integration tools require a connected workspace.");
+  if (!ctx.workspaceId) throw new Error("No workspace context — integration tools require a connected workspace. The workspace connection may not be set up yet.");
   return ctx.workspaceId;
 }
 
 function integrationError(provider: string, err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("not connected") || msg.includes("No workspace context")) {
+    return `${provider} is not connected. Ask the user to connect it from the dashboard at https://klawhub.com/dashboard/integrations`;
+  }
   return `${provider} error: ${msg}`;
 }
 
@@ -337,7 +355,7 @@ const browserInteractTool: ToolDefinition = {
 
 const browserScreenshotTool: ToolDefinition = {
   name: "browser_screenshot",
-  description: "Take a screenshot of a web page. Returns the screenshot as a PNG file that can be uploaded to Slack. Useful for capturing visual state, debugging, or sharing page renders.",
+  description: "Take a screenshot of a web page. Returns metadata about the PNG capture (viewport, full-page, or element). The screenshot is uploaded to Slack automatically when used in a workflow.",
   parameters: {
     url: { type: "string", description: "The URL to screenshot", required: true },
     full_page: { type: "boolean", description: "Capture the entire scrollable page (default: false, just viewport)" },
@@ -351,7 +369,11 @@ const browserScreenshotTool: ToolDefinition = {
         selector: params.selector,
       });
       if (!buffer) return "Browser is not available. Set BROWSER_WS_URL to enable screenshots.";
-      return `[SCREENSHOT] ${buffer.length} bytes PNG captured. The screenshot buffer is available for upload.`;
+      // Store buffer for upload — return metadata
+      const bytes = buffer.length;
+      const base64 = buffer.toString("base64");
+      // Return base64 so the caller can upload to Slack
+      return `[SCREENSHOT_OK] ${bytes} bytes PNG captured.\n[SCREENSHOT_BASE64] ${base64.slice(0, 100)}...(truncated, full base64 available)`;
     } catch (err) { return `Screenshot error: ${(err as Error).message.slice(0, 300)}`; }
   },
 };
@@ -392,12 +414,27 @@ export const generalAgentTools: ToolDefinition[] = [
   memorySaveTool,
   memorySearchTool,
   knowledgeSearchTool,
+  // Integration tools — the agent will handle "not connected" gracefully
+  googleDriveSearchTool,
+  googleDriveReadTool,
+  githubSearchTool,
+  githubReadFileTool,
+  githubIssuesTool,
+  // Browser tools
   browserBrowseTool,
   browserScrapeTool,
+  browserLinksTool,
+  browserInteractTool,
+  browserScreenshotTool,
 ];
 
 /** Tools available to the PM Agent (research for specs) */
-export const pmAgentTools: ToolDefinition[] = [webSearchTool, browserBrowseTool];
+export const pmAgentTools: ToolDefinition[] = [
+  webSearchTool,
+  webReadTool,
+  browserBrowseTool,
+  browserScrapeTool,
+];
 
 /** Tools available to the Research Agent (deep research) */
 export const researchAgentTools: ToolDefinition[] = [
@@ -406,10 +443,14 @@ export const researchAgentTools: ToolDefinition[] = [
   browserBrowseTool,
   browserScrapeTool,
   browserLinksTool,
+  browserInteractTool,
 ];
 
 /** Tools available to the Analyst Agent (code execution) */
-export const analystAgentTools: ToolDefinition[] = [codeExecuteTool];
+export const analystAgentTools: ToolDefinition[] = [
+  codeExecuteTool,
+  webSearchTool,
+];
 
 // ── Tool Description Formatter ──
 

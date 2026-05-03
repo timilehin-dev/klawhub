@@ -1,4 +1,4 @@
-export { getBrowser, isBrowserAvailable, getBrowserStatus, createPage, closePage } from "./client";
+export { isBrowserConfigured, getBrowserStatus, createPage } from "./client";
 export {
   browseUrl,
   browserScreenshot,

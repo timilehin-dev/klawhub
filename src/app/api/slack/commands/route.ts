@@ -112,7 +112,18 @@ export async function POST(req: NextRequest) {
 
     // Chat — use general agent
     if (classification.type === "chat") {
-      const responseText = await chatAsAgent(userId, classification.response || text);
+      // Resolve workspaceId for integration tools
+      let workspaceId: string | undefined;
+      try {
+        const { getWorkspaceByTeamId } = await import("@/lib/db");
+        const auth = await (await import("@/lib/slack/client")).slack.auth.test();
+        if (auth.team_id) {
+          const ws = await getWorkspaceByTeamId(auth.team_id);
+          if (ws && ws.length > 0) workspaceId = ws[0].id;
+        }
+      } catch { /* non-critical */ }
+
+      const responseText = await chatAsAgent(userId, classification.response || text, { workspaceId });
       return NextResponse.json({
         response_type: "in_channel",
         text: responseText,
@@ -224,11 +235,11 @@ function handleHelp(): NextResponse<unknown> {
 \`/klawhub help\` — Show this message.
 
 *What I can do:*
-:gear: **Build** — Scripts, tools, apps, automations (Python & JavaScript)
-:page_facing_up: **Document** — Reports, proposals, invoices, contracts (PDF & DOCX)
-:mag: **Research** — Web research with cited sources and deep analysis
-:chart_with_upwards_trend: **Analytics** — Data analysis, charts, visualizations
-:clock1: **Schedule** — Recurring tasks, reminders, automated reports
+:gear: *Build* — Scripts, tools, apps, automations (Python and JavaScript)
+:page_facing_up: *Document* — Reports, proposals, invoices, contracts (PDF and DOCX)
+:mag: *Research* — Web research with cited sources and deep analysis
+:chart_with_upwards_trend: *Analytics* — Data analysis, charts, visualizations
+:clock1: *Schedule* — Recurring tasks, reminders, automated reports
 
 *Tips:*
 • Mention me with @Klawhub in any channel to activate me

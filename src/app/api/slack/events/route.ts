@@ -10,6 +10,7 @@ import { createSchedule } from "@/lib/db";
 import { inngest } from "@/lib/inngest/client";
 import { extractAndStoreKnowledge } from "@/lib/tools/knowledge-extractor";
 import { ensureMember, checkUsageLimit } from "@/lib/slack/workspace";
+import { getWorkspaceByTeamId } from "@/lib/db";
 
 const processedEvents = new Set<string>();
 const MAX_DEDUP = 100;
@@ -86,6 +87,16 @@ export async function POST(req: NextRequest) {
   // Track user as workspace member (fire-and-forget, non-critical)
   ensureMember(userId).catch(() => {});
 
+  // Resolve workspaceId for integration tools (fire-and-forget)
+  let workspaceId: string | undefined;
+  try {
+    const auth = await slack.auth.test();
+    if (auth.team_id) {
+      const ws = await getWorkspaceByTeamId(auth.team_id);
+      if (ws && ws.length > 0) workspaceId = ws[0].id;
+    }
+  } catch { /* non-critical */ }
+
   try {
     // ── Thread reply detection (follow-ups) ──
     if (isThreadReply && !isMention) {
@@ -143,7 +154,7 @@ export async function POST(req: NextRequest) {
       // Thread reply — classify then handle
       const classification = await classify(text);
       if (classification.type === "chat") {
-        const responseText = await chatAsAgent(userId, text);
+        const responseText = await chatAsAgent(userId, text, { workspaceId });
         await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
         await slack.chat.postMessage({ channel: channelId, thread_ts: messageTs, text: responseText });
       }
@@ -185,7 +196,7 @@ export async function POST(req: NextRequest) {
     // CHAT — use the general agent (this is the heavy path)
     if (classification.type === "chat") {
       try { await addReaction(channelId, messageTs, "speech_balloon"); } catch { /* ok */ }
-      const responseText = await chatAsAgent(userId, text);
+      const responseText = await chatAsAgent(userId, text, { workspaceId });
       await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
       extractAndStoreKnowledge(userId, text).catch(() => {});
       await slack.chat.postMessage({ channel: channelId, thread_ts: messageTs, text: responseText });
