@@ -137,6 +137,28 @@ export const workspaceMembers = pgTable("workspace_members", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// ── Integrations: OAuth connections to external services ──
+
+export const integrations = pgTable("integrations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull().$type<"google_drive" | "github" | "notion" | "linear" | "hubspot">(),
+  status: text("status").$type<"active" | "expired" | "error" | "disconnected">().default("active").notNull(),
+  accessToken: text("access_token_encrypted").notNull(),
+  refreshToken: text("refresh_token_encrypted"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  scope: text("scope"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  externalAccountId: text("external_account_id"),
+  externalAccountName: text("external_account_name"),
+  externalAccountEmail: text("external_account_email"),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  errorCount: text("error_count").default("0").notNull(),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 // ── Intent list for classifier ──
 export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];
 

@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getProvider } from "@/lib/integrations/providers/registry";
+import { completeOAuthFlow } from "@/lib/integrations/oauth";
+import { getWorkspaceByTeamId } from "@/lib/db";
+
+// GET /api/integrations/callback/[provider]?code=xxx&state=xxx
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ provider: string }> }
+) {
+  const { provider: providerId } = await params;
+  const provider = getProvider(providerId);
+
+  if (!provider) {
+    return NextResponse.redirect(new URL(`/dashboard?error=unknown_provider`, request.url));
+  }
+
+  const { searchParams } = new URL(request.url);
+  const code = searchParams.get("code");
+  const error = searchParams.get("error");
+  const state = searchParams.get("state");
+
+  if (error) {
+    return NextResponse.redirect(
+      new URL(`/dashboard?error=${encodeURIComponent(error)}&provider=${providerId}`, request.url)
+    );
+  }
+
+  if (!code || !state) {
+    return NextResponse.redirect(
+      new URL(`/dashboard?error=missing_params&provider=${providerId}`, request.url)
+    );
+  }
+
+  const stateParts = state.split(":");
+  if (stateParts.length < 3 || stateParts[0] !== providerId) {
+    return NextResponse.redirect(
+      new URL(`/dashboard?error=invalid_state&provider=${providerId}`, request.url)
+    );
+  }
+
+  const workspaceId = stateParts[1];
+  const ws = await getWorkspaceByTeamId(workspaceId);
+  if (!ws || ws.length === 0) {
+    return NextResponse.redirect(
+      new URL(`/dashboard?error=workspace_not_found&provider=${providerId}`, request.url)
+    );
+  }
+
+  try {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const redirectUri = `${appUrl}/api/integrations/callback/${providerId}`;
+
+    await completeOAuthFlow(provider, code, redirectUri, ws[0].id);
+
+    return NextResponse.redirect(
+      new URL(
+        `/dashboard?success=integration&provider=${providerId}&name=${encodeURIComponent(provider.name)}`,
+        request.url
+      )
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "OAuth flow failed";
+    return NextResponse.redirect(
+      new URL(
+        `/dashboard?error=oauth_failed&provider=${providerId}&detail=${encodeURIComponent(message)}`,
+        request.url
+      )
+    );
+  }
+}
