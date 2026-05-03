@@ -10,13 +10,14 @@ interface ResearchEventData {
   slackUserId: string;
   messageText: string;
   taskId: string;
+  teamId?: string;
 }
 
 export const researchWorkflow = inngest.createFunction(
   { id: "research-task", name: "Research Task", retries: 2 },
   { event: "slack/research.requested" },
   async ({ event, step }): Promise<void> => {
-    const { slackChannelId, slackThreadTs, slackUserId, messageText, taskId } =
+    const { slackChannelId, slackThreadTs, slackUserId, messageText, taskId, teamId } =
       event.data as ResearchEventData;
 
     // Step 1: Conduct research
@@ -35,7 +36,9 @@ export const researchWorkflow = inngest.createFunction(
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `*Research Complete*\n\n${String(result.findings).slice(0, 3000)}\n\n*Sources:*\n${sourceList}`
+        `*Research Complete*\n\n${String(result.findings).slice(0, 3000)}\n\n*Sources:*\n${sourceList}`,
+        undefined,
+        teamId
       );
 
       // Save to memory for future context
@@ -54,9 +57,9 @@ export const researchWorkflow = inngest.createFunction(
       });
 
       try {
-        await removeReaction(slackChannelId, slackThreadTs, "mag");
+        await removeReaction(slackChannelId, slackThreadTs, "mag", teamId);
       } catch { /* ok */ }
-      await addReaction(slackChannelId, slackThreadTs, "white_check_mark");
+      await addReaction(slackChannelId, slackThreadTs, "white_check_mark", teamId);
 
       await trackSkillUsage("research", slackUserId, slackChannelId, messageText, "success");
     });

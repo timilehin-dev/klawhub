@@ -11,6 +11,7 @@ interface AnalyticsEventData {
   messageText: string;
   taskId: string;
   data?: string;
+  teamId?: string;
 }
 
 interface AnalyticsResult {
@@ -23,7 +24,7 @@ export const analyticsWorkflow = inngest.createFunction(
   { id: "analytics-task", name: "Analytics Task", retries: 2 },
   { event: "slack/analytics.requested" },
   async ({ event, step }): Promise<void> => {
-    const { slackChannelId, slackThreadTs, slackUserId, taskId } =
+    const { slackChannelId, slackThreadTs, slackUserId, taskId, teamId } =
       event.data as AnalyticsEventData;
 
     // Step 1: Run analysis
@@ -47,7 +48,8 @@ export const analyticsWorkflow = inngest.createFunction(
           slackThreadTs,
           buffer,
           chartFilename,
-          "Analysis Chart"
+          "Analysis Chart",
+          teamId
         );
       }
 
@@ -62,18 +64,21 @@ export const analyticsWorkflow = inngest.createFunction(
       });
 
       try {
-        await removeReaction(slackChannelId, slackThreadTs, "chart_with_upwards_trend");
+        await removeReaction(slackChannelId, slackThreadTs, "chart_with_upwards_trend", teamId);
       } catch { /* ok */ }
       await addReaction(
         slackChannelId,
         slackThreadTs,
-        exec.success ? "white_check_mark" : "warning"
+        exec.success ? "white_check_mark" : "warning",
+        teamId
       );
 
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `*Analysis ${exec.success ? "Complete" : "Failed"}*\n\n${String(result.insights).slice(0, 2000)}\n${exec.output_file ? "\n_Chart uploaded above._" : ""}\n_Reply in this thread for follow-up analysis._`
+        `*Analysis ${exec.success ? "Complete" : "Failed"}*\n\n${String(result.insights).slice(0, 2000)}\n${exec.output_file ? "\n_Chart uploaded above._" : ""}\n_Reply in this thread for follow-up analysis._`,
+        undefined,
+        teamId
       );
 
       await trackSkillUsage("analytics", slackUserId, slackChannelId, event.data.messageText, outcome);

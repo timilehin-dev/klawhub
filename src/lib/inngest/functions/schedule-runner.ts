@@ -1,7 +1,7 @@
 import { inngest } from "../client";
 import { getDueSchedules, markTriggered, incrementFailCount, updateSchedule } from "@/lib/db";
 import { cronMatchesNow } from "@/lib/tools/cron-match";
-import { slack, postToThread } from "@/lib/slack/client";
+import { getWorkspaceSlack, postToThread } from "@/lib/slack/client";
 import { classify } from "@/lib/agents/classifier";
 import { chatAsAgent } from "@/lib/agents/general";
 import { createRun, createTask } from "@/lib/db";
@@ -31,14 +31,16 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
 
       await step.run(`fire-${schedule.id.slice(0, 8)}`, async () => {
         const targetChannel = schedule.channelId;
+        const targetTeamId = schedule.slackTeamId || undefined;
         if (!targetChannel) {
           console.warn(`[SCHEDULER] No channel for schedule ${schedule.id}`);
           return;
         }
 
         try {
-          // Post "running" message to get a thread_ts
-          const runMsg = await slack.chat.postMessage({
+          // Post "running" message to get a thread_ts using per-workspace client
+          const wsClient = await getWorkspaceSlack(targetTeamId);
+          const runMsg = await wsClient.chat.postMessage({
             channel: targetChannel,
             text: `:clock1: *${schedule.name}*\n_Executing scheduled task..._`,
           });
@@ -52,7 +54,7 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
           if (classification.type === "chat" || classification.type === "unclear") {
             // Run through the general agent (with full tool-use)
             const response = await chatAsAgent(userId, schedule.action);
-            await postToThread(targetChannel, threadTs!, response);
+            await postToThread(targetChannel, threadTs!, response, undefined, targetTeamId);
             await updateSchedule(schedule.id, {
               lastRunStatus: "success",
               consecutiveSuccesses: (schedule.consecutiveSuccesses || 0) + 1,
@@ -73,6 +75,7 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
                 slackUserId: userId,
                 messageText: requestText,
                 runId: run.id,
+                teamId: targetTeamId,
               },
             });
             await updateSchedule(schedule.id, { lastRunStatus: "success" });
@@ -94,6 +97,7 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
                 slackUserId: userId,
                 messageText: requestText,
                 taskId: task.id,
+                teamId: targetTeamId,
               },
             });
             await updateSchedule(schedule.id, { lastRunStatus: "success" });
@@ -103,9 +107,10 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
         } catch (err) {
           console.error(`[SCHEDULER] Failed to fire ${schedule.id}:`, err);
 
-          // Try to post error message
+          // Try to post error message using per-workspace client
           try {
-            await slack.chat.postMessage({
+            const wsClient = await getWorkspaceSlack(targetTeamId);
+            await wsClient.chat.postMessage({
               channel: targetChannel,
               text: `:warning: *${schedule.name}* — Scheduled task failed: ${(err as Error).message.slice(0, 200)}`,
             });

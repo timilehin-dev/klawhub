@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
   const userId = params.get("user_id");
   const channelId = params.get("channel_id");
   const responseUrl = params.get("response_url");
+  const teamId = params.get("team_id") || undefined;
 
   if (!userId || !channelId) {
     return NextResponse.json({ ok: true });
@@ -96,7 +97,7 @@ export async function POST(req: NextRequest) {
 
     // ── Schedule creation ──
     if (/schedul|remind|cron|recurring|every|daily|weekly|monthly/i.test(sub)) {
-      return handleCreateSchedule(userId, channelId, text);
+      return handleCreateSchedule(userId, channelId, text, teamId);
     }
 
     // ── Classify and dispatch ──
@@ -117,9 +118,8 @@ export async function POST(req: NextRequest) {
       let workspaceId: string | undefined;
       try {
         const { getWorkspaceByTeamId } = await import("@/lib/db");
-        const auth = await (await import("@/lib/slack/client")).slack.auth.test();
-        if (auth.team_id) {
-          const ws = await getWorkspaceByTeamId(auth.team_id);
+        if (teamId) {
+          const ws = await getWorkspaceByTeamId(teamId);
           if (ws && ws.length > 0) workspaceId = ws[0].id;
         }
       } catch { /* non-critical */ }
@@ -182,6 +182,7 @@ export async function POST(req: NextRequest) {
           slackUserId: userId,
           messageText: requestText,
           runId: run.id,
+          teamId,
         },
       });
     } else {
@@ -205,6 +206,7 @@ export async function POST(req: NextRequest) {
           slackUserId: userId,
           messageText: requestText,
           taskId: task.id,
+          teamId,
         },
       });
     }
@@ -403,7 +405,7 @@ async function handleListSchedules(userId: string): Promise<NextResponse> {
   }
 }
 
-async function handleCreateSchedule(userId: string, channelId: string, text: string): Promise<NextResponse> {
+async function handleCreateSchedule(userId: string, channelId: string, text: string, teamId?: string): Promise<NextResponse> {
   try {
     const count = await getUserScheduleCount(userId);
     if (count >= 10) {
@@ -416,6 +418,7 @@ async function handleCreateSchedule(userId: string, channelId: string, text: str
     const parsed = await parseScheduleRequest(text);
     const [schedule] = await createSchedule({
       slackUserId: userId,
+      slackTeamId: teamId,
       name: parsed.name,
       cronExpr: parsed.cronExpr,
       timezone: parsed.timezone,

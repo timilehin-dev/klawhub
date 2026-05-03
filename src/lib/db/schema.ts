@@ -78,6 +78,7 @@ export const skillUsage = pgTable("skill_usage", {
 export const schedules = pgTable("schedules", {
   id: uuid("id").primaryKey().defaultRandom(),
   slackUserId: text("slack_user_id").notNull(),       // "system" for system-level schedules
+  slackTeamId: text("slack_team_id"),                      // workspace/team ID for multi-tenant support
   name: text("name").notNull(),
   cronExpr: text("cron_expr").notNull(),              // standard 5-field cron: "0 9 * * 1-5"
   timezone: text("timezone").default("UTC"),
@@ -111,6 +112,7 @@ export const workspaces = pgTable("workspaces", {
   id: uuid("id").primaryKey().defaultRandom(),
   slackTeamId: text("slack_team_id").notNull().unique(),   // Slack workspace/team ID
   slackBotUserId: text("slack_bot_user_id").notNull(),      // The bot's user ID in this workspace
+  botToken: text("bot_token"),                               // Workspace-specific bot token from OAuth
   name: text("name").notNull(),                              // Workspace name from Slack
   domain: text("domain"),                                    // workspace slug (e.g. "acme-corp")
   plan: text("plan").$type<"free" | "pro" | "enterprise">().default("free").notNull(),

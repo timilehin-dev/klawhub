@@ -20,13 +20,14 @@ interface DocumentEventData {
   slackUserId: string;
   messageText: string;
   taskId: string;
+  teamId?: string;
 }
 
 export const documentWorkflow = inngest.createFunction(
   { id: "document-task", name: "Document Task", retries: 2 },
   { event: "slack/document.requested" },
   async ({ event, step }): Promise<void> => {
-    const { slackChannelId, slackThreadTs, slackUserId, messageText, taskId } =
+    const { slackChannelId, slackThreadTs, slackUserId, messageText, taskId, teamId } =
       event.data as DocumentEventData;
 
     // Step 1: Build user context + generate outline
@@ -53,7 +54,8 @@ export const documentWorkflow = inngest.createFunction(
         slackChannelId,
         slackThreadTs,
         `*Document Agent* — Outline ready for review`,
-        { blocks }
+        { blocks },
+        teamId
       );
 
       return { messageTs: (msg as any).ts, blocks };
@@ -80,7 +82,8 @@ export const documentWorkflow = inngest.createFunction(
             slackChannelId,
             approval.messageTs,
             `*Document Agent* — Outline was *rejected*`,
-            { blocks: updatedBlocks }
+            { blocks: updatedBlocks },
+            teamId
           );
         }
 
@@ -88,14 +91,16 @@ export const documentWorkflow = inngest.createFunction(
         await trackSkillUsage("document", slackUserId, slackChannelId, messageText, "error");
 
         try {
-          await removeReaction(slackChannelId, slackThreadTs, "page_facing_up");
+          await removeReaction(slackChannelId, slackThreadTs, "page_facing_up", teamId);
         } catch { /* ok */ }
-        await addReaction(slackChannelId, slackThreadTs, "warning");
+        await addReaction(slackChannelId, slackThreadTs, "warning", teamId);
 
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*Document Generation Cancelled*\n\nThe outline was rejected. Send a new request to try again.`
+          `*Document Generation Cancelled*\n\nThe outline was rejected. Send a new request to try again.`,
+          undefined,
+          teamId
         );
       });
       return;
@@ -115,7 +120,8 @@ export const documentWorkflow = inngest.createFunction(
           slackChannelId,
           approval.messageTs,
           `*Document Agent* — Outline *approved*, generating full document...`,
-          { blocks: updatedBlocks }
+          { blocks: updatedBlocks },
+          teamId
         );
       }
 
@@ -131,14 +137,16 @@ export const documentWorkflow = inngest.createFunction(
         await trackSkillUsage("document", slackUserId, slackChannelId, messageText, "error");
 
         try {
-          await removeReaction(slackChannelId, slackThreadTs, "page_facing_up");
+          await removeReaction(slackChannelId, slackThreadTs, "page_facing_up", teamId);
         } catch { /* ok */ }
-        await addReaction(slackChannelId, slackThreadTs, "warning");
+        await addReaction(slackChannelId, slackThreadTs, "warning", teamId);
 
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*Document Generation Failed*\n\n${result.error || "Unknown error occurred."}\n_Reply to try again._`
+          `*Document Generation Failed*\n\n${result.error || "Unknown error occurred."}\n_Reply to try again._`,
+          undefined,
+          teamId
         );
         return;
       }
@@ -153,7 +161,8 @@ export const documentWorkflow = inngest.createFunction(
         slackThreadTs,
         buffer,
         filename,
-        result.title
+        result.title,
+        teamId
       );
 
       await updateTask(taskId, {
@@ -167,14 +176,16 @@ export const documentWorkflow = inngest.createFunction(
       });
 
       try {
-        await removeReaction(slackChannelId, slackThreadTs, "page_facing_up");
+        await removeReaction(slackChannelId, slackThreadTs, "page_facing_up", teamId);
       } catch { /* ok */ }
-      await addReaction(slackChannelId, slackThreadTs, "white_check_mark");
+      await addReaction(slackChannelId, slackThreadTs, "white_check_mark", teamId);
 
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `*Document Delivered*\n\n*${result.title}* (${result.format.toUpperCase()})\n${result.sections.length} sections — see the file above.\n_Reply in this thread for revisions._`
+        `*Document Delivered*\n\n*${result.title}* (${result.format.toUpperCase()})\n${result.sections.length} sections — see the file above.\n_Reply in this thread for revisions._`,
+        undefined,
+        teamId
       );
 
       await trackSkillUsage("document", slackUserId, slackChannelId, messageText, "success");

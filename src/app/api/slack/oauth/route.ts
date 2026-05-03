@@ -101,6 +101,7 @@ export async function GET(request: NextRequest) {
         const { updateWorkspace } = await import("@/lib/db");
         await updateWorkspace(existing[0].id, {
           slackBotUserId: botUserId,
+          botToken: data.bot_token,
           name: workspaceName,
           domain: workspaceDomain,
           isActive: true,
@@ -111,6 +112,7 @@ export async function GET(request: NextRequest) {
         const [created] = await createWorkspace({
           slackTeamId: data.team.id,
           slackBotUserId: botUserId,
+          botToken: data.bot_token,
           name: workspaceName,
           domain: workspaceDomain,
           plan: "free",

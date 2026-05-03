@@ -25,13 +25,14 @@ interface BuildEventData {
   slackUserId: string;
   messageText: string;
   runId: string;
+  teamId?: string;
 }
 
 export const buildSquadWorkflow = inngest.createFunction(
   { id: "build-squad", name: "Build Squad", retries: 2 },
   { event: "slack/build.requested" },
   async ({ event, step }): Promise<void> => {
-    const { slackChannelId, slackThreadTs, slackUserId, messageText, runId } =
+    const { slackChannelId, slackThreadTs, slackUserId, messageText, runId, teamId } =
       event.data as BuildEventData;
 
     // Step 1: PM writes spec
@@ -61,7 +62,8 @@ export const buildSquadWorkflow = inngest.createFunction(
         slackChannelId,
         slackThreadTs,
         `*PM Agent* — Specification ready for review`,
-        { blocks }
+        { blocks },
+        teamId
       );
 
       await updateRun(runId, { status: "pending_approval" });
@@ -91,7 +93,8 @@ export const buildSquadWorkflow = inngest.createFunction(
             slackChannelId,
             approval.messageTs,
             `*PM Agent* — Specification was *rejected*`,
-            { blocks: updatedBlocks }
+            { blocks: updatedBlocks },
+            teamId
           );
         }
 
@@ -115,7 +118,8 @@ export const buildSquadWorkflow = inngest.createFunction(
           slackChannelId,
           approval.messageTs,
           `*PM Agent* — Specification *approved*`,
-          { blocks: updatedBlocks }
+          { blocks: updatedBlocks },
+          teamId
         );
       }
 
@@ -127,7 +131,9 @@ export const buildSquadWorkflow = inngest.createFunction(
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `*Engineer Agent* — Code written (${specResult.language})`
+        `*Engineer Agent* — Code written (${specResult.language})`,
+        undefined,
+        teamId
       );
 
       const ext = specResult.language === "javascript" ? "js" : "py";
@@ -136,7 +142,8 @@ export const buildSquadWorkflow = inngest.createFunction(
         slackThreadTs,
         result.code,
         `build-${runId.slice(0, 8)}.${ext}`,
-        "Generated Code"
+        "Generated Code",
+        teamId
       );
 
       return result;
@@ -149,7 +156,9 @@ export const buildSquadWorkflow = inngest.createFunction(
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `*QA Agent* — Test 1\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation.slice(0, 2000)}`
+        `*QA Agent* — Test 1\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation.slice(0, 2000)}`,
+        undefined,
+        teamId
       );
       return result;
     });
@@ -165,7 +174,7 @@ export const buildSquadWorkflow = inngest.createFunction(
         const fixed = await fixCode(codeResult.code, error, specResult.spec, { runId, slackUserId });
 
         await updateRun(runId, { code: fixed.code });
-        await postToThread(slackChannelId, slackThreadTs, `*Engineer Agent* — Fixing issues...`);
+        await postToThread(slackChannelId, slackThreadTs, `*Engineer Agent* — Fixing issues...`, undefined, teamId);
 
         const ext = specResult.language === "javascript" ? "js" : "py";
         await uploadFile(
@@ -173,7 +182,8 @@ export const buildSquadWorkflow = inngest.createFunction(
           slackThreadTs,
           fixed.code,
           `build-${runId.slice(0, 8)}-fixed.${ext}`,
-          "Fixed Code"
+          "Fixed Code",
+          teamId
         );
         return fixed;
       });
@@ -187,7 +197,9 @@ export const buildSquadWorkflow = inngest.createFunction(
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*QA Agent* — Test 2\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation.slice(0, 2000)}`
+          `*QA Agent* — Test 2\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation.slice(0, 2000)}`,
+          undefined,
+          teamId
         );
         return result;
       });
@@ -209,12 +221,13 @@ export const buildSquadWorkflow = inngest.createFunction(
       });
 
       try {
-        await removeReaction(slackChannelId, slackThreadTs, "gear");
+        await removeReaction(slackChannelId, slackThreadTs, "gear", teamId);
       } catch { /* ok */ }
       await addReaction(
         slackChannelId,
         slackThreadTs,
-        finalTest.passed ? "white_check_mark" : "warning"
+        finalTest.passed ? "white_check_mark" : "warning",
+        teamId
       );
 
       const deliverBlocks = finalTest.passed
@@ -227,7 +240,8 @@ export const buildSquadWorkflow = inngest.createFunction(
         finalTest.passed
           ? `*Build Squad — Delivered*\n\nYour tool is ready and tested. Check the files above.\n_Reply in this thread if you need changes._`
           : `*Build Squad — Delivered with Issues*\n\nQA flagged issues. Check the output above.`,
-        finalTest.passed ? undefined : { blocks: deliverBlocks }
+        finalTest.passed ? undefined : { blocks: deliverBlocks },
+        teamId
       );
 
       await trackSkillUsage(
