@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
           const pendingRun = threadRun[0];
           if (pendingRun.status === "pending_approval") {
             await inngest.send({
-              name: "app/approval.decided",
+              name: `app/build.approval/${pendingRun.id}`,
               data: { referenceId: pendingRun.id, decision, userId },
             });
             await postToThread(channelId, messageTs, `:${isApproval ? "white_check_mark" : "x"}: *${decision === "approved" ? "Approved" : "Rejected"}* by <@${userId}>. ${isApproval ? "Engineer Agent is now coding..." : "Build cancelled."}`, undefined, teamId);
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
           const pendingTask = threadTask[0];
           if (pendingTask.status === "pending_approval") {
             await inngest.send({
-              name: "app/approval.decided",
+              name: `app/doc.approval/${pendingTask.id}`,
               data: { referenceId: pendingTask.id, decision, userId },
             });
             await postToThread(channelId, messageTs, `:${isApproval ? "white_check_mark" : "x"}: *${decision === "approved" ? "Approved" : "Rejected"}* by <@${userId}>. ${isApproval ? "Generating full document..." : "Document generation cancelled."}`, undefined, teamId);

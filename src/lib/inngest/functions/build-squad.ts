@@ -74,10 +74,10 @@ export const buildSquadWorkflow = inngest.createFunction(
     });
 
     // Step 3: Wait for approve/reject event (24h timeout)
+    // Use a run-specific event name so this step only matches its own approval
     const decision = await step.waitForEvent("wait-for-build-approval", {
-      event: "app/approval.decided",
+      event: `app/build.approval/${runId}`,
       timeout: "24h",
-      match: (event: { data: { referenceId: string } }) => event.data.referenceId === runId,
     });
 
     if (!decision || decision.data.decision === "rejected") {

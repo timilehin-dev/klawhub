@@ -186,14 +186,14 @@ export async function POST(req: NextRequest) {
       // ── Build spec approval ──
       if (action.action_id === "build_spec_approve" && action.value) {
         await inngest.send({
-          name: "app/approval.decided",
+          name: `app/build.approval/${action.value}`,
           data: { referenceId: action.value, decision: "approved", userId },
         });
         continue;
       }
       if (action.action_id === "build_spec_reject" && action.value) {
         await inngest.send({
-          name: "app/approval.decided",
+          name: `app/build.approval/${action.value}`,
           data: { referenceId: action.value, decision: "rejected", userId },
         });
         continue;
@@ -202,14 +202,14 @@ export async function POST(req: NextRequest) {
       // ── Document outline approval ──
       if (action.action_id === "doc_outline_approve" && action.value) {
         await inngest.send({
-          name: "app/approval.decided",
+          name: `app/doc.approval/${action.value}`,
           data: { referenceId: action.value, decision: "approved", userId },
         });
         continue;
       }
       if (action.action_id === "doc_outline_reject" && action.value) {
         await inngest.send({
-          name: "app/approval.decided",
+          name: `app/doc.approval/${action.value}`,
           data: { referenceId: action.value, decision: "rejected", userId },
         });
         continue;

@@ -62,10 +62,10 @@ export const documentWorkflow = inngest.createFunction(
     });
 
     // Step 3: Wait for approve/reject (24h timeout)
+    // Use a task-specific event name so this step only matches its own approval
     const decision = await step.waitForEvent("wait-for-doc-approval", {
-      event: "app/approval.decided",
+      event: `app/doc.approval/${taskId}`,
       timeout: "24h",
-      match: (event: { data: { referenceId: string } }) => event.data.referenceId === taskId,
     });
 
     if (!decision || decision.data.decision === "rejected") {
