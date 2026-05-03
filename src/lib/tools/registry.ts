@@ -8,7 +8,6 @@ import {
 } from "@/lib/db";
 import {
   searchKnowledge,
-  buildKnowledgeContext,
 } from "@/lib/db/knowledge";
 
 // ── Tool Types ──
@@ -177,9 +176,17 @@ const knowledgeSearchTool: ToolDefinition = {
   },
   async execute(params, ctx) {
     if (!ctx.slackUserId) return "Cannot search knowledge: no user context.";
-    const context = await buildKnowledgeContext(ctx.slackUserId);
-    if (!context) return "No knowledge entries found.";
-    return context;
+    const results = await searchKnowledge(ctx.slackUserId, params.query);
+    if (results.length === 0) return "No knowledge entries found matching your query.";
+    return results
+      .map((k: any) => {
+        const dataStr = Object.entries(k.data as Record<string, unknown>)
+          .filter(([, v]) => v !== null && v !== undefined)
+          .map(([key, val]) => `${key}: ${val}`)
+          .join(", ");
+        return `[${k.entityType}] ${k.entityName}: ${dataStr}`;
+      })
+      .join("\n");
   },
 };
 

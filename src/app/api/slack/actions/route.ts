@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack/verify";
 import { inngest } from "@/lib/inngest/client";
 import { createRun, createTask } from "@/lib/db";
-import { slack, updateMessage } from "@/lib/slack/client";
-import {
-  replaceActionsWithDecision,
-} from "@/lib/slack/blocks";
+import { slack } from "@/lib/slack/client";
 
 export async function POST(req: NextRequest) {
   const body = await req.text();

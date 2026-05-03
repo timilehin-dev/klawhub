@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProvider } from "@/lib/integrations/providers/registry";
 import { completeOAuthFlow } from "@/lib/integrations/oauth";
-import { getWorkspaceByTeamId } from "@/lib/db";
+import { getWorkspaceById } from "@/lib/db";
 
 // GET /api/integrations/callback/[provider]?code=xxx&state=xxx
 export async function GET(
@@ -40,7 +40,7 @@ export async function GET(
   }
 
   const workspaceId = stateParts[1];
-  const ws = await getWorkspaceByTeamId(workspaceId);
+  const ws = await getWorkspaceById(workspaceId);
   if (!ws || ws.length === 0) {
     return NextResponse.redirect(
       new URL(`/dashboard?error=workspace_not_found&provider=${providerId}`, request.url)
@@ -61,9 +61,10 @@ export async function GET(
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "OAuth flow failed";
+    console.error(`[INTEGRATIONS] OAuth callback failed for ${providerId}:`, message);
     return NextResponse.redirect(
       new URL(
-        `/dashboard?error=oauth_failed&provider=${providerId}&detail=${encodeURIComponent(message)}`,
+        `/dashboard?error=oauth_failed&provider=${providerId}`,
         request.url
       )
     );

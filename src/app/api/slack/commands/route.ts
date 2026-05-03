@@ -20,6 +20,7 @@ import { memoryForget } from "@/lib/tools/memory";
 import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
 import { createSchedule } from "@/lib/db";
 import { inngest } from "@/lib/inngest/client";
+import { checkUsageLimit } from "@/lib/slack/workspace";
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -140,6 +141,15 @@ export async function POST(req: NextRequest) {
 
     const requestText = classification.extractedRequest || text;
 
+    // Usage limit check before dispatching any task (matches events route behavior)
+    const limitCheck = await checkUsageLimit(teamId);
+    if (limitCheck && !limitCheck.allowed) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: `:warning: *Usage limit reached.* You've used ${limitCheck.used}/${limitCheck.limit} agent runs this month. Upgrade your plan at https://klawhub.com/pricing to get more runs.`,
+      });
+    }
+
     // Post initial message via response_url to get a thread_ts
     let threadTs: string | undefined;
 
@@ -223,11 +233,6 @@ export async function POST(req: NextRequest) {
       response_type: "ephemeral",
       text: `Got it! Processing your request. Updates will appear in this channel.`,
     });
-  }
-
-  // ── /klawhub-status ──
-  if (command === "/klawhub-status") {
-    return handleStatus(userId);
   }
 
   return NextResponse.json({ ok: true });

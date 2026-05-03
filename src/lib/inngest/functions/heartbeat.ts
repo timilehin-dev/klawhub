@@ -2,7 +2,7 @@ import { inngest } from "../client";
 import { getDb } from "@/lib/db/connection";
 import { workspaces, workspaceMembers, integrations } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { slack } from "@/lib/slack/client";
+import { getWorkspaceSlack } from "@/lib/slack/client";
 
 /**
  * Heartbeat workflow — runs every 30 minutes.
@@ -125,8 +125,11 @@ export const heartbeatWorkflow = inngest.createFunction(
               return; // Skip — already posted recently
             }
 
+            // Use workspace-specific Slack client
+            const wsSlack = await getWorkspaceSlack(workspace.slackTeamId);
+
             // Find channels where the bot is a member
-            const channels = await slack.conversations.list({
+            const channels = await wsSlack.conversations.list({
               types: "public_channel,private_channel",
               exclude_archived: true,
               limit: 100,
@@ -142,7 +145,7 @@ export const heartbeatWorkflow = inngest.createFunction(
             // (In future, could be configurable per workspace)
             const message = `:pulse: *Klawhub Heartbeat* — ${workspace.name}\n\n${updates.join("\n\n")}\n\n_I monitor your integrations every 30 minutes. Reply with any questions._`;
 
-            await slack.chat.postMessage({
+            await wsSlack.chat.postMessage({
               channel: memberChannels[0],
               text: message,
             });

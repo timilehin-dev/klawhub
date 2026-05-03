@@ -165,9 +165,10 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[OAUTH] Installation failed:", message);
     return NextResponse.redirect(
       new URL(
-        `/install?error=server_error&detail=${encodeURIComponent(message)}`,
+        `/install?error=server_error`,
         request.url
       )
     );

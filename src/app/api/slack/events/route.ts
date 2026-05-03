@@ -310,6 +310,13 @@ export async function POST(req: NextRequest) {
     // ── Task dispatches (lightweight — just DB insert + Inngest event) ──
     const requestText = classification.extractedRequest || text;
 
+    // Usage limit check (chat/unclear don't count toward limits)
+    const limitCheck = await checkUsageLimit(teamId);
+    if (limitCheck && !limitCheck.allowed) {
+      await postToThread(channelId, messageTs, `:warning: *Usage limit reached.*\nYou've used ${limitCheck.used}/${limitCheck.limit} agent runs this month. Upgrade your plan at https://klawhub.com/pricing to get more runs.`, undefined, teamId);
+      return NextResponse.json({ ok: true });
+    }
+
     // Extract knowledge from substantive messages (fire-and-forget with logging)
     extractAndStoreKnowledge(userId, text).then((stored) => {
       if (stored > 0) console.log(`[EVENTS] Knowledge: stored ${stored} entities for ${userId}`);
@@ -326,13 +333,6 @@ export async function POST(req: NextRequest) {
       }
     } catch (err: unknown) {
       console.error("[EVENTS] trackSkillUsage failed:", err instanceof Error ? err.message : err);
-    }
-
-    // Usage limit check (chat/unclear don't count toward limits)
-    const limitCheck = await checkUsageLimit(teamId);
-    if (limitCheck && !limitCheck.allowed) {
-      await postToThread(channelId, messageTs, `:warning: *Usage limit reached.*\nYou've used ${limitCheck.used}/${limitCheck.limit} agent runs this month. Upgrade your plan at https://klawhub.com/pricing to get more runs.`, undefined, teamId);
-      return NextResponse.json({ ok: true });
     }
 
     if (classification.type === "build") {

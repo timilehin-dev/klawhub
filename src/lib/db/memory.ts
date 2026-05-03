@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { memory } from "./schema";
-import { eq, ilike, and, desc, sql, count } from "drizzle-orm";
+import { eq, ilike, and, desc, sql, count, inArray } from "drizzle-orm";
 
 /** Maximum memories per user per category to keep things lean. */
 const MAX_MEMORIES_PER_CATEGORY = 20;
@@ -45,7 +45,7 @@ export function pruneOldMemories(slackUserId: string, daysOld = 30) {
     .where(
       and(
         eq(memory.slackUserId, slackUserId),
-        sql`${memory.createdAt} < now() - interval '${sql.raw(String(daysOld))} days'`
+        sql`${memory.createdAt} < now() - make_interval(days => ${daysOld})`
       )
     );
 }
@@ -86,7 +86,7 @@ export async function autoPruneMemory(slackUserId: string, category: string) {
         const ids = toDelete.map((r) => r.id);
         await getDb()
           .delete(memory)
-          .where(sql`${memory.id} IN ${sql.raw(`(${ids.map((id) => `'${id}'`).join(",")})`)}`);
+          .where(inArray(memory.id, ids));
       }
     }
   } catch {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProvider } from "@/lib/integrations/providers/registry";
 import { buildAuthUrl } from "@/lib/integrations/oauth";
-import { getWorkspaceByTeamId } from "@/lib/db";
+import { getWorkspaceById } from "@/lib/db";
 
 // GET /api/integrations/connect/[provider]?workspaceId=xxx
 export async function GET(
@@ -22,10 +22,13 @@ export async function GET(
     return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
   }
 
-  const ws = await getWorkspaceByTeamId(workspaceId);
+  const ws = await getWorkspaceById(workspaceId);
   if (!ws || ws.length === 0) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
   }
+
+  // Pass the workspace UUID (not teamId) for integration storage
+  const workspaceUuid = ws[0].id;
 
   try {
     const { getProviderCredentials } = await import("@/lib/integrations/providers/registry");
@@ -36,7 +39,7 @@ export async function GET(
   }
 
   const nonce = crypto.randomUUID().slice(0, 8);
-  const state = `${providerId}:${workspaceId}:${nonce}`;
+  const state = `${providerId}:${workspaceUuid}:${nonce}`;
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const redirectUri = `${appUrl}/api/integrations/callback/${providerId}`;

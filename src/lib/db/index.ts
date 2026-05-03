@@ -1,6 +1,6 @@
 export { getDb } from "./connection";
 export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs, workspaces, workspaceMembers, integrations } from "./schema";
-export { createRun, updateRun, getRun, getRunByThreadTs, getRecentRuns } from "./runs";
+export { createRun, updateRun, getRunByThreadTs, getRecentRuns } from "./runs";
 export { createTask, updateTask, getRecentTasks, getTaskByThreadTs } from "./tasks";
 export {
   saveMemory,
@@ -26,9 +26,7 @@ export {
 } from "./schedules";
 export {
   upsertKnowledge,
-  getKnowledge,
   searchKnowledge,
-  deleteKnowledge,
   getAllKnowledge,
   buildKnowledgeContext,
 } from "./knowledge";
