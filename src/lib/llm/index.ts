@@ -1,1 +1,1 @@
-export { llm } from "./client";
+export { llm, agentChat, agentChatWithUsage } from "./client";

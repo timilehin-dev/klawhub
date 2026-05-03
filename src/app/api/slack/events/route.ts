@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
         const threadRuns = await getRun(threadTs).catch(() => null);
         if (Array.isArray(threadRuns) && threadRuns.length > 0) {
           const pendingRun = threadRuns.find(
-            (r: { slackThreadTs?: string; status?: string }) =>
+            (r) =>
               r.slackThreadTs === threadTs && r.status === "pending_approval"
           );
           if (pendingRun) {
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
         const threadTasks = await getRecentTasks(userId, 5).catch(() => null);
         if (Array.isArray(threadTasks) && threadTasks.length > 0) {
           const pendingTask = threadTasks.find(
-            (t: { slackThreadTs?: string; status?: string }) =>
+            (t) =>
               t.slackThreadTs === threadTs && t.status === "pending_approval"
           );
           if (pendingTask) {
