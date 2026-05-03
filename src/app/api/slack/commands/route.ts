@@ -167,8 +167,8 @@ export async function POST(req: NextRequest) {
       // Track skill usage at dispatch (await to ensure DB write)
       try {
         await trackSkillUsage("build", userId, channelId, requestText, "attempted");
-      } catch (err) {
-        console.error("[COMMANDS] trackSkillUsage (build) failed:", err?.message || err);
+      } catch (err: unknown) {
+        console.error("[COMMANDS] trackSkillUsage (build) failed:", err instanceof Error ? err.message : err);
       }
 
       const [run] = await createRun({
@@ -194,8 +194,8 @@ export async function POST(req: NextRequest) {
       // Track skill usage at dispatch (await to ensure DB write)
       try {
         await trackSkillUsage(taskType, userId, channelId, requestText, "attempted");
-      } catch (err) {
-        console.error("[COMMANDS] trackSkillUsage (task) failed:", err?.message || err);
+      } catch (err: unknown) {
+        console.error("[COMMANDS] trackSkillUsage (task) failed:", err instanceof Error ? err.message : err);
       }
 
       const [task] = await createTask({

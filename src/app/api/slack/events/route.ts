@@ -283,8 +283,8 @@ export async function POST(req: NextRequest) {
       } else if (["document", "research", "analytics"].includes(classification.type)) {
         await trackSkillUsage(classification.type, userId, channelId, requestText, "attempted");
       }
-    } catch (err) {
-      console.error("[EVENTS] trackSkillUsage failed:", err?.message || err);
+    } catch (err: unknown) {
+      console.error("[EVENTS] trackSkillUsage failed:", err instanceof Error ? err.message : err);
     }
 
     // Usage limit check (chat/unclear don't count toward limits)
