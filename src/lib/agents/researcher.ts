@@ -70,7 +70,7 @@ export async function conductResearch(topic: string) {
     },
   ];
 
-  const findings = await llm.chat(synthMessages, { temperature: 0.4, maxTokens: 6000 });
+  const findings = await llm.chat(synthMessages, { temperature: 0.4, maxTokens: 131072 });
 
   return {
     findings,

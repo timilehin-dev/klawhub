@@ -17,7 +17,7 @@ export async function writeCode(spec: string, language: string) {
     { role: "system" as const, content: ENGINEER_PROMPT },
     { role: "user" as const, content: `Language: ${language}\n\nSpecification:\n${spec}` },
   ];
-  const response = await llm.chat(messages, { temperature: 0.3, maxTokens: 4096 });
+  const response = await llm.chat(messages, { temperature: 0.3, maxTokens: 131072 });
   const codeMatch = response.match(/```(?:\w+)?\n?([\s\S]*?)```/);
   return { code: codeMatch?.[1]?.trim() || response.trim() };
 }
@@ -30,7 +30,7 @@ export async function fixCode(code: string, error: string, spec: string) {
       content: `Fix this code to resolve the error.\n\nSpec:\n${spec}\n\nCurrent code:\n${code}\n\nError:\n${error}\n\nReturn ONLY the corrected code inside a code block.`,
     },
   ];
-  const response = await llm.chat(messages, { temperature: 0.3, maxTokens: 4096 });
+  const response = await llm.chat(messages, { temperature: 0.3, maxTokens: 131072 });
   const codeMatch = response.match(/```(?:\w+)?\n?([\s\S]*?)```/);
   return { code: codeMatch?.[1]?.trim() || response.trim() };
 }

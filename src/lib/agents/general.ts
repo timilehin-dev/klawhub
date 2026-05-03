@@ -106,5 +106,5 @@ export async function chatAsAgent(
     { role: "user" as const, content: userMessage },
   ];
 
-  return llm.chat(messages, { temperature: 0.7, maxTokens: 8192 });
+  return llm.chat(messages, { temperature: 0.7, maxTokens: 131072 });
 }

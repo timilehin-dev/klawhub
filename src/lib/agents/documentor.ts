@@ -55,7 +55,7 @@ export async function generateDocument(request: string, userContext = "") {
     { role: "user" as const, content: request + contextNote },
   ];
 
-  const response = await llm.chat(messages, { temperature: 0.4, maxTokens: 6000 });
+  const response = await llm.chat(messages, { temperature: 0.4, maxTokens: 131072 });
 
   const docStructure = safeJsonParse(response);
   if (!docStructure || !docStructure.sections || !docStructure.title) {
@@ -106,7 +106,7 @@ Keep section bodies brief (summaries, not full content). The user will approve t
     { role: "user" as const, content: request + contextNote },
   ];
 
-  const response = await llm.chat(messages, { temperature: 0.4, maxTokens: 3000 });
+  const response = await llm.chat(messages, { temperature: 0.4, maxTokens: 131072 });
   const outline = safeJsonParse(response);
 
   if (!outline || !outline.title || !outline.sections) {
