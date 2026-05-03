@@ -49,3 +49,56 @@ Stage Summary:
 - Viktor competitive analysis complete
 - DB state documented — prototype was tested but async pipeline never ran in production
 - Development phases planned and ready for approval
+
+---
+Task ID: 4
+Agent: Main Agent (Z-Agent)
+Task: Phase 1 — Tool-Use Architecture, Usage Tracking, Schedule Fix
+
+Work Log:
+- Created .env.local with Inngest signing/event keys
+- Updated .env.local.example with future multi-provider LLM vars and usage tracking vars
+- Applied DB migrations to Supabase:
+  - Created usage_logs table (14 columns, 3 indexes)
+  - Added last_run_status and consecutive_successes columns to schedules table
+- Refactored LLM client (src/lib/llm/client.ts):
+  - Added chatWithUsage() method that captures token counts from Ollama API response
+  - Non-blocking usage logging on every LLM call (success and failure)
+  - Returns { content, usage } for callers that need token data
+- Created src/lib/db/usage.ts — usage tracking DB operations:
+  - logUsage(), getUsageStats(), getRecentUsageLogs(), getAgentUsageBreakdown()
+- Created src/lib/tools/registry.ts — tool definition system:
+  - 6 tools: web_search, web_read, code_execute, memory_save, memory_search, knowledge_search
+  - ToolContext for passing user/run/task IDs
+  - Pre-configured tool sets: generalAgentTools, pmAgentTools, researchAgentTools, analystAgentTools
+  - formatToolDescriptions() for system prompt injection
+- Created src/lib/tools/executor.ts — tool-use execution loop:
+  - Parses [TOOL:name]{params}[/TOOL] blocks from LLM responses
+  - Parallel tool execution when multiple tools are called
+  - Iterative loop with configurable max iterations
+  - Graceful final summary when max iterations reached
+- Upgraded src/lib/agents/general.ts:
+  - Full tool-use loop with web_search, web_read, memory_save, memory_search, knowledge_search
+  - Agent can dynamically use tools during conversation
+- Upgraded src/lib/agents/researcher.ts:
+  - Replaced hardcoded 3-search logic with adaptive tool-use loop
+  - Agent decides how many searches/reads to do based on findings
+- Upgraded src/lib/agents/pm.ts:
+  - PM can now use web_search during spec research
+  - More accurate specs with real API/library references
+- Fixed src/lib/inngest/functions/schedule-runner.ts:
+  - Schedules now classify the action and execute through the FULL agent pipeline
+  - CHAT → General Agent, BUILD → Build Squad, RESEARCH/DOCUMENT/ANALYTICS → respective workflows
+  - Error reporting to channel on failures
+- Updated src/lib/db/index.ts — exported new usage module
+- TypeScript compilation: 0 errors
+- Pushed to GitHub: commit c99e8c6 on main (13 files, 727 insertions, 129 deletions)
+
+Stage Summary:
+- Phase 1 complete. All 13 files modified/created, pushed to GitHub.
+- Tool-use architecture: 6 registered tools, 3 agents upgraded (general, PM, researcher)
+- Schedule runner: Now executes through the full agent pipeline (was just posting text)
+- Usage tracking: Every LLM call logged with tokens, duration, errors
+- DB: usage_logs table created, schedules table enhanced with status tracking
+- Foundation laid for multi-provider LLM routing (Ollama-only for now)
+- Zero dead code — all features fully wired end-to-end
