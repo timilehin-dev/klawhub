@@ -121,7 +121,7 @@ export const buildSquadWorkflow = inngest.createFunction(
 
       await updateRun(runId, { status: "coding" });
 
-      const result = await writeCode(specResult.spec, specResult.language);
+      const result = await writeCode(specResult.spec, specResult.language, { runId, slackUserId });
       await updateRun(runId, { code: result.code });
 
       await postToThread(
@@ -144,7 +144,7 @@ export const buildSquadWorkflow = inngest.createFunction(
 
     // Step 5: QA Test 1
     const test1 = await step.run("qa-test-1", async () => {
-      const result = await testCode(codeResult.code, specResult.language, specResult.spec);
+      const result = await testCode(codeResult.code, specResult.language, specResult.spec, { runId, slackUserId });
 
       await postToThread(
         slackChannelId,
@@ -162,7 +162,7 @@ export const buildSquadWorkflow = inngest.createFunction(
       const fixResult = await step.run("engineer-fix", async () => {
         const exec = test1.execution as SandboxResponse;
         const error = exec.stderr || exec.error || test1.evaluation;
-        const fixed = await fixCode(codeResult.code, error, specResult.spec);
+        const fixed = await fixCode(codeResult.code, error, specResult.spec, { runId, slackUserId });
 
         await updateRun(runId, { code: fixed.code });
         await postToThread(slackChannelId, slackThreadTs, `*Engineer Agent* — Fixing issues...`);
@@ -182,7 +182,7 @@ export const buildSquadWorkflow = inngest.createFunction(
 
       // Step 7: QA Test 2
       finalTest = await step.run("qa-test-2", async () => {
-        const result = await testCode(finalCode, specResult.language, specResult.spec);
+        const result = await testCode(finalCode, specResult.language, specResult.spec, { runId, slackUserId });
 
         await postToThread(
           slackChannelId,

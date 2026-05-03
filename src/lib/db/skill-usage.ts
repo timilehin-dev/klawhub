@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { skillUsage } from "./schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql, count } from "drizzle-orm";
 
 export function trackSkillUsage(
   skillName: string,
@@ -22,10 +22,10 @@ export function getUserSkillStats(slackUserId: string) {
   return getDb()
     .select({
       skillName: skillUsage.skillName,
-      count: skillUsage.id,
+      count: count(),
     })
     .from(skillUsage)
     .where(eq(skillUsage.slackUserId, slackUserId))
     .groupBy(skillUsage.skillName)
-    .orderBy(desc(skillUsage.createdAt));
+    .orderBy(desc(count()));
 }

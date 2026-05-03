@@ -1,4 +1,4 @@
-import { llm } from "@/lib/llm";
+import { agentChat } from "@/lib/llm";
 
 const ENGINEER_PROMPT = `You are the Engineer Agent of Klawhub. You write production-quality working code.
 
@@ -12,17 +12,17 @@ RULES:
 7. Return ONLY the code inside a markdown code block.
 8. Include a brief comment at the top explaining what the script does.`;
 
-export async function writeCode(spec: string, language: string) {
+export async function writeCode(spec: string, language: string, meta?: { runId?: string; slackUserId?: string }) {
   const messages = [
     { role: "system" as const, content: ENGINEER_PROMPT },
     { role: "user" as const, content: `Language: ${language}\n\nSpecification:\n${spec}` },
   ];
-  const response = await llm.chat(messages, { temperature: 0.3, maxTokens: 131072 });
+  const response = await agentChat("engineer", messages, { temperature: 0.3, maxTokens: 131072 }, meta);
   const codeMatch = response.match(/```(?:\w+)?\n?([\s\S]*?)```/);
   return { code: codeMatch?.[1]?.trim() || response.trim() };
 }
 
-export async function fixCode(code: string, error: string, spec: string) {
+export async function fixCode(code: string, error: string, spec: string, meta?: { runId?: string; slackUserId?: string }) {
   const messages = [
     { role: "system" as const, content: ENGINEER_PROMPT },
     {
@@ -30,7 +30,7 @@ export async function fixCode(code: string, error: string, spec: string) {
       content: `Fix this code to resolve the error.\n\nSpec:\n${spec}\n\nCurrent code:\n${code}\n\nError:\n${error}\n\nReturn ONLY the corrected code inside a code block.`,
     },
   ];
-  const response = await llm.chat(messages, { temperature: 0.3, maxTokens: 131072 });
+  const response = await agentChat("engineer", messages, { temperature: 0.3, maxTokens: 131072 }, meta);
   const codeMatch = response.match(/```(?:\w+)?\n?([\s\S]*?)```/);
   return { code: codeMatch?.[1]?.trim() || response.trim() };
 }

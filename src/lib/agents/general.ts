@@ -180,5 +180,6 @@ export async function chatAsAgent(
     context: toolContext,
     maxIterations: 6,
     temperature: 0.7,
+    agentName: "general",
   });
 }

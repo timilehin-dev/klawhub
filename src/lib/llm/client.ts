@@ -139,3 +139,36 @@ class LLMClient {
 }
 
 export const llm = new LLMClient();
+
+/**
+ * Helper: wrap chat() calls with agent name for usage logging.
+ * All agents should use this instead of calling llm.chat() directly
+ * so that usage logs record the correct agent_name.
+ */
+export async function agentChat(
+  agentName: string,
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  options: { temperature?: number; maxTokens?: number } = {},
+  meta?: { slackUserId?: string; runId?: string; taskId?: string }
+): Promise<string> {
+  return llm.chatWithUsage(messages, options, {
+    agentName,
+    slackUserId: meta?.slackUserId,
+    runId: meta?.runId,
+    taskId: meta?.taskId,
+  }).then((r) => r.content);
+}
+
+export async function agentChatWithUsage(
+  agentName: string,
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  options: { temperature?: number; maxTokens?: number } = {},
+  meta?: { slackUserId?: string; runId?: string; taskId?: string }
+) {
+  return llm.chatWithUsage(messages, options, {
+    agentName,
+    slackUserId: meta?.slackUserId,
+    runId: meta?.runId,
+    taskId: meta?.taskId,
+  });
+}

@@ -1,4 +1,4 @@
-import { llm } from "@/lib/llm";
+import { agentChat } from "@/lib/llm";
 import { sandbox } from "@/lib/tools/sandbox";
 
 const QA_PROMPT = `You are the QA Agent of Klawhub. You evaluate code ruthlessly against the specification.
@@ -15,7 +15,7 @@ VERDICT: <PASS or FAIL>
 REASON: <concise explanation>
 OUTPUT: <what the code produced>`;
 
-export async function testCode(code: string, language: string, spec: string) {
+export async function testCode(code: string, language: string, spec: string, meta?: { runId?: string; slackUserId?: string }) {
   const execution = await sandbox({ type: "code", code, language });
 
   const messages = [
@@ -26,7 +26,7 @@ export async function testCode(code: string, language: string, spec: string) {
     },
   ];
 
-  const evaluation = await llm.chat(messages, { temperature: 0.3, maxTokens: 500 });
+  const evaluation = await agentChat("qa", messages, { temperature: 0.3, maxTokens: 500 }, meta);
 
   const verdictMatch = evaluation.match(/VERDICT:\s*(PASS|FAIL)/i);
   const passed = verdictMatch?.[1]?.toUpperCase() === "PASS" && execution.success;

@@ -1,4 +1,4 @@
-import { llm } from "@/lib/llm";
+import { agentChat } from "@/lib/llm";
 import {
   type ToolDefinition,
   type ToolCall,
@@ -51,6 +51,8 @@ export interface ToolUseOptions {
   maxTokens?: number;
   temperature?: number;
   onToolCall?: (call: ToolCall, result: string) => void;
+  /** Agent name for usage logging (defaults to "tool-executor") */
+  agentName?: string;
 }
 
 /**
@@ -69,6 +71,7 @@ export async function runToolUseLoop(
     maxTokens = 131072,
     temperature = 0.7,
     onToolCall,
+    agentName = "tool-executor",
   } = options;
 
   const toolMap = new Map(tools.map((t) => [t.name, t]));
@@ -83,7 +86,11 @@ export async function runToolUseLoop(
 
   while (iterations < maxIterations) {
     iterations++;
-    const response = await llm.chat(messages, { temperature, maxTokens });
+    const response = await agentChat(agentName, messages, { temperature, maxTokens }, {
+      slackUserId: context.slackUserId,
+      runId: context.runId,
+      taskId: context.taskId,
+    });
 
     const toolCalls = parseToolCalls(response);
 
@@ -129,6 +136,10 @@ export async function runToolUseLoop(
       "You've used the maximum number of tool calls. Please provide your final answer based on the information gathered so far.",
   });
 
-  const finalResponse = await llm.chat(messages, { temperature, maxTokens });
+  const finalResponse = await agentChat(agentName, messages, { temperature, maxTokens }, {
+    slackUserId: context.slackUserId,
+    runId: context.runId,
+    taskId: context.taskId,
+  });
   return stripToolCalls(finalResponse) || finalResponse;
 }

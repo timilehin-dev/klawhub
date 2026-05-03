@@ -9,8 +9,9 @@ import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
 import { createSchedule } from "@/lib/db";
 import { inngest } from "@/lib/inngest/client";
 import { extractAndStoreKnowledge } from "@/lib/tools/knowledge-extractor";
-import { ensureMember, checkUsageLimit } from "@/lib/slack/workspace";
+import { ensureMember, checkUsageLimit, ensureWorkspaceExists } from "@/lib/slack/workspace";
 import { getWorkspaceByTeamId } from "@/lib/db";
+import { trackSkillUsage } from "@/lib/db";
 
 const processedEvents = new Set<string>();
 const MAX_DEDUP = 100;
@@ -25,6 +26,16 @@ const FOLLOWUP_PATTERNS = [
 const SCHEDULE_PATTERNS = [
   /\b(schedul|remind|cron|recurring|every|daily|weekly|monthly)\b/i,
   /\b(set up|create|add)\s+(a\s+)?(schedul|remind|cron|alert)/i,
+];
+
+const APPROVAL_PATTERNS = [
+  /^\s*(approve|yes|ok|go ahead|looks good|proceed|accepted|ship it|do it|lgtm)\s*$/i,
+  /^\s*\+1\s*$/,
+];
+
+const REJECTION_PATTERNS = [
+  /^\s*(reject|no|cancel|stop|don't|do not|decline|nay)\s*$/i,
+  /^\s*-1\s*$/,
 ];
 
 export async function POST(req: NextRequest) {
@@ -84,8 +95,9 @@ export async function POST(req: NextRequest) {
   // Immediate reaction so user sees the bot is alive (fire-and-forget)
   addReaction(channelId, messageTs, "eyes").catch(() => {});
 
-  // Track user as workspace member (fire-and-forget, non-critical)
+  // Track user as workspace member + ensure workspace exists (fire-and-forget, non-critical)
   ensureMember(userId).catch(() => {});
+  ensureWorkspaceExists().catch(() => {});
 
   // Resolve workspaceId for integration tools (fire-and-forget)
   let workspaceId: string | undefined;
@@ -98,8 +110,58 @@ export async function POST(req: NextRequest) {
   } catch { /* non-critical */ }
 
   try {
-    // ── Thread reply detection (follow-ups) ──
+    // ── Thread reply detection ──
     if (isThreadReply && !isMention) {
+      // Check for approve/reject patterns first (for pending_approval runs/tasks)
+      const isApproval = APPROVAL_PATTERNS.some((p) => p.test(text));
+      const isRejection = REJECTION_PATTERNS.some((p) => p.test(text));
+
+      if (isApproval || isRejection) {
+        const decision = isApproval ? "approved" : "rejected";
+
+        // Check for pending_approval runs in this thread
+        const threadRuns = await getRun(threadTs).catch(() => null);
+        if (Array.isArray(threadRuns) && threadRuns.length > 0) {
+          const pendingRun = threadRuns.find(
+            (r: { slackThreadTs?: string; status?: string }) =>
+              r.slackThreadTs === threadTs && r.status === "pending_approval"
+          );
+          if (pendingRun) {
+            await inngest.send({
+              name: "app/approval.decided",
+              data: { referenceId: pendingRun.id, decision, userId },
+            });
+            await slack.chat.postMessage({
+              channel: channelId,
+              thread_ts: messageTs,
+              text: `:${isApproval ? "white_check_mark" : "x"}: *${decision === "approved" ? "Approved" : "Rejected"}* by <@${userId}>. ${isApproval ? "Engineer Agent is now coding..." : "Build cancelled."}`,
+            });
+            return NextResponse.json({ ok: true });
+          }
+        }
+
+        // Check for pending_approval tasks (documents) in this thread
+        const threadTasks = await getRecentTasks(userId, 5).catch(() => null);
+        if (Array.isArray(threadTasks) && threadTasks.length > 0) {
+          const pendingTask = threadTasks.find(
+            (t: { slackThreadTs?: string; status?: string }) =>
+              t.slackThreadTs === threadTs && t.status === "pending_approval"
+          );
+          if (pendingTask) {
+            await inngest.send({
+              name: "app/approval.decided",
+              data: { referenceId: pendingTask.id, decision, userId },
+            });
+            await slack.chat.postMessage({
+              channel: channelId,
+              thread_ts: messageTs,
+              text: `:${isApproval ? "white_check_mark" : "x"}: *${decision === "approved" ? "Approved" : "Rejected"}* by <@${userId}>. ${isApproval ? "Generating full document..." : "Document generation cancelled."}`,
+            });
+            return NextResponse.json({ ok: true });
+          }
+        }
+      }
+
       const isFollowup = FOLLOWUP_PATTERNS.some((p) => p.test(text));
 
       if (isFollowup) {
@@ -215,6 +277,13 @@ export async function POST(req: NextRequest) {
     // ── Task dispatches (lightweight — just DB insert + Inngest event) ──
     const requestText = classification.extractedRequest || text;
     extractAndStoreKnowledge(userId, text).catch(() => {});
+
+    // Track skill usage at dispatch time (not just completion)
+    if (classification.type === "build") {
+      trackSkillUsage("build", userId, channelId, requestText, "success").catch(() => {});
+    } else if (["document", "research", "analytics"].includes(classification.type)) {
+      trackSkillUsage(classification.type, userId, channelId, requestText, "success").catch(() => {});
+    }
 
     // Usage limit check (chat/unclear don't count toward limits)
     const limitCheck = await checkUsageLimit();

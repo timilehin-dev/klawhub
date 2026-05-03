@@ -33,7 +33,7 @@ export const documentWorkflow = inngest.createFunction(
     const outline = await step.run("generate-outline", async () => {
       const userContext = await buildUserContext(slackUserId);
       await updateTask(taskId, { status: "pending_approval" });
-      return generateOutline(messageText, userContext);
+      return generateOutline(messageText, userContext, { taskId, slackUserId });
     });
 
     // Step 2: Post outline for approval + wait
@@ -121,7 +121,7 @@ export const documentWorkflow = inngest.createFunction(
 
       const userContext = await buildUserContext(slackUserId);
       await updateTask(taskId, { status: "processing" });
-      return generateDocument(messageText, userContext);
+      return generateDocument(messageText, userContext, { taskId, slackUserId });
     });
 
     // Step 5: Deliver

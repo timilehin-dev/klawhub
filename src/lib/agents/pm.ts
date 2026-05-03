@@ -31,6 +31,7 @@ export async function createSpec(request: string, userContext: string) {
       maxIterations: 4,
       temperature: 0.4,
       maxTokens: 600,
+      agentName: "pm",
     }
   );
 

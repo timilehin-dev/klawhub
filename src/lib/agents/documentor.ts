@@ -1,4 +1,4 @@
-import { llm } from "@/lib/llm";
+import { agentChat } from "@/lib/llm";
 import { sandbox } from "@/lib/tools/sandbox";
 
 const DOCSTRUCTURE_PROMPT = `You are the Document Agent of Klawhub. You structure content for professional documents.
@@ -48,14 +48,14 @@ function safeJsonParse(raw: string): Record<string, any> | null {
   return null;
 }
 
-export async function generateDocument(request: string, userContext = "") {
+export async function generateDocument(request: string, userContext = "", meta?: { taskId?: string; slackUserId?: string }) {
   const contextNote = userContext ? `\n\nUser context (use to personalize the document):\n${userContext}` : "";
   const messages = [
     { role: "system" as const, content: DOCSTRUCTURE_PROMPT },
     { role: "user" as const, content: request + contextNote },
   ];
 
-  const response = await llm.chat(messages, { temperature: 0.4, maxTokens: 131072 });
+  const response = await agentChat("documentor", messages, { temperature: 0.4, maxTokens: 131072 }, meta);
 
   const docStructure = safeJsonParse(response);
   if (!docStructure || !docStructure.sections || !docStructure.title) {
@@ -84,7 +84,7 @@ export async function generateDocument(request: string, userContext = "") {
 }
 
 /** Generate just the outline for approval (lighter weight). */
-export async function generateOutline(request: string, userContext = "") {
+export async function generateOutline(request: string, userContext = "", meta?: { taskId?: string; slackUserId?: string }) {
   const contextNote = userContext ? `\n\nUser context: ${userContext}` : "";
   const messages = [
     {
@@ -106,7 +106,7 @@ Keep section bodies brief (summaries, not full content). The user will approve t
     { role: "user" as const, content: request + contextNote },
   ];
 
-  const response = await llm.chat(messages, { temperature: 0.4, maxTokens: 131072 });
+  const response = await agentChat("documentor", messages, { temperature: 0.4, maxTokens: 131072 }, meta);
   const outline = safeJsonParse(response);
 
   if (!outline || !outline.title || !outline.sections) {

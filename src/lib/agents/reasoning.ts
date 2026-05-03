@@ -1,4 +1,4 @@
-import { llm } from "@/lib/llm";
+import { agentChat } from "@/lib/llm";
 import {
   type ToolDefinition,
   type ToolCall,
@@ -202,16 +202,17 @@ export async function runReasoningChain(
   } = options;
 
   const toolDescriptions = formatToolDescriptions(tools);
-  const toolMap = new Map(tools.map((t) => [t.name, t]));
+  const meta = {
+    slackUserId: context.slackUserId,
+    runId: context.runId,
+    taskId: context.taskId,
+  };
 
   // ── Phase 1: Plan ──
-  const planningResponse = await llm.chat(
-    [
-      { role: "system", content: PLANNER_SYSTEM_PROMPT + "\n\n" + toolDescriptions },
-      { role: "user", content: userMessage },
-    ],
-    { temperature, maxTokens: 8192 }
-  );
+  const planningResponse = await agentChat("reasoning-planner", [
+    { role: "system", content: PLANNER_SYSTEM_PROMPT + "\n\n" + toolDescriptions },
+    { role: "user", content: userMessage },
+  ], { temperature, maxTokens: 8192 }, meta);
 
   const plan = parsePlan(planningResponse);
   if (!plan || plan.steps.length === 0) {
@@ -223,6 +224,7 @@ export async function runReasoningChain(
       context,
       maxIterations: 8,
       temperature,
+      agentName: "reasoning-fallback",
     });
   }
 
@@ -255,13 +257,10 @@ export async function runReasoningChain(
         ? `\n\nPrevious step results:\n${stepResults.map((r, i) => `Step ${i + 1}: ${r.slice(0, 500)}`).join("\n")}`
         : "";
 
-      const executionResponse = await llm.chat(
-        [
-          { role: "system", content: executorPrompt + "\n\n" + toolDescriptions },
-          { role: "user", content: userMessage + contextInfo },
-        ],
-        { temperature, maxTokens: 16384 }
-      );
+      const executionResponse = await agentChat("reasoning-executor", [
+        { role: "system", content: executorPrompt + "\n\n" + toolDescriptions },
+        { role: "user", content: userMessage + contextInfo },
+      ], { temperature, maxTokens: 16384 }, meta);
 
       // Execute any tool calls in the response
       const toolCalls = parseToolCalls(executionResponse);
@@ -280,17 +279,14 @@ export async function runReasoningChain(
 
       // ── Phase 3: Verify ──
       if (retries < maxRetriesPerStep) {
-        const verifyResponse = await llm.chat(
-          [
-            {
-              role: "system",
-              content: VERIFIER_SYSTEM_PROMPT
-                .replace("{step_action}", step.action)
-                .replace("{step_result}", result.slice(0, 2000)),
-            },
-          ],
-          { temperature: 0.3, maxTokens: 512 }
-        );
+        const verifyResponse = await agentChat("reasoning-verifier", [
+          {
+            role: "system",
+            content: VERIFIER_SYSTEM_PROMPT
+              .replace("{step_action}", step.action)
+              .replace("{step_result}", result.slice(0, 2000)),
+          },
+        ], { temperature: 0.3, maxTokens: 512 }, meta);
 
         const verification = parseVerification(verifyResponse);
 
@@ -315,18 +311,15 @@ export async function runReasoningChain(
   const planSummary = steps.map((s) => `${s.stepNumber}. ${s.action}`).join("\n");
   const stepResultsText = stepResults.map((r, i) => `Step ${i + 1}: ${r}`).join("\n\n");
 
-  const synthesizedResponse = await llm.chat(
-    [
-      {
-        role: "system",
-        content: SYNTHESIZER_SYSTEM_PROMPT
-          .replace("{goal}", plan.goal)
-          .replace("{plan_summary}", planSummary)
-          .replace("{step_results}", stepResultsText),
-      },
-    ],
-    { temperature: 0.5, maxTokens: 16384 }
-  );
+  const synthesizedResponse = await agentChat("reasoning-synthesizer", [
+    {
+      role: "system",
+      content: SYNTHESIZER_SYSTEM_PROMPT
+        .replace("{goal}", plan.goal)
+        .replace("{plan_summary}", planSummary)
+        .replace("{step_results}", stepResultsText),
+    },
+  ], { temperature: 0.5, maxTokens: 16384 }, meta);
 
   return synthesizedResponse;
 }

@@ -29,7 +29,7 @@ export const analyticsWorkflow = inngest.createFunction(
     // Step 1: Run analysis
     const result = await step.run("run-analysis", async () => {
       await updateTask(taskId, { status: "processing" });
-      const r = await analyzeData(event.data.messageText, event.data.data);
+      const r = await analyzeData(event.data.messageText, event.data.data, { taskId, slackUserId });
       return r as AnalyticsResult;
     });
 

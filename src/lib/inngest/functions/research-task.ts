@@ -22,7 +22,7 @@ export const researchWorkflow = inngest.createFunction(
     // Step 1: Conduct research
     const result = await step.run("conduct-research", async () => {
       await updateTask(taskId, { status: "processing" });
-      return conductResearch(messageText);
+      return conductResearch(messageText, { taskId, slackUserId });
     });
 
     // Step 2: Post findings

@@ -1,4 +1,4 @@
-import { llm } from "@/lib/llm";
+import { agentChat } from "@/lib/llm";
 import { getActiveSkills } from "@/lib/db";
 import type { ClassificationResult, Intent } from "@/types";
 
@@ -46,7 +46,7 @@ const INTENT_PATTERN: Record<Intent, RegExp> = {
 export async function classify(userMessage: string): Promise<ClassificationResult> {
   const systemPrompt = await buildClassifierPrompt();
 
-  const response = await llm.chat([
+  const response = await agentChat("classifier", [
     { role: "system" as const, content: systemPrompt },
     { role: "user" as const, content: userMessage },
   ], { temperature: 0.0, maxTokens: 100 });

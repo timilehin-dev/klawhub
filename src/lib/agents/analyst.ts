@@ -1,4 +1,4 @@
-import { llm } from "@/lib/llm";
+import { agentChat } from "@/lib/llm";
 import { sandbox } from "@/lib/tools/sandbox";
 import type { SandboxResponse } from "@/types";
 
@@ -23,7 +23,7 @@ Given the analysis output below, provide:
 
 Keep it concise and business-focused. No more than 200 words.`;
 
-export async function analyzeData(request: string, data?: string) {
+export async function analyzeData(request: string, data?: string, meta?: { taskId?: string; slackUserId?: string }) {
   const messages = [
     { role: "system" as const, content: ANALYST_PROMPT },
     {
@@ -32,7 +32,7 @@ export async function analyzeData(request: string, data?: string) {
     },
   ];
 
-  const codeResponse = await llm.chat(messages, { temperature: 0.3, maxTokens: 2000 });
+  const codeResponse = await agentChat("analyst", messages, { temperature: 0.3, maxTokens: 2000 }, meta);
   const codeMatch = codeResponse.match(/```(?:python)?\n?([\s\S]*?)```/);
   const code = codeMatch?.[1]?.trim() || codeResponse.trim();
 
@@ -49,7 +49,7 @@ export async function analyzeData(request: string, data?: string) {
       content: `Request: ${request}\n\nOutput:\n${execution.stdout || ""}\n${execution.stderr ? `Errors: ${execution.stderr}` : ""}`,
     },
   ];
-  const insights = await llm.chat(interpMessages, { temperature: 0.4, maxTokens: 800 });
+  const insights = await agentChat("analyst", interpMessages, { temperature: 0.4, maxTokens: 800 }, meta);
 
   return { code, execution, insights };
 }

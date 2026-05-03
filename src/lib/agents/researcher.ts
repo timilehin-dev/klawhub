@@ -18,18 +18,23 @@ export interface ResearchResult {
   sources: Array<{ title: string; url: string }>;
 }
 
-export async function conductResearch(topic: string): Promise<ResearchResult> {
+export async function conductResearch(topic: string, meta?: { taskId?: string; slackUserId?: string }): Promise<ResearchResult> {
   const findings = await runToolUseLoop(topic, {
     systemPrompt: RESEARCH_PROMPT,
     tools: researchAgentTools,
     maxIterations: 10,
     temperature: 0.4,
+    context: {
+      slackUserId: meta?.slackUserId,
+      taskId: meta?.taskId,
+    },
     onToolCall(call, result) {
       // Extract URLs from search results for source tracking
       if (call.tool === "web_search" && result.includes("http")) {
         // URLs will be parsed from the findings text
       }
     },
+    agentName: "researcher",
   });
 
   // Extract sources from the findings text

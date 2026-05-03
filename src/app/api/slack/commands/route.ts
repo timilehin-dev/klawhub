@@ -14,6 +14,7 @@ import {
   deleteSchedule as dbDeleteSchedule,
   getUserScheduleCount,
   updateSchedule,
+  trackSkillUsage,
 } from "@/lib/db";
 import { memoryForget } from "@/lib/tools/memory";
 import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
@@ -163,6 +164,9 @@ export async function POST(req: NextRequest) {
 
     // Dispatch to appropriate workflow
     if (classification.type === "build") {
+      // Track skill usage at dispatch
+      trackSkillUsage("build", userId, channelId, requestText, "success").catch(() => {});
+
       const [run] = await createRun({
         slackUserId: userId,
         slackChannelId: channelId,
@@ -182,6 +186,9 @@ export async function POST(req: NextRequest) {
       });
     } else {
       const taskType = classification.type as "document" | "research" | "analytics";
+      // Track skill usage at dispatch
+      trackSkillUsage(taskType, userId, channelId, requestText, "success").catch(() => {});
+
       const [task] = await createTask({
         slackUserId: userId,
         slackChannelId: channelId,
