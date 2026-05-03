@@ -19,6 +19,7 @@
     "next": "^15.0.0",
     "postcss": "^8.5.13",
     "postgres": "^3.4.0",
+    "puppeteer-core": "^24.42.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwindcss": "^4.2.4"

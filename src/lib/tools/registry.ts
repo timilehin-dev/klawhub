@@ -271,6 +271,91 @@ const githubIssuesTool: ToolDefinition = {
 
 
 
+// ── Browser Automation Tools (require BROWSER_WS_URL env var) ──
+
+const browserBrowseTool: ToolDefinition = {
+  name: "browser_browse",
+  description: "Open a URL in a headless browser and extract the visible text content. Use this for dynamic pages, SPAs, or sites that require JavaScript rendering — where web_read fails.",
+  parameters: {
+    url: { type: "string", description: "The URL to browse", required: true },
+  },
+  async execute(params, _ctx) {
+    try {
+      const { browseUrl } = await import("@/lib/browser/actions");
+      return await browseUrl(params.url);
+    } catch (err) { return `Browser error: ${(err as Error).message.slice(0, 300)}`; }
+  },
+};
+
+const browserScrapeTool: ToolDefinition = {
+  name: "browser_scrape",
+  description: "Scrape structured text from a web page using CSS selectors. Opens the page in a browser, waits for it to load, then extracts text from specific elements.",
+  parameters: {
+    url: { type: "string", description: "The URL to scrape", required: true },
+    selector: { type: "string", description: "CSS selector to extract text from (e.g. 'table.data', '.article-body', '#results'). If omitted, extracts full page text." },
+  },
+  async execute(params, _ctx) {
+    try {
+      const { browserScrape } = await import("@/lib/browser/actions");
+      return await browserScrape(params.url, params.selector);
+    } catch (err) { return `Browser scrape error: ${(err as Error).message.slice(0, 300)}`; }
+  },
+};
+
+const browserLinksTool: ToolDefinition = {
+  name: "browser_links",
+  description: "Extract all links (anchor tags) from a web page. Returns the link text and URL for each link found.",
+  parameters: {
+    url: { type: "string", description: "The URL to extract links from", required: true },
+  },
+  async execute(params, _ctx) {
+    try {
+      const { browserGetLinks } = await import("@/lib/browser/actions");
+      return await browserGetLinks(params.url);
+    } catch (err) { return `Browser links error: ${(err as Error).message.slice(0, 300)}`; }
+  },
+};
+
+const browserInteractTool: ToolDefinition = {
+  name: "browser_interact",
+  description: "Interact with a web page: navigate, click buttons, type text, select dropdowns, wait for elements, and scrape results. For multi-step browser workflows like form submissions, logins, or navigating multi-page flows.",
+  parameters: {
+    url: { type: "string", description: "Starting URL", required: true },
+    actions: { type: "string", description: 'JSON array of actions: [{"type":"click","selector":"button.submit"},{"type":"type","selector":"#email","value":"user@example.com"},{"type":"select","selector":"#country","value":"US"},{"type":"wait","selector":".results"},{"type":"scrape"}]', required: true },
+  },
+  async execute(params, _ctx) {
+    try {
+      const { browserInteract } = await import("@/lib/browser/actions");
+      const actions = JSON.parse(params.actions);
+      return await browserInteract(params.url, actions);
+    } catch (err) {
+      if ((err as Error).message.includes("JSON")) return "Invalid actions JSON. Must be an array of {type, selector?, value?} objects.";
+      return `Browser interact error: ${(err as Error).message.slice(0, 300)}`;
+    }
+  },
+};
+
+const browserScreenshotTool: ToolDefinition = {
+  name: "browser_screenshot",
+  description: "Take a screenshot of a web page. Returns the screenshot as a PNG file that can be uploaded to Slack. Useful for capturing visual state, debugging, or sharing page renders.",
+  parameters: {
+    url: { type: "string", description: "The URL to screenshot", required: true },
+    full_page: { type: "boolean", description: "Capture the entire scrollable page (default: false, just viewport)" },
+    selector: { type: "string", description: "CSS selector to screenshot a specific element instead of the full page" },
+  },
+  async execute(params, _ctx) {
+    try {
+      const { browserScreenshot } = await import("@/lib/browser/actions");
+      const buffer = await browserScreenshot(params.url, {
+        fullPage: params.full_page || false,
+        selector: params.selector,
+      });
+      if (!buffer) return "Browser is not available. Set BROWSER_WS_URL to enable screenshots.";
+      return `[SCREENSHOT] ${buffer.length} bytes PNG captured. The screenshot buffer is available for upload.`;
+    } catch (err) { return `Screenshot error: ${(err as Error).message.slice(0, 300)}`; }
+  },
+};
+
 // ── Tool Registry ──
 
 export const allTools: ToolDefinition[] = [
@@ -286,6 +371,12 @@ export const allTools: ToolDefinition[] = [
   githubSearchTool,
   githubReadFileTool,
   githubIssuesTool,
+  // Browser automation tools
+  browserBrowseTool,
+  browserScrapeTool,
+  browserLinksTool,
+  browserInteractTool,
+  browserScreenshotTool,
 ];
 
 export function getToolsByName(names: string[]): ToolDefinition[] {
@@ -301,15 +392,20 @@ export const generalAgentTools: ToolDefinition[] = [
   memorySaveTool,
   memorySearchTool,
   knowledgeSearchTool,
+  browserBrowseTool,
+  browserScrapeTool,
 ];
 
 /** Tools available to the PM Agent (research for specs) */
-export const pmAgentTools: ToolDefinition[] = [webSearchTool];
+export const pmAgentTools: ToolDefinition[] = [webSearchTool, browserBrowseTool];
 
 /** Tools available to the Research Agent (deep research) */
 export const researchAgentTools: ToolDefinition[] = [
   webSearchTool,
   webReadTool,
+  browserBrowseTool,
+  browserScrapeTool,
+  browserLinksTool,
 ];
 
 /** Tools available to the Analyst Agent (code execution) */

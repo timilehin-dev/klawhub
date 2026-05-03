@@ -5,8 +5,9 @@ import { researchWorkflow } from "@/lib/inngest/functions/research-task";
 import { documentWorkflow } from "@/lib/inngest/functions/document-task";
 import { analyticsWorkflow } from "@/lib/inngest/functions/analytics-task";
 import { scheduleRunnerWorkflow } from "@/lib/inngest/functions/schedule-runner";
+import { heartbeatWorkflow } from "@/lib/inngest/functions/heartbeat";
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  functions: [buildSquadWorkflow, researchWorkflow, documentWorkflow, analyticsWorkflow, scheduleRunnerWorkflow],
+  functions: [buildSquadWorkflow, researchWorkflow, documentWorkflow, analyticsWorkflow, scheduleRunnerWorkflow, heartbeatWorkflow],
 });
