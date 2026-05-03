@@ -1,6 +1,15 @@
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
-import { ArrowRight, MessageSquare, FileText, Search, BarChart3, CheckCircle2 } from "lucide-react";
+import {
+  ArrowRight,
+  MessageSquare,
+  FileText,
+  Search,
+  BarChart3,
+  CheckCircle2,
+  ExternalLink,
+} from "lucide-react";
+import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -9,10 +18,42 @@ export const metadata: Metadata = {
     "Install Klawhub in your Slack workspace in under 60 seconds. No credit card required.",
 };
 
+const SLACK_CLIENT_ID = process.env.NEXT_PUBLIC_SLACK_CLIENT_ID;
+const SLACK_SCOPES = [
+  "commands",
+  "chat:write",
+  "chat:write.public",
+  "chat:write.customize",
+  "app_mentions:read",
+  "users:read",
+  "channels:read",
+  "groups:read",
+  "im:read",
+  "im:history",
+  "channels:history",
+  "groups:history",
+  "reactions:read",
+  "files:read",
+  "files:write",
+];
+const SLACK_USER_SCOPES = ["search:read"];
+
+function getSlackOAuthUrl(redirectUri?: string) {
+  const params = new URLSearchParams({
+    client_id: SLACK_CLIENT_ID!,
+    scope: SLACK_SCOPES.join(","),
+    user_scope: SLACK_USER_SCOPES.join(","),
+  });
+  if (redirectUri) {
+    params.set("redirect_uri", redirectUri);
+  }
+  return `https://slack.com/oauth/v2/authorize?${params.toString()}`;
+}
+
 const setupSteps = [
   {
     icon: ArrowRight,
-    title: "Click \"Add to Slack\"",
+    title: 'Click "Add to Slack"',
     description:
       "You'll be redirected to Slack to authorize Klawhub in your workspace. Choose which channels to invite it to.",
   },
@@ -54,6 +95,9 @@ const capabilities = [
 ];
 
 export default function InstallPage() {
+  const isConfigured = Boolean(SLACK_CLIENT_ID);
+  const oauthUrl = isConfigured ? getSlackOAuthUrl() : null;
+
   return (
     <>
       <Header />
@@ -78,25 +122,54 @@ export default function InstallPage() {
               No new tools, no learning curve — just Slack.
             </p>
 
-            {/* Slack install button */}
+            {/* Install Button */}
             <div className="mt-10">
-              <a
-                href="https://slack.com/oauth/v2/authorize?client_id=&scope=commands,chat:write,chat:write.public,chat:write.customize,app_mentions:read,users:read,channels:read,groups:read,im:read,im:history,channels:history,groups:history,reactions:read,files:read,files:write"
-                className="inline-flex items-center gap-3 rounded-full gradient-bg px-10 py-4 text-lg font-semibold text-white shadow-xl shadow-brand-500/25 transition-all hover:shadow-2xl hover:shadow-brand-500/30 hover:brightness-110"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-6 w-6 fill-current"
-                  aria-hidden="true"
-                >
-                  <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.27 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.163 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.163 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.163 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.27a2.527 2.527 0 0 1-2.52-2.523 2.527 2.527 0 0 1 2.52-2.52h6.315A2.528 2.528 0 0 1 24 15.163a2.528 2.528 0 0 1-2.522 2.523h-6.315z" />
-                </svg>
-                Add to Slack
-              </a>
-              <p className="mt-4 text-sm text-surface-700">
-                Requires permission to post messages, read channels, and upload
-                files
-              </p>
+              {isConfigured ? (
+                <>
+                  <a
+                    href={oauthUrl!}
+                    className="inline-flex items-center gap-3 rounded-full gradient-bg px-10 py-4 text-lg font-semibold text-white shadow-xl shadow-brand-500/25 transition-all hover:shadow-2xl hover:shadow-brand-500/30 hover:brightness-110"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-6 w-6 fill-current"
+                      aria-hidden="true"
+                    >
+                      <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.27 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.163 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.163 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.163 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.27a2.527 2.527 0 0 1-2.52-2.523 2.527 2.527 0 0 1 2.52-2.52h6.315A2.528 2.528 0 0 1 24 15.163a2.528 2.528 0 0 1-2.522 2.523h-6.315z" />
+                    </svg>
+                    Add to Slack
+                  </a>
+                  <p className="mt-4 text-sm text-surface-700">
+                    Requires permission to post messages, read channels, and
+                    upload files
+                  </p>
+                </>
+              ) : (
+                <div className="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50 p-6 text-left">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 shrink-0 rounded-full bg-amber-100 p-2">
+                      <ExternalLink size={18} className="text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-amber-900">
+                        Slack app is currently in private beta
+                      </p>
+                      <p className="mt-1 text-sm leading-relaxed text-amber-800">
+                        Klawhub is being rolled out to early adopters. If
+                        you&apos;d like to get early access, reach out to us on
+                        our support channel or check back soon.
+                      </p>
+                      <Link
+                        href="/pricing"
+                        className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        View Pricing & Features
+                        <ArrowRight size={14} />
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
