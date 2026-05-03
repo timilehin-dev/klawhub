@@ -13,3 +13,7 @@ export function updateTask(id: string, updates: Partial<typeof tasks.$inferInser
 export function getRecentTasks(userId: string, limit = 5) {
   return getDb().select().from(tasks).where(eq(tasks.slackUserId, userId)).orderBy(desc(tasks.createdAt)).limit(limit);
 }
+
+export function getTaskByThreadTs(threadTs: string) {
+  return getDb().select().from(tasks).where(eq(tasks.slackThreadTs, threadTs)).orderBy(desc(tasks.createdAt)).limit(1);
+}

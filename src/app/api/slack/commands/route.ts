@@ -164,8 +164,12 @@ export async function POST(req: NextRequest) {
 
     // Dispatch to appropriate workflow
     if (classification.type === "build") {
-      // Track skill usage at dispatch
-      trackSkillUsage("build", userId, channelId, requestText, "success").catch(() => {});
+      // Track skill usage at dispatch (await to ensure DB write)
+      try {
+        await trackSkillUsage("build", userId, channelId, requestText, "attempted");
+      } catch (err) {
+        console.error("[COMMANDS] trackSkillUsage (build) failed:", err?.message || err);
+      }
 
       const [run] = await createRun({
         slackUserId: userId,
@@ -187,8 +191,12 @@ export async function POST(req: NextRequest) {
       });
     } else {
       const taskType = classification.type as "document" | "research" | "analytics";
-      // Track skill usage at dispatch
-      trackSkillUsage(taskType, userId, channelId, requestText, "success").catch(() => {});
+      // Track skill usage at dispatch (await to ensure DB write)
+      try {
+        await trackSkillUsage(taskType, userId, channelId, requestText, "attempted");
+      } catch (err) {
+        console.error("[COMMANDS] trackSkillUsage (task) failed:", err?.message || err);
+      }
 
       const [task] = await createTask({
         slackUserId: userId,

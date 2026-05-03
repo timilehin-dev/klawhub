@@ -3,7 +3,7 @@ import { verifySlackRequest } from "@/lib/slack/verify";
 import { getWorkspaceSlack, postToThread, addReaction } from "@/lib/slack/client";
 import { classify } from "@/lib/agents/classifier";
 import { chatAsAgent } from "@/lib/agents/general";
-import { createRun, createTask, getRun, getRecentTasks, getUserSchedules, getUserScheduleCount } from "@/lib/db";
+import { createRun, createTask, getRunByThreadTs, getTaskByThreadTs, getUserSchedules, getUserScheduleCount } from "@/lib/db";
 import { memoryWrite } from "@/lib/tools/memory";
 import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
 import { createSchedule } from "@/lib/db";
@@ -117,14 +117,14 @@ export async function POST(req: NextRequest) {
       if (isApproval || isRejection) {
         const decision = isApproval ? "approved" : "rejected";
 
-        // Check for pending_approval runs in this thread
-        const threadRuns = await getRun(threadTs).catch(() => null);
-        if (Array.isArray(threadRuns) && threadRuns.length > 0) {
-          const pendingRun = threadRuns.find(
-            (r) =>
-              r.slackThreadTs === threadTs && r.status === "pending_approval"
-          );
-          if (pendingRun) {
+        // Check for pending_approval runs in this thread (query by threadTs, not id)
+        const threadRun = await getRunByThreadTs(threadTs).catch((err) => {
+          console.error("[EVENTS] getRunByThreadTs error:", err);
+          return null;
+        });
+        if (threadRun && threadRun.length > 0) {
+          const pendingRun = threadRun[0];
+          if (pendingRun.status === "pending_approval") {
             await inngest.send({
               name: "app/approval.decided",
               data: { referenceId: pendingRun.id, decision, userId },
@@ -135,13 +135,13 @@ export async function POST(req: NextRequest) {
         }
 
         // Check for pending_approval tasks (documents) in this thread
-        const threadTasks = await getRecentTasks(userId, 5).catch(() => null);
-        if (Array.isArray(threadTasks) && threadTasks.length > 0) {
-          const pendingTask = threadTasks.find(
-            (t) =>
-              t.slackThreadTs === threadTs && t.status === "pending_approval"
-          );
-          if (pendingTask) {
+        const threadTask = await getTaskByThreadTs(threadTs).catch((err) => {
+          console.error("[EVENTS] getTaskByThreadTs error:", err);
+          return null;
+        });
+        if (threadTask && threadTask.length > 0) {
+          const pendingTask = threadTask[0];
+          if (pendingTask.status === "pending_approval") {
             await inngest.send({
               name: "app/approval.decided",
               data: { referenceId: pendingTask.id, decision, userId },
@@ -155,12 +155,18 @@ export async function POST(req: NextRequest) {
       const isFollowup = FOLLOWUP_PATTERNS.some((p) => p.test(text));
 
       if (isFollowup) {
-        const existingRun = await getRun(threadTs).catch(() => null);
-        const existingTask = await getRecentTasks(userId, 1).catch(() => null);
+        const existingRun = await getRunByThreadTs(threadTs).catch((err) => {
+          console.error("[EVENTS] getRunByThreadTs (followup) error:", err);
+          return null;
+        });
+        const existingTask = await getTaskByThreadTs(threadTs).catch((err) => {
+          console.error("[EVENTS] getTaskByThreadTs (followup) error:", err);
+          return null;
+        });
 
         if (existingRun && existingRun.length > 0) {
           const run = existingRun[0];
-          if (run.slackThreadTs === threadTs && (run.status === "done" || run.status === "error")) {
+          if ((run.status === "done" || run.status === "error") && run.slackThreadTs === threadTs) {
             try { await addReaction(channelId, messageTs, "gear", teamId); } catch { /* ok */ }
             await postToThread(channelId, messageTs, `*Build Squad re-activated!*\n_Follow-up: ${text}_\n\nPM Agent is analyzing...`, undefined, teamId);
 
@@ -183,7 +189,7 @@ export async function POST(req: NextRequest) {
 
         if (existingTask && existingTask.length > 0) {
           const task = existingTask[0];
-          if (task.slackThreadTs === threadTs && (task.status === "done" || task.status === "error")) {
+          if ((task.status === "done" || task.status === "error") && task.slackThreadTs === threadTs) {
             const taskEmojis: Record<string, string> = { document: "page_facing_up", research: "mag", analytics: "chart_with_upwards_trend" };
             try { await addReaction(channelId, messageTs, taskEmojis[task.type] || "speech_balloon", teamId); } catch { /* ok */ }
 
@@ -244,7 +250,12 @@ export async function POST(req: NextRequest) {
       try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
       const responseText = await chatAsAgent(userId, text, { workspaceId });
       await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
-      extractAndStoreKnowledge(userId, text).catch(() => {});
+      // Extract knowledge from chat messages (fire-and-forget with logging)
+      extractAndStoreKnowledge(userId, text).then((stored) => {
+        if (stored > 0) console.log(`[EVENTS] Chat knowledge: stored ${stored} entities for ${userId}`);
+      }).catch((err) => {
+        console.error("[EVENTS] Chat knowledge extraction failed:", err?.message || err);
+      });
       await postToThread(channelId, messageTs, responseText, undefined, teamId);
       return NextResponse.json({ ok: true });
     }
@@ -257,13 +268,23 @@ export async function POST(req: NextRequest) {
 
     // ── Task dispatches (lightweight — just DB insert + Inngest event) ──
     const requestText = classification.extractedRequest || text;
-    extractAndStoreKnowledge(userId, text).catch(() => {});
 
-    // Track skill usage at dispatch time (not just completion)
-    if (classification.type === "build") {
-      trackSkillUsage("build", userId, channelId, requestText, "success").catch(() => {});
-    } else if (["document", "research", "analytics"].includes(classification.type)) {
-      trackSkillUsage(classification.type, userId, channelId, requestText, "success").catch(() => {});
+    // Extract knowledge from substantive messages (fire-and-forget with logging)
+    extractAndStoreKnowledge(userId, text).then((stored) => {
+      if (stored > 0) console.log(`[EVENTS] Knowledge: stored ${stored} entities for ${userId}`);
+    }).catch((err) => {
+      console.error("[EVENTS] Knowledge extraction failed:", err?.message || err);
+    });
+
+    // Track skill usage at dispatch time (await to ensure DB write completes)
+    try {
+      if (classification.type === "build") {
+        await trackSkillUsage("build", userId, channelId, requestText, "attempted");
+      } else if (["document", "research", "analytics"].includes(classification.type)) {
+        await trackSkillUsage(classification.type, userId, channelId, requestText, "attempted");
+      }
+    } catch (err) {
+      console.error("[EVENTS] trackSkillUsage failed:", err?.message || err);
     }
 
     // Usage limit check (chat/unclear don't count toward limits)

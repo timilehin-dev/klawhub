@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { workspaces, workspaceMembers, runs, tasks } from "./schema";
-import { eq, and, desc, sql, count } from "drizzle-orm";
+import { eq, and, desc, sql, count, inArray } from "drizzle-orm";
 
 // ── Workspace CRUD ──
 
@@ -99,17 +99,17 @@ export async function getWorkspaceStats(workspaceId: string): Promise<WorkspaceS
     };
   }
 
-  // Get runs count by status for these users
+  // Get runs count by status for these users (safe parameterized query)
   const runRows: { status: string | null; cnt: number }[] = await getDb()
     .select({ status: runs.status, cnt: count() })
     .from(runs)
-    .where(sql`${runs.slackUserId} IN ${sql.raw(`(${memberIds.map((id) => `'${id}'`).join(",")})`)}`)
+    .where(inArray(runs.slackUserId, memberIds))
     .groupBy(runs.status);
 
   const taskRows: { status: string | null; cnt: number }[] = await getDb()
     .select({ status: tasks.status, cnt: count() })
     .from(tasks)
-    .where(sql`${tasks.slackUserId} IN ${sql.raw(`(${memberIds.map((id) => `'${id}'`).join(",")})`)}`)
+    .where(inArray(tasks.slackUserId, memberIds))
     .groupBy(tasks.status);
 
   const runsByStatus: Record<string, number> = {};
@@ -128,17 +128,17 @@ export async function getWorkspaceStats(workspaceId: string): Promise<WorkspaceS
     totalTasks += t.cnt;
   }
 
-  // Count schedules for these users
+  // Count schedules for these users (safe parameterized query)
   const scheduleRows: { cnt: number }[] = await getDb()
     .select({ cnt: count() })
     .from(schedules)
-    .where(sql`${schedules.slackUserId} IN ${sql.raw(`(${memberIds.map((id) => `'${id}'`).join(",")})`)}`)
+    .where(inArray(schedules.slackUserId, memberIds))
     .then((r) => r);
 
   const activeScheduleRows: { cnt: number }[] = await getDb()
     .select({ cnt: count() })
     .from(schedules)
-    .where(sql`${schedules.slackUserId} IN ${sql.raw(`(${memberIds.map((id) => `'${id}'`).join(",")})`)} AND ${schedules.isActive} = true`)
+    .where(and(inArray(schedules.slackUserId, memberIds), eq(schedules.isActive, true)))
     .then((r) => r);
 
   return {
@@ -179,20 +179,20 @@ export async function checkWorkspaceUsageLimit(workspaceId: string): Promise<Usa
     return { allowed: true, used: 0, limit };
   }
 
-  // Count runs + tasks this calendar month
+  // Count runs + tasks this calendar month (safe parameterized query)
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const runCount: { cnt: number }[] = await getDb()
     .select({ cnt: count() })
     .from(runs)
-    .where(sql`${runs.slackUserId} IN ${sql.raw(`(${memberIds.map((id) => `'${id}'`).join(",")})`)} AND ${runs.createdAt} >= ${monthStart.toISOString()}`)
+    .where(and(inArray(runs.slackUserId, memberIds), sql`${runs.createdAt} >= ${monthStart.toISOString()}`))
     .then((r) => r);
 
   const taskCount: { cnt: number }[] = await getDb()
     .select({ cnt: count() })
     .from(tasks)
-    .where(sql`${tasks.slackUserId} IN ${sql.raw(`(${memberIds.map((id) => `'${id}'`).join(",")})`)} AND ${tasks.createdAt} >= ${monthStart.toISOString()}`)
+    .where(and(inArray(tasks.slackUserId, memberIds), sql`${tasks.createdAt} >= ${monthStart.toISOString()}`))
     .then((r) => r);
 
   const used = (runCount[0]?.cnt || 0) + (taskCount[0]?.cnt || 0);

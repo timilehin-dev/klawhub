@@ -14,6 +14,10 @@ export function getRun(id: string) {
   return getDb().select().from(runs).where(eq(runs.id, id)).limit(1);
 }
 
+export function getRunByThreadTs(threadTs: string) {
+  return getDb().select().from(runs).where(eq(runs.slackThreadTs, threadTs)).orderBy(desc(runs.createdAt)).limit(1);
+}
+
 export function getRecentRuns(userId: string, limit = 5) {
   return getDb().select().from(runs).where(eq(runs.slackUserId, userId)).orderBy(desc(runs.createdAt)).limit(limit);
 }

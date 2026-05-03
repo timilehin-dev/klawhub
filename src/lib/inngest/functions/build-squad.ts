@@ -35,7 +35,9 @@ export const buildSquadWorkflow = inngest.createFunction(
     const { slackChannelId, slackThreadTs, slackUserId, messageText, runId, teamId } =
       event.data as BuildEventData;
 
-    // Step 1: PM writes spec
+    // Ensure skill usage is tracked even if intermediate steps fail
+    try {
+      // Step 1: PM writes spec
     const specResult = await step.run("pm-spec", async () => {
       const userContext = await memoryRead(slackUserId, "preference");
       const spec = await createSpec(messageText, userContext);
@@ -252,5 +254,23 @@ export const buildSquadWorkflow = inngest.createFunction(
         finalTest.passed ? "success" : "error"
       );
     });
+    } catch (workflowError) {
+      // Track the error and notify the user
+      console.error("[BUILD-SQUAD] Workflow error:", workflowError);
+      try {
+        await updateRun(runId, { status: "error" });
+        await trackSkillUsage("build", slackUserId, slackChannelId, messageText, "error");
+        await postToThread(
+          slackChannelId,
+          slackThreadTs,
+          `*Build Squad — Error*\n\nAn error occurred during the build process: ${(workflowError as Error).message?.slice(0, 500) || "Unknown error"}.\n_Reply in this thread to retry._`,
+          undefined,
+          teamId
+        );
+        try { await addReaction(slackChannelId, slackThreadTs, "warning", teamId); } catch { /* ok */ }
+      } catch (notifyError) {
+        console.error("[BUILD-SQUAD] Failed to notify user of error:", notifyError);
+      }
+    }
   }
 );
