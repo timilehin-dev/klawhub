@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack/verify";
 import { slack, postToThread, addReaction } from "@/lib/slack/client";
 import { classify } from "@/lib/agents/classifier";
+import { chatAsAgent } from "@/lib/agents/general";
 import { createRun, createTask, getRun, getRecentTasks, getUserSchedules, getUserScheduleCount } from "@/lib/db";
-import { memoryWrite, buildUserContext } from "@/lib/tools/memory";
+import { memoryWrite } from "@/lib/tools/memory";
 import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
 import { createSchedule } from "@/lib/db";
 import { inngest } from "@/lib/inngest/client";
@@ -158,11 +159,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Thread reply without follow-up keywords and no @mention — respond as chat
+      // Thread reply without follow-up keywords and no @mention — respond via general agent
       const classification = await classify(text);
       if (classification.type === "chat") {
-        const userContext = await buildUserContext(userId);
-        let responseText = classification.response || "";
+        const responseText = await chatAsAgent(userId, text);
         await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
         await slack.chat.postMessage({
           channel: channelId,
@@ -211,10 +211,9 @@ export async function POST(req: NextRequest) {
     // ── Standard classification pipeline ──
     const classification = await classify(text);
 
-    // CHAT
+    // CHAT — use the general agent (tool-aware, context-rich)
     if (classification.type === "chat") {
-      const userContext = await buildUserContext(userId);
-      let responseText = classification.response || "";
+      const responseText = await chatAsAgent(userId, text);
 
       await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
 

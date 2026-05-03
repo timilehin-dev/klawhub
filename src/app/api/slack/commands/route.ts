@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack/verify";
 import { classify } from "@/lib/agents/classifier";
+import { chatAsAgent } from "@/lib/agents/general";
 import {
   createRun,
   createTask,
@@ -109,11 +110,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Chat and unclear — respond directly
+    // Chat — use general agent
     if (classification.type === "chat") {
+      const responseText = await chatAsAgent(userId, classification.response || text);
       return NextResponse.json({
         response_type: "in_channel",
-        text: classification.response || "",
+        text: responseText,
       });
     }
 
