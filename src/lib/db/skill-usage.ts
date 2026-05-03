@@ -7,7 +7,7 @@ export function trackSkillUsage(
   slackUserId: string,
   slackChannelId: string,
   request: string,
-  outcome: "success" | "error"
+  outcome: "success" | "error" | "attempted"
 ) {
   return getDb().insert(skillUsage).values({
     skillName,

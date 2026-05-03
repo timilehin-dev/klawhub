@@ -69,7 +69,7 @@ export const skillUsage = pgTable("skill_usage", {
   slackUserId: text("slack_user_id").notNull(),
   slackChannelId: text("slack_channel_id").notNull(),
   request: text("request").notNull(),
-  outcome: text("outcome").$type<"success" | "error">().notNull(),
+  outcome: text("outcome").$type<"success" | "error" | "attempted">().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
