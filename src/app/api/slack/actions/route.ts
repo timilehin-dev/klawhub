@@ -239,6 +239,16 @@ export async function POST(req: NextRequest) {
       try {
         const currentBlocks = message?.blocks as unknown[] | undefined;
         if (currentBlocks) {
+          // Determine which button was clicked for the status message
+          let statusText = `Processing... (clicked by <@${userId}>)`;
+          for (const action of actions) {
+            if (action.action_id?.includes("approve")) {
+              statusText = `:white_check_mark: *Approved* by <@${userId}> — processing...`;
+            } else if (action.action_id?.includes("reject")) {
+              statusText = `:x: *Rejected* by <@${userId}> — processing...`;
+            }
+          }
+
           // Replace action buttons with disabled state (plain text)
           const disabledBlocks = currentBlocks.map((block: any) => {
             if (block.type === "actions") {
@@ -247,7 +257,7 @@ export async function POST(req: NextRequest) {
                 elements: [
                   {
                     type: "mrkdwn",
-                    text: `Processing... (clicked by <@${userId}>)`,
+                    text: statusText,
                   },
                 ],
               };

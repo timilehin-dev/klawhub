@@ -211,11 +211,52 @@ export async function POST(req: NextRequest) {
 
       // Thread reply — classify then handle
       const classification = await classify(text);
+
       if (classification.type === "chat") {
         const responseText = await chatAsAgent(userId, text, { workspaceId });
         await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
         await postToThread(channelId, messageTs, responseText, undefined, teamId);
+        return NextResponse.json({ ok: true });
       }
+
+      // Handle non-chat classifications in thread replies — dispatch as new tasks
+      if (classification.type === "build") {
+        try { await addReaction(channelId, messageTs, "gear", teamId); } catch { /* ok */ }
+        await postToThread(channelId, messageTs, `*Build Squad activated!*\n_Request: ${text}_\n\nPM Agent is analyzing...`, undefined, teamId);
+
+        const [newRun] = await createRun({
+          slackUserId: userId,
+          slackChannelId: channelId,
+          slackThreadTs: messageTs,
+          request: classification.extractedRequest || text,
+        });
+        await inngest.send({
+          name: "slack/build.requested",
+          data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: classification.extractedRequest || text, runId: newRun.id, teamId },
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (["document", "research", "analytics"].includes(classification.type)) {
+        const taskType = classification.type as "document" | "research" | "analytics";
+        const taskEmojis: Record<string, string> = { document: "page_facing_up", research: "mag", analytics: "chart_with_upwards_trend" };
+        const taskLabels: Record<string, string> = { document: "Generating document", research: "Researching", analytics: "Analyzing data" };
+        try { await addReaction(channelId, messageTs, taskEmojis[taskType] || "speech_balloon", teamId); } catch { /* ok */ }
+        await postToThread(channelId, messageTs, `*${taskLabels[taskType]}...*\n_Request: ${text}_`, undefined, teamId);
+
+        const [newTask] = await createTask({
+          slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: taskType,
+          request: classification.extractedRequest || text,
+        });
+        await inngest.send({
+          name: `slack/${taskType}.requested`,
+          data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: classification.extractedRequest || text, taskId: newTask.id, teamId },
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      // UNCLEAR classification — ask for clarification
+      await postToThread(channelId, messageTs, `:thinking: ${classification.question || "Could you clarify what you need?"}`, undefined, teamId);
       return NextResponse.json({ ok: true });
     }
 
