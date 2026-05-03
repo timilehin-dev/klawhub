@@ -12,6 +12,8 @@ Rules:
 - If CHAT: return ONLY: CHAT: [your friendly response, max 2 sentences]
 - If UNCLEAR: return ONLY: UNCLEAR: [one clarifying question]
 
+Note: Schedule requests ("remind me every...", "set up a daily...", "schedule...") are handled separately — do NOT classify them. Just classify the core intent.
+
 Be decisive. Never explain your reasoning. Never combine categories.`;
 
 async function buildClassifierPrompt(): Promise<string> {

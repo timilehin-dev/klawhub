@@ -8,8 +8,15 @@ import {
   getRecentTasks,
   getUserSkillStats,
   getMemoryStats,
+  getUserSchedules,
+  getSchedule,
+  deleteSchedule as dbDeleteSchedule,
+  getUserScheduleCount,
+  updateSchedule,
 } from "@/lib/db";
 import { memoryForget } from "@/lib/tools/memory";
+import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
+import { createSchedule } from "@/lib/db";
 import { inngest } from "@/lib/inngest/client";
 
 export async function POST(req: NextRequest) {
@@ -39,9 +46,12 @@ export async function POST(req: NextRequest) {
 • \`/klawhub build a python script that fetches crypto prices\`
 • \`/klawhub create a Q4 revenue report in PDF\`
 • \`/klawhub research the latest trends in AI startups\`
-• \`/klawhub analyze this sales data and show me trends\`\n\n*Commands:*
+• \`/klawhub analyze this sales data and show me trends\`
+• \`/klawhub schedule daily forex scan at 8am weekdays\`\n\n*Commands:*
 • \`/klawhub help\` — show all commands
 • \`/klawhub status\` — view recent activity & skill stats
+• \`/klawhub schedules\` — view your active schedules
+• \`/klawhub cancel-schedule [id]\` — remove a schedule
 • \`/klawhub forget\` — clear your memory & start fresh`,
       });
     }
@@ -70,6 +80,21 @@ export async function POST(req: NextRequest) {
 
     if (sub === "history") {
       return handleHistory(userId);
+    }
+
+    if (sub === "schedules") {
+      return handleListSchedules(userId);
+    }
+
+    // /klawhub cancel-schedule [id]
+    if (sub.startsWith("cancel-schedule")) {
+      const id = text.replace(/^cancel-schedule\s+/i, "").trim();
+      return handleCancelSchedule(userId, id);
+    }
+
+    // ── Schedule creation ──
+    if (/schedul|remind|cron|recurring|every|daily|weekly|monthly/i.test(sub)) {
+      return handleCreateSchedule(userId, channelId, text);
     }
 
     // ── Classify and dispatch ──
@@ -187,10 +212,13 @@ function handleHelp(): NextResponse<unknown> {
     response_type: "ephemeral",
     text: `*Klawhub — Commands*
 
-\`/klawhub [request]\` — Your universal command. I'll figure out what you need.
-\`/klawhub status\` — View recent activity and your skill usage stats.
-\`/klawhub history\` — View your recent requests across all skills.
-\`/klawhub forget\` — Clear all your stored context and start fresh.
+\`/klawhub [request]\` — Universal command. I'll figure out what you need.
+\`/klawhub schedule [description]\` — Set up a recurring schedule (e.g. "daily forex scan at 8am WAT")
+\`/klawhub schedules\` — View your active schedules.
+\`/klawhub cancel-schedule [id]\` — Cancel a schedule.
+\`/klawhub status\` — View recent activity and skill usage stats.
+\`/klawhub history\` — View your recent requests.
+\`/klawhub forget\` — Clear all your stored context.
 \`/klawhub help\` — Show this message.
 
 *What I can do:*
@@ -198,21 +226,23 @@ function handleHelp(): NextResponse<unknown> {
 :page_facing_up: **Document** — Reports, proposals, invoices, contracts (PDF & DOCX)
 :mag: **Research** — Web research with cited sources and deep analysis
 :chart_with_upwards_trend: **Analytics** — Data analysis, charts, visualizations
+:clock1: **Schedule** — Recurring tasks, reminders, automated reports
 
 *Tips:*
 • Mention me with @Klawhub in any channel to activate me
-• Reply in a thread with "revise", "change", or "try again" to follow up
-• Use the global shortcut (Ctrl+K) to open the request modal`,
+• Reply in threads with "revise", "change", or "try again" to follow up
+• Say "schedule" or "remind me every..." to set up recurring tasks`,
   });
 }
 
 async function handleStatus(userId: string): Promise<NextResponse> {
   try {
-    const [runList, taskList, skillStats, memStats] = await Promise.all([
+    const [runList, taskList, skillStats, memStats, scheduleList] = await Promise.all([
       getRecentRuns(userId, 3),
       getRecentTasks(userId, 3),
       getUserSkillStats(userId).catch(() => []),
       getMemoryStats(userId).catch(() => []),
+      getUserSchedules(userId).catch(() => []),
     ]);
 
     const lines: string[] = [];
@@ -239,6 +269,15 @@ async function handleStatus(userId: string): Promise<NextResponse> {
       lines.push("\n*Your memory:*");
       for (const m of memStats) {
         lines.push(`  :brain: ${String(m.category)} — ${m.count} entries`);
+      }
+    }
+
+    // Active schedules
+    const active = scheduleList.filter((s) => s.isActive);
+    if (active.length > 0) {
+      lines.push(`\n*Active schedules: ${active.length}*`);
+      for (const s of active) {
+        lines.push(`  :clock1: ${s.name} (${s.cronExpr})`);
       }
     }
 
@@ -313,6 +352,96 @@ async function handleForget(userId: string): Promise<NextResponse> {
     return NextResponse.json({
       response_type: "ephemeral",
       text: "Could not clear memory. Please try again.",
+    });
+  }
+}
+
+async function handleListSchedules(userId: string): Promise<NextResponse> {
+  try {
+    const list = await getUserSchedules(userId);
+    if (list.length === 0) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: "No schedules yet. Create one with:\n`/klawhub schedule daily standup at 9am`\n`/klawhub schedule weekly report every Friday at 5pm`",
+      });
+    }
+
+    const lines = list.map((s) => {
+      const status = s.isActive ? ":white_check_mark:" : ":pause_button:";
+      return `${status} \`${s.id.slice(0, 8)}\` *${s.name}*\n  ${s.cronExpr} (${s.timezone}) — ${s.action.slice(0, 60)}`;
+    });
+
+    return NextResponse.json({
+      response_type: "ephemeral",
+      text: `*Your schedules (${list.length}/10):*\n\n${lines.join("\n\n")}\n\nCancel with: \`/klawhub cancel-schedule [id]\``,
+    });
+  } catch {
+    return NextResponse.json({
+      response_type: "ephemeral",
+      text: "Could not load schedules. Please try again.",
+    });
+  }
+}
+
+async function handleCreateSchedule(userId: string, channelId: string, text: string): Promise<NextResponse> {
+  try {
+    const count = await getUserScheduleCount(userId);
+    if (count >= 10) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: ":warning: You've reached the maximum of 10 active schedules. Remove one with `/klawhub cancel-schedule [id]` first.",
+      });
+    }
+
+    const parsed = await parseScheduleRequest(text);
+    const [schedule] = await createSchedule({
+      slackUserId: userId,
+      name: parsed.name,
+      cronExpr: parsed.cronExpr,
+      timezone: parsed.timezone,
+      action: parsed.action,
+      channelId,
+    });
+
+    return NextResponse.json({
+      response_type: "in_channel",
+      text: `:clock1: *Schedule created!*\n\n*${parsed.name}*\n\`${parsed.cronExpr}\` (${parsed.timezone})\n> ${parsed.action}\n\nID: \`${schedule.id.slice(0, 8)}\` — manage with \`/klawhub schedules\``,
+    });
+  } catch (err) {
+    return NextResponse.json({
+      response_type: "ephemeral",
+      text: `:warning: Could not parse schedule. Try a format like:\n• \`/klawhub schedule daily forex scan at 8am WAT weekdays\`\n• \`/klawhub schedule weekly report every Friday at 5pm\`\n\nError: ${(err as Error).message.slice(0, 100)}`,
+    });
+  }
+}
+
+async function handleCancelSchedule(userId: string, id: string): Promise<NextResponse> {
+  if (!id) {
+    return NextResponse.json({
+      response_type: "ephemeral",
+      text: "Usage: `/klawhub cancel-schedule [id]`\nFind IDs with `/klawhub schedules`",
+    });
+  }
+
+  try {
+    const allSchedules = await getUserSchedules(userId, false);
+    const match = allSchedules.find((s: { id: string }) => s.id.startsWith(id));
+    if (!match) {
+      return NextResponse.json({
+        response_type: "ephemeral",
+        text: `:warning: No schedule found with ID "${id}". Check \`/klawhub schedules\` for your active schedules.`,
+      });
+    }
+
+    await dbDeleteSchedule(match.id);
+    return NextResponse.json({
+      response_type: "ephemeral",
+      text: `:broom: Schedule *${match.name}* (\`${match.id.slice(0, 8)}\`) has been cancelled.`,
+    });
+  } catch {
+    return NextResponse.json({
+      response_type: "ephemeral",
+      text: "Could not cancel schedule. Please try again.",
     });
   }
 }

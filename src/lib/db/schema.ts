@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, jsonb, boolean, integer } from "drizzle-orm/pg-core";
 import type { Intent } from "@/types";
 
 // ── Runs: tracks app/script build requests ──
@@ -71,6 +71,36 @@ export const skillUsage = pgTable("skill_usage", {
   request: text("request").notNull(),
   outcome: text("outcome").$type<"success" | "error">().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+// ── Schedules: user-created and system-level scheduled tasks ──
+
+export const schedules = pgTable("schedules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slackUserId: text("slack_user_id").notNull(),       // "system" for system-level schedules
+  name: text("name").notNull(),
+  cronExpr: text("cron_expr").notNull(),              // standard 5-field cron: "0 9 * * 1-5"
+  timezone: text("timezone").default("UTC"),
+  action: text("action").notNull(),                    // the prompt/task to execute
+  channelId: text("channel_id"),                      // where to post results
+  isActive: boolean("is_active").default(true),
+  lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
+  failCount: integer("fail_count").default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// ── Knowledge: structured entity memory (projects, people, events) ──
+
+export const knowledge = pgTable("knowledge", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slackUserId: text("slack_user_id").notNull(),
+  entityType: text("entity_type").notNull().$type<"project" | "person" | "event" | "standing_item">(),
+  entityName: text("entity_name").notNull(),
+  data: jsonb("data").notNull().default({}),
+  source: text("source"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
 // ── Intent list for classifier ──

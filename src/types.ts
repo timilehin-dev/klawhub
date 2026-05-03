@@ -98,3 +98,16 @@ export interface WebSearchResult {
   url: string;
   content: string;
 }
+
+export interface ParsedSchedule {
+  name: string;
+  cronExpr: string;
+  timezone: string;
+  action: string;
+}
+
+export interface KnowledgeEntity {
+  entityType: "project" | "person" | "event" | "standing_item";
+  entityName: string;
+  data: Record<string, unknown>;
+}

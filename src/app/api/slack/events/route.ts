@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack/verify";
 import { slack, postToThread, addReaction } from "@/lib/slack/client";
 import { classify } from "@/lib/agents/classifier";
-import { createRun, createTask, getRun, getRecentTasks } from "@/lib/db";
+import { createRun, createTask, getRun, getRecentTasks, getUserSchedules, getUserScheduleCount } from "@/lib/db";
 import { memoryWrite, buildUserContext } from "@/lib/tools/memory";
+import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
+import { createSchedule } from "@/lib/db";
 import { inngest } from "@/lib/inngest/client";
+import { extractAndStoreKnowledge } from "@/lib/tools/knowledge-extractor";
 
 const processedEvents = new Set<string>();
 const MAX_DEDUP = 100;
@@ -15,6 +18,12 @@ const FOLLOWUP_PATTERNS = [
   /\b(make it|try again|redo|regenerate|re-do)\b/i,
   /\binstead|different|another|alternative|more detail/i,
   /\b(convert|translate|rewrite|reformat)\b/i,
+];
+
+// Keywords that indicate a scheduling request
+const SCHEDULE_PATTERNS = [
+  /\b(schedul|remind|cron|recurring|every|daily|weekly|monthly)\b/i,
+  /\b(set up|create|add)\s+(a\s+)?(schedul|remind|cron|alert)/i,
 ];
 
 export async function POST(req: NextRequest) {
@@ -45,12 +54,8 @@ export async function POST(req: NextRequest) {
     if (first) processedEvents.delete(first);
   }
 
-  // Ignore bot messages
-  if (event.bot_id || event.subtype === "bot_message") return NextResponse.json({ ok: true });
-
-  const isMention = event.type === "app_mention";
-  const isDM = event.type === "message" && event.channel_type === "im";
-  if (!isMention && !isDM) return NextResponse.json({ ok: true });
+  // Ignore bot messages and subtypes (edits, joins, etc.)
+  if (event.bot_id || event.subtype) return NextResponse.json({ ok: true });
 
   const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
   if (!text) return NextResponse.json({ ok: true });
@@ -59,6 +64,15 @@ export async function POST(req: NextRequest) {
   const channelId = event.channel as string;
   const threadTs = event.thread_ts as string | undefined;
   const messageTs = event.ts as string;
+
+  const isMention = event.type === "app_mention";
+  const isDM = event.type === "message" && event.channel_type === "im";
+  const isThreadReply = !!(threadTs && threadTs !== messageTs);
+
+  // Only process: mentions, DMs, or thread replies in channels (for follow-ups)
+  if (!isMention && !isDM && !isThreadReply) {
+    return NextResponse.json({ ok: true });
+  }
 
   if (text.length > 4000) {
     await slack.chat.postMessage({
@@ -70,9 +84,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // ── Thread reply detection ──
-    // If the user is replying in a thread (not the top message), check if it's a follow-up
-    if (threadTs && threadTs !== messageTs) {
+    // ── Thread reply detection (follow-ups in existing threads) ──
+    if (isThreadReply && !isMention) {
       const isFollowup = FOLLOWUP_PATTERNS.some((p) => p.test(text));
 
       if (isFollowup) {
@@ -83,7 +96,6 @@ export async function POST(req: NextRequest) {
         if (existingRun && existingRun.length > 0) {
           const run = existingRun[0];
           if (run.slackThreadTs === threadTs && (run.status === "done" || run.status === "error")) {
-            // Retrigger the build with the follow-up context
             try { await addReaction(channelId, messageTs, "gear"); } catch { /* ok */ }
             await postToThread(channelId, messageTs, `*Build Squad re-activated!*\n_Follow-up: ${text}_\n\nPM Agent is analyzing...`);
 
@@ -113,7 +125,6 @@ export async function POST(req: NextRequest) {
         if (existingTask && existingTask.length > 0) {
           const task = existingTask[0];
           if (task.slackThreadTs === threadTs && (task.status === "done" || task.status === "error")) {
-            // Retrigger the task
             const taskEmojis: Record<string, string> = {
               document: "page_facing_up",
               research: "mag",
@@ -146,6 +157,55 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+
+      // Thread reply without follow-up keywords and no @mention — respond as chat
+      const classification = await classify(text);
+      if (classification.type === "chat") {
+        const userContext = await buildUserContext(userId);
+        let responseText = classification.response || "";
+        await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
+        await slack.chat.postMessage({
+          channel: channelId,
+          thread_ts: messageTs,
+          text: responseText,
+        });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── Schedule detection (in mentions and DMs) ──
+    if (SCHEDULE_PATTERNS.some((p) => p.test(text))) {
+      try {
+        const parsed = await parseScheduleRequest(text);
+        const count = await getUserScheduleCount(userId);
+        if (count >= 10) {
+          await slack.chat.postMessage({
+            channel: channelId,
+            thread_ts: messageTs,
+            text: `:warning: You have reached the maximum of 10 active schedules. Remove one with \`/klawhub cancel-schedule\` first.`,
+          });
+          return NextResponse.json({ ok: true });
+        }
+
+        const [schedule] = await createSchedule({
+          slackUserId: userId,
+          name: parsed.name,
+          cronExpr: parsed.cronExpr,
+          timezone: parsed.timezone,
+          action: parsed.action,
+          channelId,
+        });
+
+        await slack.chat.postMessage({
+          channel: channelId,
+          thread_ts: messageTs,
+          text: `:clock1: *Schedule created!*\n\n*${parsed.name}*\n${parsed.cronExpr} (${parsed.timezone})\nAction: ${parsed.action.slice(0, 100)}\n\nID: \`${schedule.id.slice(0, 8)}\`\nManage with \`/klawhub schedules\``,
+        });
+        return NextResponse.json({ ok: true });
+      } catch (err) {
+        // If parsing fails, fall through to normal classification
+        console.error("[EVENTS] Schedule parse failed:", err);
+      }
     }
 
     // ── Standard classification pipeline ──
@@ -156,12 +216,11 @@ export async function POST(req: NextRequest) {
       const userContext = await buildUserContext(userId);
       let responseText = classification.response || "";
 
-      // If we have context, personalize the chat response
-      if (userContext && !responseText.includes("I don't have context")) {
-        responseText = classification.response || "";
-      }
-
       await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
+
+      // Extract knowledge from conversations (non-blocking)
+      extractAndStoreKnowledge(userId, text).catch(() => {});
+
       await slack.chat.postMessage({
         channel: channelId,
         thread_ts: messageTs,
@@ -181,6 +240,9 @@ export async function POST(req: NextRequest) {
     }
 
     const requestText = classification.extractedRequest || text;
+
+    // Extract knowledge from task requests (non-blocking)
+    extractAndStoreKnowledge(userId, text).catch(() => {});
 
     // BUILD
     if (classification.type === "build") {
