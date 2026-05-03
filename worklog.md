@@ -1,4 +1,40 @@
 ---
+Task ID: 9
+Agent: Main Agent (Z-Agent)
+Task: Phase 5 polish — tool audit, fix all broken tools, serverless safety, reasoning chains
+
+Work Log:
+- Full audit of all 16 registered tools + system-level issues
+- Found 8 broken/problematic tools and 6 system-level issues
+- Fixed ALL issues:
+
+Tool fixes:
+- Wired all 16 tools to General Agent (was only 7 — missing integration + browser tools)
+- Added Google Drive + GitHub integration tools to General Agent
+- Added browser_interact + browser_screenshot to General Agent
+- Added browser_interact to Research Agent
+- Added web_read + browser_scrape to PM Agent (was only web_search)
+- web_read: graceful fallback to browser when sandbox unavailable
+- code_execute: graceful error when MODAL_FUNCTION_URL not configured
+- Integration tools: user-friendly error with link to dashboard when not connected
+
+System fixes:
+- Browser client: removed unsafe global singleton, fresh connection per operation (serverless-safe)
+- Reasoning chains: now auto-triggered for complex multi-step requests in General Agent
+- Heartbeat: added dedup cache, raised channel limit to 100
+- Slack formatting: fixed **bold** → *bold* in document-task + slash commands
+- Event handler: resolves workspaceId and passes to General Agent for integration tools
+- Slash commands: also resolves workspaceId for chat responses
+
+Stage Summary:
+- All 16 tools now fully functional — zero dead tools
+- Tool count: 16 (was advertised as 20, but 4 were duplicates/ghosts)
+  - web_search, web_read, code_execute, memory_save, memory_search, knowledge_search
+  - google_drive_search, google_drive_read, github_search, github_read_file, github_list_issues
+  - browser_browse, browser_scrape, browser_links, browser_interact, browser_screenshot
+- Pushed: commit 10ef1f9
+
+---
 Task ID: 8
 Agent: Main Agent (Z-Agent)
 Task: Phase 3 cleanup + Phase 4 — Live Dashboard UI
