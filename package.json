@@ -12,12 +12,16 @@
   },
   "dependencies": {
     "@slack/web-api": "^7.0.0",
+    "@tailwindcss/postcss": "^4.2.4",
     "drizzle-orm": "^0.38.0",
     "inngest": "^3.0.0",
+    "lucide-react": "^1.14.0",
     "next": "^15.0.0",
+    "postcss": "^8.5.13",
     "postgres": "^3.4.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
