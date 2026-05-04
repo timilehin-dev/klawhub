@@ -171,6 +171,7 @@ export async function POST(req: NextRequest) {
             slackChannelId: channelId,
             slackThreadTs: threadTs, // keep same thread
             request: fullRequest,
+            workspaceId,
           });
 
           await inngest.send({
@@ -178,7 +179,7 @@ export async function POST(req: NextRequest) {
             data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, runId: newRun.id, teamId },
           });
 
-          await memoryWrite(userId, `Build follow-up: ${text.slice(0, 100)}`, "preference");
+          await memoryWrite(userId, `Build follow-up: ${text.slice(0, 100)}`, "preference", workspaceId);
           return NextResponse.json({ ok: true });
         }
       }
@@ -195,7 +196,7 @@ export async function POST(req: NextRequest) {
 
           const [newTask] = await createTask({
             slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs, type: task.type,
-            request: fullRequest,
+            request: fullRequest, workspaceId,
           });
 
           await inngest.send({
@@ -203,7 +204,7 @@ export async function POST(req: NextRequest) {
             data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, taskId: newTask.id, teamId },
           });
 
-          await memoryWrite(userId, `${task.type} follow-up: ${text.slice(0, 100)}`, "preference");
+          await memoryWrite(userId, `${task.type} follow-up: ${text.slice(0, 100)}`, "preference", workspaceId);
           return NextResponse.json({ ok: true });
         }
       }
@@ -217,7 +218,7 @@ export async function POST(req: NextRequest) {
           workspaceId,
           threadHistory,
         });
-        await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
+        await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId);
         await postToThread(channelId, messageTs, responseText, undefined, teamId);
         return NextResponse.json({ ok: true });
       }
@@ -236,6 +237,7 @@ export async function POST(req: NextRequest) {
           slackChannelId: channelId,
           slackThreadTs: threadTs,
           request: contextReq,
+          workspaceId,
         });
         await inngest.send({
           name: "slack/build.requested",
@@ -257,7 +259,7 @@ export async function POST(req: NextRequest) {
 
         const [newTask] = await createTask({
           slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs, type: taskType,
-          request: contextReq,
+          request: contextReq, workspaceId,
         });
         await inngest.send({
           name: `slack/${taskType}.requested`,
@@ -304,7 +306,7 @@ export async function POST(req: NextRequest) {
     if (classification.type === "chat") {
       try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
       const responseText = await chatAsAgent(userId, text, { workspaceId });
-      await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
+      await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId);
       extractAndStoreKnowledge(userId, text).then((stored) => {
         if (stored > 0) console.log(`[EVENTS] Chat knowledge: stored ${stored} entities for ${userId}`);
       }).catch(() => {});
@@ -346,7 +348,7 @@ export async function POST(req: NextRequest) {
       try { await addReaction(channelId, messageTs, "gear", teamId); } catch { /* ok */ }
       await postToThread(channelId, messageTs, `*Build Squad activated!*\n_Request: ${requestText}_\n\nPM Agent is analyzing...`, undefined, teamId);
 
-      const [run] = await createRun({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, request: requestText });
+      const [run] = await createRun({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, request: requestText, workspaceId });
       await inngest.send({ name: "slack/build.requested", data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: requestText, runId: run.id, teamId } });
       return NextResponse.json({ ok: true });
     }
@@ -355,7 +357,7 @@ export async function POST(req: NextRequest) {
       try { await addReaction(channelId, messageTs, "page_facing_up", teamId); } catch { /* ok */ }
       await postToThread(channelId, messageTs, `*Generating document...*\n_Request: ${requestText}_`, undefined, teamId);
 
-      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: "document", request: requestText });
+      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: "document", request: requestText, workspaceId });
       await inngest.send({ name: "slack/document.requested", data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId } });
       return NextResponse.json({ ok: true });
     }
@@ -364,7 +366,7 @@ export async function POST(req: NextRequest) {
       try { await addReaction(channelId, messageTs, "mag", teamId); } catch { /* ok */ }
       await postToThread(channelId, messageTs, `*Researching...*\n_Topic: ${requestText}_`, undefined, teamId);
 
-      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: "research", request: requestText });
+      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: "research", request: requestText, workspaceId });
       await inngest.send({ name: "slack/research.requested", data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId } });
       return NextResponse.json({ ok: true });
     }
@@ -373,7 +375,7 @@ export async function POST(req: NextRequest) {
       try { await addReaction(channelId, messageTs, "chart_with_upwards_trend", teamId); } catch { /* ok */ }
       await postToThread(channelId, messageTs, `*Analyzing data...*\n_Request: ${requestText}_`, undefined, teamId);
 
-      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: "analytics", request: requestText });
+      const [task] = await createTask({ slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: "analytics", request: requestText, workspaceId });
       await inngest.send({ name: "slack/analytics.requested", data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId } });
       return NextResponse.json({ ok: true });
     }

@@ -27,9 +27,10 @@ export async function buildUserContext(slackUserId: string): Promise<string> {
 export async function memoryWrite(
   slackUserId: string,
   content: string,
-  category = "general"
+  category = "general",
+  workspaceId?: string
 ): Promise<string> {
-  await saveMemory(slackUserId, content.slice(0, 1000), category);
+  await saveMemory(slackUserId, content.slice(0, 1000), category, workspaceId);
   // Auto-prune in background (non-blocking)
   autoPruneMemory(slackUserId, category).catch(() => {});
   return "Memory saved.";

@@ -5,8 +5,8 @@ import { eq, ilike, and, desc, sql, count, inArray } from "drizzle-orm";
 /** Maximum memories per user per category to keep things lean. */
 const MAX_MEMORIES_PER_CATEGORY = 20;
 
-export function saveMemory(slackUserId: string, content: string, category = "general") {
-  return getDb().insert(memory).values({ slackUserId, content, category });
+export function saveMemory(slackUserId: string, content: string, category = "general", workspaceId?: string) {
+  return getDb().insert(memory).values({ slackUserId, content, category, workspaceId });
 }
 
 export function readMemory(slackUserId: string, query: string) {

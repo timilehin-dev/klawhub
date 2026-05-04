@@ -5,6 +5,7 @@ import type { Intent } from "@/types";
 
 export const runs = pgTable("runs", {
   id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
   slackUserId: text("slack_user_id").notNull(),
   slackChannelId: text("slack_channel_id").notNull(),
   slackThreadTs: text("slack_thread_ts"),
@@ -25,6 +26,7 @@ export const runs = pgTable("runs", {
 
 export const tasks = pgTable("tasks", {
   id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
   slackUserId: text("slack_user_id").notNull(),
   slackChannelId: text("slack_channel_id").notNull(),
   slackThreadTs: text("slack_thread_ts"),
@@ -43,6 +45,7 @@ export const tasks = pgTable("tasks", {
 
 export const memory = pgTable("memory", {
   id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
   slackUserId: text("slack_user_id").notNull(),
   content: text("content").notNull(),
   category: text("category").default("general"),
@@ -155,7 +158,7 @@ export const integrations = pgTable("integrations", {
   externalAccountName: text("external_account_name"),
   externalAccountEmail: text("external_account_email"),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-  errorCount: text("error_count").default("0").notNull(),
+  errorCount: integer("error_count").default(0).notNull(),
   lastError: text("last_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

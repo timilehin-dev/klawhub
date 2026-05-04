@@ -79,7 +79,7 @@ export async function updateIntegrationTokens(
       ...(refreshToken ? { refreshToken: encrypt(refreshToken) } : {}),
       ...(expiresAt ? { expiresAt } : {}),
       status: "active",
-      errorCount: "0",
+      errorCount: 0,
       lastError: null,
       updatedAt: new Date(),
     })
@@ -88,13 +88,13 @@ export async function updateIntegrationTokens(
 
 export async function markIntegrationError(id: string, error: string) {
   const existing = await getIntegration(id);
-  const newCount = String((parseInt(existing?.errorCount || "0", 10)) + 1);
+  const newCount = (existing?.errorCount || 0) + 1;
   return getDb()
     .update(integrations)
     .set({
       lastError: error,
       errorCount: newCount,
-      status: parseInt(newCount, 10) >= 5 ? "error" : "active",
+      status: newCount >= 5 ? "error" : "active",
       updatedAt: new Date(),
     })
     .where(eq(integrations.id, id));
