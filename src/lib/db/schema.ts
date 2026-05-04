@@ -180,6 +180,13 @@ export const engineerLearnings = pgTable("engineer_learnings", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+// ── Processed Events: DB-backed dedup — survives serverless cold starts ──
+
+export const processedEvents = pgTable("processed_events", {
+  eventId: text("event_id").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
 // ── Intent list for classifier ──
 export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];
 

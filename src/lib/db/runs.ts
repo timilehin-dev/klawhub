@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { runs } from "./schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 
 export function createRun(values: typeof runs.$inferInsert) {
   return getDb().insert(runs).values(values).returning();
@@ -16,6 +16,24 @@ export function getRun(id: string) {
 
 export function getRunByThreadTs(threadTs: string) {
   return getDb().select().from(runs).where(eq(runs.slackThreadTs, threadTs)).orderBy(desc(runs.createdAt)).limit(1);
+}
+
+/**
+ * Check if there's an active (in-progress) run in a thread.
+ * Used to prevent duplicate builds when one is already running.
+ */
+export function getActiveRunByThreadTs(threadTs: string) {
+  return getDb()
+    .select()
+    .from(runs)
+    .where(
+      and(
+        eq(runs.slackThreadTs, threadTs),
+        inArray(runs.status, ["pending", "pm", "coding", "qa", "pending_approval"])
+      )
+    )
+    .orderBy(desc(runs.createdAt))
+    .limit(1);
 }
 
 export function getRecentRuns(userId: string, limit = 5) {

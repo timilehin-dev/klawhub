@@ -1,14 +1,28 @@
 import { getWorkspaceSlack } from "@/lib/slack/client";
 
+/** Maximum bot messages to include in context (prevents token bloat). */
+const MAX_BOT_MESSAGES = 5;
+/** Maximum total messages to include. */
+const MAX_TOTAL_MESSAGES = 20;
+/** Maximum characters per message in context. */
+const MAX_MESSAGE_LENGTH = 1000;
+
 /**
  * Fetch recent thread messages from Slack to build conversation context.
- * Returns a formatted string of the thread history, excluding bot messages.
+ * Returns a formatted string of the thread history, INCLUDING bot messages.
+ *
+ * FIX #4 (Phase A): Previously, bot messages were excluded, which meant
+ * the bot had no memory of its own responses. When a user said "make section 2 shorter",
+ * the bot couldn't know what section 2 was because it filtered out its own output.
+ *
+ * Now: Bot messages are included (capped at MAX_BOT_MESSAGES) and formatted
+ * as "[Klawhub]: {text}" to distinguish from human messages.
  */
 export async function getThreadHistory(
   channelId: string,
   threadTs: string,
   teamId?: string,
-  limit = 20
+  limit = MAX_TOTAL_MESSAGES
 ): Promise<string> {
   try {
     const slack = await getWorkspaceSlack(teamId);
@@ -23,28 +37,32 @@ export async function getThreadHistory(
       return "";
     }
 
-    // Filter to user messages only (exclude bot messages), build context
-    const contextMessages: string[] = [];
-    const messages = result.messages.slice(-limit); // most recent N messages
+    const messages = result.messages.slice(-limit);
+
+    const userMessages: string[] = [];
+    let botMessageCount = 0;
 
     for (const msg of messages) {
-      // Skip bot messages (we only want human context)
       const m = msg as Record<string, unknown>;
-      if (m.bot_id || m.subtype) continue;
-
       const text = (msg.text || "").replace(/<@[^>]+>/g, "").trim();
       if (!text) continue;
 
-      // Truncate very long messages to keep context manageable
-      const truncated = text.length > 1000 ? text.slice(0, 1000) + "..." : text;
-      contextMessages.push(truncated);
+      const isBot = !!m.bot_id;
+      const truncated = text.length > MAX_MESSAGE_LENGTH ? text.slice(0, MAX_MESSAGE_LENGTH) + "..." : text;
+
+      if (isBot) {
+        botMessageCount++;
+        if (botMessageCount > MAX_BOT_MESSAGES) continue; // Cap bot messages
+        userMessages.push(`[Klawhub]: ${truncated}`);
+      } else if (!m.subtype) {
+        // Human message (exclude subtypes like join/leave)
+        userMessages.push(truncated);
+      }
     }
 
-    if (contextMessages.length === 0) return "";
+    if (userMessages.length === 0) return "";
 
-    // Take last 15 messages to keep context window reasonable
-    const recent = contextMessages.slice(-15);
-    return recent.join("\n");
+    return userMessages.join("\n");
   } catch (err) {
     console.error("[THREAD-CONTEXT] Failed to fetch thread history:", err);
     return "";
