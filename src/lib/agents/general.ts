@@ -198,9 +198,9 @@ export async function chatAsAgent(
     systemPrompt,
     tools: generalAgentTools,
     context: toolContext,
-    maxIterations: 15,
+    maxIterations: 5,
     temperature: 0.7,
-    maxTokens: 131072,
+    maxTokens: 4096,
     agentName: "general",
   });
 }

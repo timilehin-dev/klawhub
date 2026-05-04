@@ -66,7 +66,8 @@ export function getProviders(): ProviderConfig[] {
  */
 export const AGENT_PROVIDER_MAP: Record<string, string> = {
   engineer: "aihubmix",     // Engineer uses AIHubMix for better code generation
-  // All other agents (classifier, general, pm, qa, researcher, etc.) use "default" (Ollama)
+  classifier: "aihubmix",   // Classifier needs speed, not power — use fast model
+  general: "aihubmix",      // General chat — use fast model for snappy responses
 };
 
 export const DEFAULT_PROVIDER_ID = "default";

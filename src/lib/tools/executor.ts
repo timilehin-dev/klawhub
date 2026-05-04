@@ -68,7 +68,7 @@ export async function runToolUseLoop(
     systemPrompt,
     tools,
     context = {},
-    maxTokens = 131072,
+    maxTokens = 8192,
     temperature = 0.7,
     onToolCall,
     agentName = "tool-executor",

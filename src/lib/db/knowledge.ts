@@ -88,7 +88,8 @@ export function getAllKnowledge(slackUserId: string) {
     .select()
     .from(knowledge)
     .where(eq(knowledge.slackUserId, slackUserId))
-    .orderBy(desc(knowledge.updatedAt));
+    .orderBy(desc(knowledge.updatedAt))
+    .limit(50);
 }
 
 /** Build a concise context string from all user knowledge for agents. */
