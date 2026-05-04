@@ -53,7 +53,7 @@ export async function getRelevantLearnings(
     .where(
       and(
         eq(engineerLearnings.language, language),
-        // Prioritize FAIL verdicts (mistakes to avoid)
+        // Include both FAIL (mistakes to avoid) and PASS (good patterns) learnings
         or(
           eq(engineerLearnings.verdict, "fail"),
           eq(engineerLearnings.verdict, "pass")
@@ -68,23 +68,23 @@ export async function getRelevantLearnings(
   // Relevance score: prefer rows whose domain/taskType matches our keywords
   const scored = rows.map((row) => {
     let score = 0;
-    const searchable = `${row.domain} ${row.taskType} ${row.mistake}`.toLowerCase();
+    const searchable = `${row.domain} ${row.taskType} ${row.mistake} ${row.correction}`.toLowerCase();
     for (const kw of keywords) {
       if (searchable.includes(kw.toLowerCase())) score += 2;
     }
-    // Prioritize recent mistakes
-    if (row.verdict === "fail") score += 1;
+    // Prioritize recent mistakes (they're often recurring issues)
+    if (row.verdict === "fail") score += 2;
     return { ...row, score };
   });
 
-  // Sort by relevance, take top 10
+  // Sort by relevance, take top 12 (increased from 10 for more learning context)
   scored.sort((a, b) => b.score - a.score);
-  const top = scored.slice(0, 10);
+  const top = scored.slice(0, 12);
 
   // Format as context for the engineer prompt
   const lines = top.map((row) => {
     const header = row.verdict === "fail" ? "MISTAKE TO AVOID" : "GOOD PATTERN";
-    return `[${header}] (${row.domain}, ${row.taskType})\n  Problem: ${row.mistake.slice(0, 300)}\n  Fix: ${row.correction.slice(0, 300)}`;
+    return `[${header}] (${row.domain}, ${row.taskType})\n  Problem: ${row.mistake.slice(0, 400)}\n  Fix: ${row.correction.slice(0, 400)}`;
   });
 
   return lines.join("\n\n");
@@ -124,21 +124,25 @@ export async function getLearningStats(): Promise<{
  * Extract meaningful domain keywords from a request string.
  */
 function extractDomainKeywords(text: string): string[] {
-  // Common programming domains/patterns to look for
   const domainPatterns = [
-    /api/i, /rest/i, /graphql/i, /webhook/i, /scraper|scrape|parsing/i,
-    /database|db|sql|postgres|mysql|mongo/i, /auth|login|oauth|jwt/i,
-    /file|csv|json|excel|pdf/i, /email|notification|slack|discord/i,
-    /test|testing|unit test/i, /docker|deploy|ci\/cd/i, /http|request|fetch/i,
-    /automation|scheduled|cron/i, /data|analytics|chart|graph/i,
-    /browser|selenium|puppeteer|playwright/i, /cli|command line/i,
-    /image|resize|compress|convert/i, /search|filter|sort/i,
+    /api|rest|graphql|webhook|endpoint/i, /scraper|scrape|parsing|crawl|extract/i,
+    /database|db|sql|postgres|mysql|mongo|sqlite|redis/i, /auth|login|oauth|jwt|session|token/i,
+    /file|csv|json|excel|pdf|docx|yaml|xml/i, /email|notification|slack|discord|telegram|smtp/i,
+    /test|testing|unit test|integration test|pytest|jest/i, /docker|deploy|ci\/cd|kubernetes|vercel/i,
+    /http|request|fetch|response|client/i, /automation|scheduled|cron|worker|queue/i,
+    /data|analytics|chart|graph|visualization|pandas|matplotlib/i, /browser|selenium|playwright|puppeteer/i,
+    /cli|command line|argparse|click/i, /image|resize|compress|convert|ffmpeg|pillow/i,
+    /search|filter|sort|elasticsearch|algolia/i, /payment|stripe|paypal|checkout/i,
+    /ai|ml|machine learning|openai|llm|gpt|embedding/i, /security|encrypt|hash|ssl|tls|certificate/i,
+    /performance|cache|optimize|lazy|parallel|concurrent/i, /websocket|sse|stream|real.?time/i,
+    /configuration|env|secret|credential|deploy/i,
   ];
 
   const keywords: string[] = [];
   for (const pattern of domainPatterns) {
     if (pattern.test(text)) {
-      keywords.push(text.match(pattern)?.[0] || "");
+      const match = text.match(pattern);
+      if (match) keywords.push(match[0].toLowerCase());
     }
   }
 
@@ -148,10 +152,12 @@ function extractDomainKeywords(text: string): string[] {
     "that", "this", "with", "from", "have", "will", "would", "could",
     "should", "write", "build", "make", "create", "need", "want",
     "please", "using", "used", "which", "their", "about", "into",
+    "also", "just", "like", "some", "them", "than", "then", "what",
+    "when", "where", "there", "here", "very", "only", "even", "still",
   ]);
   for (const w of words) {
     if (!stopWords.has(w)) keywords.push(w);
   }
 
-  return [...new Set(keywords)].slice(0, 15);
+  return [...new Set(keywords)].slice(0, 20);
 }

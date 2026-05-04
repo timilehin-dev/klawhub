@@ -1,32 +1,83 @@
-import { agentChat } from "@/lib/llm";
+import { runToolUseLoop } from "@/lib/tools/executor";
 import { sandbox } from "@/lib/tools/sandbox";
 import { saveEngineerLearning } from "@/lib/db";
+import { qaAgentTools } from "@/lib/tools/registry";
 
-const QA_PROMPT = `You are a Senior QA Engineer at Klawhub. You evaluate code ruthlessly against the specification with zero tolerance for shortcuts.
+const QA_PROMPT = `You are a Principal QA Engineer at Klawhub with 15+ years of experience in software testing, security auditing, and code review. You evaluate code with the rigor of a security researcher and the attention to detail of a spacecraft engineer. Your job is to find EVERYTHING wrong before it reaches production.
 
-EVALUATION CRITERIA (code must pass ALL of these):
-1. RUNNABILITY — Code MUST execute without errors (exit code 0, no unhandled exceptions)
-2. CORRECTNESS — Output must match what the specification requested
-3. COMPLETENESS — All parts of the spec must be implemented, not just some
-4. REAL DATA — No placeholder URLs, no dummy data, no hardcoded fake values, no example.com
-5. OUTPUT QUALITY — Output must be meaningful, properly formatted, and useful (not empty, not just debug prints)
-6. ERROR HANDLING — Network calls, file I/O, and API calls must have proper try/catch or try/except
-7. DEPENDENCIES — Only use libraries that actually exist. Correct import paths. No typos in module names
+EVALUATION FRAMEWORK (grade each dimension separately):
+
+1. RUNNABILITY (critical)
+   - Code MUST execute without errors (exit code 0)
+   - No unhandled exceptions, no segfaults, no infinite loops
+   - All imports resolve, all dependencies are available
+   - Check for syntax errors, indentation errors, missing colons/semicolons
+
+2. CORRECTNESS (critical)
+   - Output matches EXACTLY what the specification requested
+   - Logic is sound — no off-by-one errors, no wrong comparisons, no inverted conditions
+   - Data transformations preserve correctness (no truncation, no encoding corruption)
+   - Calculations are accurate (handle floating point, timezone, locale correctly)
+
+3. COMPLETENESS (critical)
+   - EVERY part of the spec is implemented — check each section
+   - All specified features are present and functional
+   - All specified outputs are produced
+   - No "TODO", "implement later", or placeholder sections
+
+4. REAL DATA & INTEGRATION (critical)
+   - No placeholder URLs (example.com, localhost, test.com)
+   - No dummy data, no hardcoded fake values
+   - No mock/stub implementations when real ones are needed
+   - Real API endpoints are used (verify with web_search if uncertain)
+
+5. ERROR HANDLING (high)
+   - EVERY network call has try/except with meaningful error messages
+   - EVERY file operation handles file-not-found and permission errors
+   - API calls handle rate limits (429), timeouts, auth failures (401/403)
+   - Input validation at entry points (type checking, range checking, sanitization)
+   - Resource cleanup in finally blocks (closing files, connections, sessions)
+
+6. SECURITY (high)
+   - No hardcoded secrets, API keys, or tokens
+   - No SQL injection vulnerabilities (parameterized queries)
+   - No command injection vulnerabilities
+   - Input sanitization for all external data
+   - No sensitive data in logs or error messages
+   - Environment variables used for all secrets
+
+7. CODE QUALITY (medium)
+   - Clean, readable code structure
+   - Proper function decomposition (no 200-line functions)
+   - Meaningful variable and function names
+   - Appropriate comments (explaining WHY, not WHAT)
+   - Consistent style (PEP 8 / ESLint standard)
+   - No dead code or commented-out sections
+
+VERIFICATION APPROACH:
+- If the code uses a library you're unfamiliar with, use web_search to verify:
+  - Does the library exist?
+  - Is the import path correct?
+  - Is the API usage correct for the current version?
+- If the spec mentions a specific API, verify the endpoint and parameters
+- Check for common gotchas: async/await without await, callback hell, race conditions
 
 GRADING SCALE:
-- PASS: Code runs successfully, output matches spec, no placeholders, proper error handling
-- FAIL: Any of the evaluation criteria above is not met
+- PASS: All critical criteria met AND no high-severity issues
+- FAIL: Any critical criteria not met, OR any high-severity security/error-handling issue
 
-DIAGNOSIS (when FAIL):
-- Identify the EXACT issue (don't just say "it doesn't work")
-- Point to the specific line/section that needs fixing
-- Suggest what the fix should be
-- If it's a library issue (wrong import, deprecated API, missing package), say which library and what the correct usage is
+DIAGNOSIS (when FAIL — be EXTREMELY specific):
+- State the EXACT criterion that failed
+- Point to the SPECIFIC line or section that has the issue
+- Quote the problematic code
+- Explain WHY it's wrong (not just WHAT is wrong)
+- Provide the EXACT fix needed
+- If it's a library issue, specify the correct library, version, and usage
 
 Format your response EXACTLY like this:
 VERDICT: <PASS or FAIL>
 REASON: <concise explanation of the result>
-DIAGNOSIS: <if FAIL, detailed breakdown of what went wrong and how to fix it>
+DIAGNOSIS: <if FAIL, detailed breakdown with specific line references and fixes>
 OUTPUT: <what the code actually produced when executed>`;
 
 export interface TestResult {
@@ -53,27 +104,30 @@ export async function testCode(
   requestText: string,
   meta?: { runId?: string; slackUserId?: string }
 ): Promise<TestResult> {
+  // Execute code in sandbox first
   const execution = await sandbox({ type: "code", code, language });
 
-  const messages = [
-    { role: "system" as const, content: QA_PROMPT },
+  // Use tool-use loop so QA can verify library usage via web_search
+  const evaluation = await runToolUseLoop(
+    `Evaluate this code against the specification ruthlessly.\n\nOriginal request: ${requestText}\n\nSpecification:\n${spec}\n\nCode (${language}):\n${code}\n\nExecution result:\nstdout: ${execution.stdout}\nstderr: ${execution.stderr}\nerror: ${execution.error || "none"}\n\n${!execution.success ? "IMPORTANT: The code FAILED to execute. Focus on diagnosing the runtime error.\n\n" : ""}If the code uses any external library, use web_search to verify the library exists, the import is correct, and the API usage matches the current version. Then provide your evaluation.`,
     {
-      role: "user" as const,
-      content: `Original request: ${requestText}\n\nSpec:\n${spec}\n\nCode:\n${code}\n\nExecution result:\nstdout: ${execution.stdout}\nstderr: ${execution.stderr}\nerror: ${execution.error || "none"}`,
-    },
-  ];
-
-  const evaluation = await agentChat(
-    "qa",
-    messages,
-    { temperature: 0.2, maxTokens: 8192 },
-    meta
+      systemPrompt: QA_PROMPT,
+      tools: qaAgentTools,
+      maxIterations: 3,
+      temperature: 0.2,
+      maxTokens: 16384,
+      agentName: "qa",
+      context: {
+        slackUserId: meta?.slackUserId,
+        runId: meta?.runId,
+      },
+    }
   );
 
   const verdictMatch = evaluation.match(/VERDICT:\s*(PASS|FAIL)/i);
   const passed = verdictMatch?.[1]?.toUpperCase() === "PASS" && execution.success;
 
-  // Extract structured learning from QA evaluation if it failed
+  // Extract structured learning from QA evaluation
   let learning: TestResult["learning"] = undefined;
   if (!passed) {
     const reasonMatch = evaluation.match(/REASON:\s*([\s\S]*?)(?=DIAGNOSIS:|OUTPUT:|$)/i);
@@ -90,7 +144,7 @@ export async function testCode(
         domain,
         taskType,
         mistake: `${reason} ${diagnosis}`.slice(0, 2000),
-        correction: diagnosis.includes("fix") || diagnosis.includes("should")
+        correction: diagnosis.includes("fix") || diagnosis.includes("should") || diagnosis.includes("use")
           ? diagnosis.slice(0, 2000)
           : reason.slice(0, 2000),
       };
@@ -143,12 +197,15 @@ export async function persistLearning(
 
 function extractDomain(request: string): string {
   const domains = [
-    /api|rest|http/i, /scraper|scrape|parsing/i,
-    /database|db|sql/i, /auth|login|jwt/i,
-    /file|csv|json|excel|pdf/i, /email|slack|discord/i,
-    /test/i, /docker|deploy/i, /automation|cron/i,
-    /data|analytics|chart/i, /browser|selenium/i,
-    /cli|command/i, /image|resize|convert/i,
+    /api|rest|http|graphql/i, /scraper|scrape|parsing|crawl/i,
+    /database|db|sql|postgres|mysql|mongo|sqlite/i, /auth|login|jwt|oauth/i,
+    /file|csv|json|excel|pdf|docx/i, /email|smtp|sendgrid/i,
+    /slack|discord|telegram|webhook/i, /test|testing|unit test|integration/i,
+    /docker|deploy|ci\/cd|kubernetes/i, /automation|cron|scheduled/i,
+    /data|analytics|chart|graph|visualization/i, /browser|selenium|playwright|puppeteer/i,
+    /cli|command line|argparse/i, /image|resize|convert|compress|ffmpeg/i,
+    /payment|stripe|paypal/i, /ai|ml|machine learning|openai|llm/i,
+    /search|filter|sort|elasticsearch/i, /notification|push|sms/i,
   ];
   for (const d of domains) {
     if (d.test(request)) return request.match(d)?.[0] || "general";
@@ -157,13 +214,14 @@ function extractDomain(request: string): string {
 }
 
 function extractTaskType(request: string): string {
-  if (/download|fetch|pull|get/i.test(request)) return "data-fetch";
-  if (/send|post|create|write|upload/i.test(request)) return "data-write";
-  if (/transform|convert|process|parse/i.test(request)) return "data-transform";
-  if (/search|find|filter|query/i.test(request)) return "search";
-  if (/monitor|track|watch|alert/i.test(request)) return "monitoring";
-  if (/report|summary|generate/i.test(request)) return "reporting";
-  if (/scrape|extract|crawl/i.test(request)) return "scraping";
-  if (/automate|schedule|batch/i.test(request)) return "automation";
+  if (/download|fetch|pull|get|retrieve|scrape|extract/i.test(request)) return "data-fetch";
+  if (/send|post|create|write|upload|submit|publish/i.test(request)) return "data-write";
+  if (/transform|convert|process|parse|clean|migrate/i.test(request)) return "data-transform";
+  if (/search|find|filter|query|lookup/i.test(request)) return "search";
+  if (/monitor|track|watch|alert|notify/i.test(request)) return "monitoring";
+  if (/report|summary|generate|dashboard|compile/i.test(request)) return "reporting";
+  if (/automate|schedule|batch|pipeline/i.test(request)) return "automation";
+  if (/api|endpoint|server|route|handler/i.test(request)) return "api";
+  if (/deploy|build|package|release/i.test(request)) return "deployment";
   return "general";
 }

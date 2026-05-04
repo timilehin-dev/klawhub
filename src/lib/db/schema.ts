@@ -98,7 +98,7 @@ export const schedules = pgTable("schedules", {
 export const knowledge = pgTable("knowledge", {
   id: uuid("id").primaryKey().defaultRandom(),
   slackUserId: text("slack_user_id").notNull(),
-  entityType: text("entity_type").notNull().$type<"project" | "person" | "event" | "standing_item">(),
+  entityType: text("entity_type").notNull().$type<"project" | "person" | "event" | "standing_item" | "technology" | "preference" | "relationship">(),
   entityName: text("entity_name").notNull(),
   data: jsonb("data").notNull().default({}),
   source: text("source"),

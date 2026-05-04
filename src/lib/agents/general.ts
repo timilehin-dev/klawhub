@@ -98,10 +98,13 @@ function isComplexRequest(message: string): boolean {
     /\b(research.*and|find.*and.*compare|gather.*and.*synthesize)\b/i,
     /\b(create.*report|write.*report|build.*dashboard)\b/i,
     /\b(why|how come|what causes|what leads to)\b/i,
+    /\b(pros.*cons|advantages.*disadvantages|trade.?offs?)\b/i,
+    /\b(before.*after|impact.*of|effect.*on)\b/i,
+    /\b(breakdown|break down|deep.?dive)\b/i,
   ];
 
   const signalCount = complexitySignals.filter((p) => p.test(message)).length;
-  const isLongMessage = message.length > 200;
+  const isLongMessage = message.length > 150;
 
   return signalCount >= 2 || (signalCount >= 1 && isLongMessage);
 }

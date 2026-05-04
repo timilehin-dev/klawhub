@@ -36,14 +36,14 @@ export async function getThreadHistory(
       if (!text) continue;
 
       // Truncate very long messages to keep context manageable
-      const truncated = text.length > 500 ? text.slice(0, 500) + "..." : text;
+      const truncated = text.length > 1000 ? text.slice(0, 1000) + "..." : text;
       contextMessages.push(truncated);
     }
 
     if (contextMessages.length === 0) return "";
 
-    // Take last 10 messages to keep context window reasonable
-    const recent = contextMessages.slice(-10);
+    // Take last 15 messages to keep context window reasonable
+    const recent = contextMessages.slice(-15);
     return recent.join("\n");
   } catch (err) {
     console.error("[THREAD-CONTEXT] Failed to fetch thread history:", err);
@@ -64,18 +64,27 @@ export function buildFollowupContext(
 ): string {
   const parts: string[] = [];
 
-  parts.push(`PREVIOUS REQUEST:\n${previousRequest.slice(0, 500)}`);
+  parts.push(`PREVIOUS REQUEST:\n${previousRequest.slice(0, 800)}`);
 
   if (previousResult?.spec) {
-    parts.push(`PREVIOUS SPEC:\n${previousResult.spec.slice(0, 1000)}`);
+    parts.push(`PREVIOUS SPEC:\n${previousResult.spec.slice(0, 1500)}`);
   }
 
   if (previousResult?.error) {
-    parts.push(`PREVIOUS ERROR:\n${previousResult.error.slice(0, 500)}`);
+    parts.push(`PREVIOUS ERROR:\n${previousResult.error.slice(0, 800)}`);
   }
 
   if (previousResult?.evaluation) {
-    parts.push(`PREVIOUS QA EVALUATION:\n${previousResult.evaluation.slice(0, 500)}`);
+    parts.push(`PREVIOUS QA EVALUATION:\n${previousResult.evaluation.slice(0, 800)}`);
+  }
+
+  if (previousResult?.code) {
+    // Include first and last 50 lines for context without bloating
+    const lines = previousResult.code.split("\n");
+    const preview = lines.length > 100
+      ? lines.slice(0, 50).join("\n") + "\n... (truncated) ...\n" + lines.slice(-50).join("\n")
+      : previousResult.code;
+    parts.push(`PREVIOUS CODE (preview):\n${preview.slice(0, 2000)}`);
   }
 
   if (threadHistory) {

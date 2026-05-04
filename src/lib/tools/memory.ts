@@ -12,13 +12,13 @@ import {
  */
 export async function buildUserContext(slackUserId: string): Promise<string> {
   try {
-    const recentMem = await getRecentMemories(slackUserId, undefined, 8);
+    const recentMem = await getRecentMemories(slackUserId, undefined, 15);
     if (recentMem.length === 0) return "";
 
     const formatted = recentMem
       .map((m) => `[${m.category}] ${m.content}`)
       .join("\n");
-    return formatted.slice(0, 800); // cap to avoid bloating prompts
+    return formatted.slice(0, 2000); // cap to avoid bloating prompts
   } catch {
     return ""; // non-critical
   }

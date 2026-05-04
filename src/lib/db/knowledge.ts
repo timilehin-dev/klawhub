@@ -1,8 +1,8 @@
 import { getDb } from "./connection";
 import { knowledge } from "./schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ilike, or } from "drizzle-orm";
 
-type EntityType = "project" | "person" | "event" | "standing_item";
+type EntityType = "project" | "person" | "event" | "standing_item" | "technology" | "preference" | "relationship";
 
 export function upsertKnowledge(
   slackUserId: string,
@@ -36,16 +36,20 @@ export function getKnowledge(
 }
 
 export function searchKnowledge(slackUserId: string, query: string) {
+  const pattern = `%${query}%`;
   return getDb()
     .select()
     .from(knowledge)
     .where(
       and(
         eq(knowledge.slackUserId, slackUserId),
-        // Simple ILIKE search on entity name
-        eq(knowledge.entityName, query) // exact match first
+        or(
+          ilike(knowledge.entityName, pattern),
+          ilike(knowledge.entityType, pattern)
+        )
       )
-    );
+    )
+    .limit(20);
 }
 
 export function deleteKnowledge(id: string) {
@@ -74,7 +78,7 @@ export async function buildKnowledgeContext(slackUserId: string): Promise<string
       return `[${k.entityType}] ${k.entityName}: ${dataStr}`;
     });
 
-    return lines.join("\n").slice(0, 1200);
+    return lines.join("\n").slice(0, 3000);
   } catch {
     return "";
   }
