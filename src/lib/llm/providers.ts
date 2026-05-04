@@ -50,7 +50,7 @@ export function getProviders(): ProviderConfig[] {
     "aihubmix",
     "https://aihubmix.com/v1",
     ["AIHUBMIX_API_KEY_1", "AIHUBMIX_API_KEY_2"],
-    process.env.AIHUBMIX_MODEL || "kimi-k2.5-free",
+    process.env.AIHUBMIX_MODEL || "k2.6-code-preview-free",
     "aihubmix"
   );
   if (aihubmix) providers.push(aihubmix);
@@ -65,9 +65,7 @@ export function getProviders(): ProviderConfig[] {
  * Override per-agent here. Agents not listed use the "default" provider.
  */
 export const AGENT_PROVIDER_MAP: Record<string, string> = {
-  engineer: "aihubmix",     // Engineer uses AIHubMix for better code generation
-  classifier: "aihubmix",   // Classifier needs speed, not power — use fast model
-  general: "aihubmix",      // General chat — use fast model for snappy responses
+  engineer: "aihubmix",     // Engineer uses AIHubMix for code generation
 };
 
 export const DEFAULT_PROVIDER_ID = "default";
