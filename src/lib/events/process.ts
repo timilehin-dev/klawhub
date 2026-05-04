@@ -79,19 +79,23 @@ const SCHEDULE_PATTERNS = [
 export async function processSlackEvent(input: ProcessEventInput): Promise<void> {
   const { event, teamId } = input;
 
+  // ── Instant acknowledgment — fire reaction BEFORE any DB/API calls ──
+  const channelId = event.channel as string;
+  const messageTs = event.ts as string;
+  const userId = event.user as string;
+  const threadTs = event.thread_ts as string | undefined;
+
+  addReaction(channelId, messageTs, "eyes", teamId).catch(() => {});
+
   // Periodic cleanup (~1% chance per event — amortized, non-blocking)
   if (Math.random() < 0.01) {
     cleanupOldEvents().catch(() => {});
   }
 
   // Track workspace member + ensure workspace exists (fire-and-forget, non-critical)
-  const userId = event.user as string;
   ensureMember(userId, teamId).catch(() => {});
   ensureWorkspaceExists(teamId).catch(() => {});
 
-  const channelId = event.channel as string;
-  const threadTs = event.thread_ts as string | undefined;
-  const messageTs = event.ts as string;
   const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
   if (!text) return;
 
@@ -101,7 +105,7 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
 
   if (!isMention && !isDM && !isThreadReply) return;
 
-  // Resolve workspaceId for integration tools (non-critical)
+  // Resolve workspaceId for integration tools (non-critical, lazy)
   let workspaceId: string | undefined;
   try {
     if (teamId) {
@@ -109,9 +113,6 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
       if (ws && ws.length > 0) workspaceId = ws[0].id;
     }
   } catch { /* non-critical */ }
-
-  // Immediate reaction so user sees the bot is alive
-  addReaction(channelId, messageTs, "eyes", teamId).catch(() => {});
 
   try {
     // ══════════════════════════════════════════════════

@@ -5,46 +5,50 @@ import { decrypt } from "@/lib/integrations/crypto";
 // Per-workspace client cache (survives across requests in same serverless instance)
 const clientCache = new Map<string, WebClient>();
 
+// Pre-warmed default client (env var token) — avoids DB lookup on every first request
+let _prewarmedDefault: WebClient | null = null;
+function getPrewarmedDefault(): WebClient {
+  if (!_prewarmedDefault) {
+    const token = process.env.SLACK_BOT_TOKEN;
+    if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
+    _prewarmedDefault = new WebClient(token);
+  }
+  return _prewarmedDefault;
+}
+
 /**
  * Get a workspace-specific Slack WebClient.
  * Falls back to SLACK_BOT_TOKEN env var if no workspace token is stored.
+ * Optimized: returns pre-warmed default client immediately on cache miss,
+ * then kicks off async DB lookup for workspace-specific token if needed.
  */
 export async function getWorkspaceSlack(teamId?: string): Promise<WebClient> {
-  if (!teamId) {
-    // No team context — use default env var token
-    const token = process.env.SLACK_BOT_TOKEN;
-    if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
-    return new WebClient(token);
-  }
+  if (!teamId) return getPrewarmedDefault();
 
   // Check cache first
-  let client = clientCache.get(teamId);
-  if (client) return client;
+  const cached = clientCache.get(teamId);
+  if (cached) return cached;
 
-  // Look up workspace token from DB
+  // Try DB lookup for workspace-specific token (OAuth-installed workspaces)
   try {
     const ws = await getWorkspaceByTeamId(teamId);
     if (ws && ws.length > 0 && ws[0].botToken) {
-      // Decrypt the stored bot token (handle both encrypted and legacy plaintext)
       let token: string;
       try {
         token = decrypt(ws[0].botToken);
       } catch {
-        // Legacy: token was stored before encryption was added
-        token = ws[0].botToken;
+        token = ws[0].botToken; // Legacy plaintext fallback
       }
-      client = new WebClient(token);
+      const client = new WebClient(token);
       clientCache.set(teamId, client);
       return client;
     }
   } catch {
-    // DB lookup failed — fall through to default token
+    // DB lookup failed — fall through to default
   }
 
-  // Fallback to default token
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) throw new Error("SLACK_BOT_TOKEN is not set and no workspace token found");
-  client = new WebClient(token);
+  // Fallback: use default token and cache it for this teamId
+  const client = getPrewarmedDefault();
   clientCache.set(teamId, client);
   return client;
 }

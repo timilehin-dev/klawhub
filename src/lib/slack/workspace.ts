@@ -1,14 +1,27 @@
 import { getWorkspaceByTeamId, upsertWorkspaceMember, createWorkspace } from "@/lib/db";
 import { getWorkspaceSlack, invalidateWorkspaceClient } from "@/lib/slack/client";
 
+// ── Shared auth.test() cache — avoids redundant Slack API calls per event ──
+let _authCache: { teamId: string; userId: string; team: string; ts: number } | null = null;
+const AUTH_CACHE_TTL = 60_000; // 1 minute
+
+async function getCachedAuth(teamId?: string) {
+  if (_authCache && Date.now() - _authCache.ts < AUTH_CACHE_TTL && (!teamId || _authCache.teamId === teamId)) {
+    return { team_id: _authCache.teamId, user_id: _authCache.userId, team: _authCache.team };
+  }
+  const wsClient = await getWorkspaceSlack(teamId);
+  const auth = await wsClient.auth.test();
+  _authCache = { teamId: auth.team_id, userId: auth.user_id, team: auth.team || auth.user || "", ts: Date.now() };
+  return auth;
+}
+
 /**
  * Ensures a Slack user is tracked as a workspace member.
  * Called fire-and-forget from event handlers — never blocks the main flow.
  */
 export async function ensureMember(slackUserId: string, teamId?: string) {
   try {
-    const wsClient = await getWorkspaceSlack(teamId);
-    const auth = await wsClient.auth.test();
+    const auth = await getCachedAuth(teamId);
     const effectiveTeamId = teamId || auth.team_id;
     if (!effectiveTeamId) return;
 
@@ -17,6 +30,7 @@ export async function ensureMember(slackUserId: string, teamId?: string) {
 
     const workspaceId = ws[0].id;
 
+    const wsClient = await getWorkspaceSlack(teamId);
     let userName: string | undefined;
     try {
       const profile = await wsClient.users.profile.get({ user: slackUserId });
@@ -32,8 +46,7 @@ export async function ensureMember(slackUserId: string, teamId?: string) {
  */
 export async function ensureWorkspaceExists(teamId?: string) {
   try {
-    const wsClient = await getWorkspaceSlack(teamId);
-    const auth = await wsClient.auth.test();
+    const auth = await getCachedAuth(teamId);
     const effectiveTeamId = teamId || auth.team_id;
     const botUserId = auth.user_id;
     if (!effectiveTeamId || !botUserId) return;
@@ -63,8 +76,7 @@ export async function ensureWorkspaceExists(teamId?: string) {
  */
 export async function checkUsageLimit(teamId?: string): Promise<{ allowed: boolean; used: number; limit: number } | null> {
   try {
-    const wsClient = await getWorkspaceSlack(teamId);
-    const auth = await wsClient.auth.test();
+    const auth = await getCachedAuth(teamId);
     const effectiveTeamId = teamId || auth.team_id;
     if (!effectiveTeamId) return null;
 
