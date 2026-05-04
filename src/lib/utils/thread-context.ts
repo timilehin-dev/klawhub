@@ -29,7 +29,8 @@ export async function getThreadHistory(
 
     for (const msg of messages) {
       // Skip bot messages (we only want human context)
-      if (msg.bot_id || msg.subtype) continue;
+      const m = msg as Record<string, unknown>;
+      if (m.bot_id || m.subtype) continue;
 
       const text = (msg.text || "").replace(/<@[^>]+>/g, "").trim();
       if (!text) continue;
