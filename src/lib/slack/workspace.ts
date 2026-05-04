@@ -2,16 +2,22 @@ import { getWorkspaceByTeamId, upsertWorkspaceMember, createWorkspace } from "@/
 import { getWorkspaceSlack, invalidateWorkspaceClient } from "@/lib/slack/client";
 
 // ── Shared auth.test() cache — avoids redundant Slack API calls per event ──
-let _authCache: { teamId: string; userId: string; team: string; ts: number } | null = null;
+let _authCache: { teamId: string; userId: string; team: string; user: string; ts: number } | null = null;
 const AUTH_CACHE_TTL = 60_000; // 1 minute
 
 async function getCachedAuth(teamId?: string) {
   if (_authCache && Date.now() - _authCache.ts < AUTH_CACHE_TTL && (!teamId || _authCache.teamId === teamId)) {
-    return { team_id: _authCache.teamId, user_id: _authCache.userId, team: _authCache.team };
+    return { team_id: _authCache.teamId, user_id: _authCache.userId, team: _authCache.team, user: _authCache.user };
   }
   const wsClient = await getWorkspaceSlack(teamId);
   const auth = await wsClient.auth.test();
-  _authCache = { teamId: auth.team_id ?? "", userId: auth.user_id ?? "", team: auth.team || auth.user || "", ts: Date.now() };
+  _authCache = {
+    teamId: auth.team_id ?? "",
+    userId: auth.user_id ?? "",
+    team: auth.team || "",
+    user: auth.user || "",
+    ts: Date.now()
+  };
   return auth;
 }
 
