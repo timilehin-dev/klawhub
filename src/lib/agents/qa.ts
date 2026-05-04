@@ -34,9 +34,9 @@ export interface TestResult {
   evaluation: string;
   execution: {
     success: boolean;
-    stdout: string;
-    stderr: string;
-    error: string | null;
+    stdout?: string;
+    stderr?: string;
+    error?: string | null;
   };
   learning?: {
     domain: string;
