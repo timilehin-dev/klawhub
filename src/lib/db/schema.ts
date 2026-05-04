@@ -161,6 +161,22 @@ export const integrations = pgTable("integrations", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// ── Engineer Learnings: stores QA feedback and corrections for continuous improvement ──
+
+export const engineerLearnings = pgTable("engineer_learnings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  language: text("language").notNull(),
+  domain: text("domain").notNull(),
+  taskType: text("task_type").notNull(),
+  mistake: text("mistake").notNull(),
+  correction: text("correction").notNull(),
+  verdict: text("verdict").$type<"pass" | "fail">().notNull(),
+  specSnippet: text("spec_snippet"),
+  codeSnippet: text("code_snippet"),
+  runId: uuid("run_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
 // ── Intent list for classifier ──
 export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];
 

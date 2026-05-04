@@ -459,6 +459,13 @@ export const analystAgentTools: ToolDefinition[] = [
   webSearchTool,
 ];
 
+/** Tools available to the Engineer Agent (research + code verification) */
+export const engineerAgentTools: ToolDefinition[] = [
+  webSearchTool,
+  webReadTool,
+  codeExecuteTool,
+];
+
 // ── Tool Description Formatter ──
 
 export function formatToolDescriptions(tools: ToolDefinition[]): string {

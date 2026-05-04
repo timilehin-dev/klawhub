@@ -1,6 +1,6 @@
 export { getDb } from "./connection";
-export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs, workspaces, workspaceMembers, integrations } from "./schema";
-export { createRun, updateRun, getRunByThreadTs, getRecentRuns } from "./runs";
+export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs, workspaces, workspaceMembers, integrations, engineerLearnings } from "./schema";
+export { createRun, updateRun, getRun, getRunByThreadTs, getRecentRuns } from "./runs";
 export { createTask, updateTask, getRecentTasks, getTaskByThreadTs } from "./tasks";
 export {
   saveMemory,
@@ -44,4 +44,5 @@ export {
   checkWorkspaceUsageLimit,
 } from "./workspaces";
 export type { UsageLogInsert, UsageStats } from "./usage";
+export { saveEngineerLearning, getRelevantLearnings, getLearningStats } from "./engineer-learnings";
 export type { WorkspaceStats, UsageLimitResult } from "./workspaces";
