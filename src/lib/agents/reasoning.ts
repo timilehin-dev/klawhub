@@ -277,8 +277,12 @@ export async function runReasoningChain(
       step.status = "done";
       onStepComplete?.(step);
 
-      // ── Phase 3: Verify ──
-      if (retries < maxRetriesPerStep) {
+      // ── Phase 3: Verify (skip if output is substantial) ──
+      // Heuristic: skip verification LLM call if step produced meaningful output
+      const isSubstantialOutput = result.length >= 100 && !result.includes("[ERROR]");
+      if (isSubstantialOutput) {
+        verified = true; // trust the executor — saves 1 LLM call per step
+      } else if (retries < maxRetriesPerStep) {
         const verifyResponse = await agentChat("reasoning-verifier", [
           {
             role: "system",

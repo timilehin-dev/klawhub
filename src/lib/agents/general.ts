@@ -184,8 +184,8 @@ export async function chatAsAgent(
       const result = await runReasoningChain(fullMessage, {
         tools: generalAgentTools,
         context: toolContext,
-        maxSteps: 8,
-        maxRetriesPerStep: 3,
+        maxSteps: 4,
+        maxRetriesPerStep: 1,
         temperature: 0.6,
       });
       return result;

@@ -379,9 +379,6 @@ async function handleNewThreadOrDM(ctx: {
   if (classification.type === "chat") {
     try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
     const responseText = await chatAsAgent(userId, text, { workspaceId });
-    extractAndStoreKnowledge(userId, text).then((stored) => {
-      if (stored > 0) console.log(`[EVENTS] Chat knowledge: stored ${stored} entities for ${userId}`);
-    }).catch(() => {});
     await postToThread(channelId, messageTs, responseText, undefined, teamId);
     return;
   }
