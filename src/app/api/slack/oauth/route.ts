@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { WebClient } from "@slack/web-api";
+import { signWorkspaceId } from "@/lib/session";
+import { encrypt } from "@/lib/integrations/crypto";
 
 // Slack OAuth callback — exchanges code for token, creates workspace record
 export async function GET(request: NextRequest) {
@@ -57,6 +59,9 @@ export async function GET(request: NextRequest) {
     // Create or update workspace record
     const { createWorkspace, upsertWorkspaceMember } = await import("@/lib/db");
 
+    // Encrypt bot token before storing
+    const encryptedBotToken = data.bot_token ? encrypt(data.bot_token) : undefined;
+
     // The installer becomes workspace admin
     const installerUserId = data.authed_user?.id;
     const installerUserToken = data.authed_user?.access_token;
@@ -101,7 +106,7 @@ export async function GET(request: NextRequest) {
         const { updateWorkspace } = await import("@/lib/db");
         await updateWorkspace(existing[0].id, {
           slackBotUserId: botUserId,
-          botToken: data.bot_token,
+          botToken: encryptedBotToken,
           name: workspaceName,
           domain: workspaceDomain,
           isActive: true,
@@ -112,7 +117,7 @@ export async function GET(request: NextRequest) {
         const [created] = await createWorkspace({
           slackTeamId: data.team.id,
           slackBotUserId: botUserId,
-          botToken: data.bot_token,
+          botToken: encryptedBotToken,
           name: workspaceName,
           domain: workspaceDomain,
           plan: "free",
@@ -144,20 +149,20 @@ export async function GET(request: NextRequest) {
     const redirectUrl = new URL(`/install?success=1&workspace=${encodeURIComponent(workspaceSlug)}`, request.url);
     const response = NextResponse.redirect(redirectUrl);
 
-    // Store workspace ID in an httpOnly cookie (secure in production)
+    // Store signed workspace ID in an httpOnly cookie
     if (workspaceId) {
-      response.cookies.set("klawhub_workspace_id", workspaceId, {
+      response.cookies.set("klawhub_workspace_id", signWorkspaceId(workspaceId), {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 365, // 1 year
+        maxAge: 60 * 60 * 24 * 30, // 30 days (renews on next install)
         path: "/",
       });
       // Also store workspace name for display (not httpOnly — readable by client)
       response.cookies.set("klawhub_workspace_name", workspaceName, {
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 365,
+        maxAge: 60 * 60 * 24 * 30,
         path: "/",
       });
     }

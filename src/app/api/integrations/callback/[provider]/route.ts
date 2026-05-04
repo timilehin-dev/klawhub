@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProvider } from "@/lib/integrations/providers/registry";
 import { completeOAuthFlow } from "@/lib/integrations/oauth";
 import { getWorkspaceById } from "@/lib/db";
+import { verifyOAuthState } from "@/lib/session";
 
 // GET /api/integrations/callback/[provider]?code=xxx&state=xxx
 export async function GET(
@@ -32,14 +33,16 @@ export async function GET(
     );
   }
 
-  const stateParts = state.split(":");
-  if (stateParts.length < 3 || stateParts[0] !== providerId) {
+  // Verify HMAC-signed state (prevents forgery and replay attacks)
+  const parsedState = verifyOAuthState(state);
+  if (!parsedState || parsedState.provider !== providerId) {
+    console.error(`[INTEGRATIONS] Invalid or expired OAuth state for ${providerId}`);
     return NextResponse.redirect(
       new URL(`/dashboard?error=invalid_state&provider=${providerId}`, request.url)
     );
   }
 
-  const workspaceId = stateParts[1];
+  const workspaceId = parsedState.workspaceId;
   const ws = await getWorkspaceById(workspaceId);
   if (!ws || ws.length === 0) {
     return NextResponse.redirect(

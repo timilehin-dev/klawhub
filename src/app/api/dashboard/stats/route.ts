@@ -1,10 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getWorkspaceStats, getWorkspaceMembers, checkWorkspaceUsageLimit } from "@/lib/db";
+import { verifyWorkspaceId } from "@/lib/session";
 
 // GET /api/dashboard/stats?workspaceId=xxx
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  // Prefer the middleware-validated header, fall back to query param
+  const validatedId = request.headers.get("x-validated-workspace-id");
   const { searchParams } = new URL(request.url);
-  const workspaceId = searchParams.get("workspaceId");
+  const workspaceId = validatedId || searchParams.get("workspaceId");
 
   if (!workspaceId) {
     return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });

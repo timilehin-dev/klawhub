@@ -3,15 +3,16 @@ import { getWorkspaceIntegrations, disconnectIntegration } from "@/lib/integrati
 
 // GET /api/integrations/manage?workspaceId=xxx — list active integrations
 export async function GET(request: NextRequest) {
+  // Prefer the middleware-validated header, fall back to query param
+  const validatedId = request.headers.get("x-validated-workspace-id");
   const { searchParams } = new URL(request.url);
-  const workspaceId = searchParams.get("workspaceId");
+  const workspaceId = validatedId || searchParams.get("workspaceId");
 
   if (!workspaceId) {
     return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
   }
 
   try {
-    // workspaceId here is the actual UUID, not team ID
     const integrations = await getWorkspaceIntegrations(workspaceId);
     // Don't expose encrypted tokens
     const safe = integrations.map((i: { id: string; provider: string; status: string; externalAccountId: string | null; externalAccountName: string | null; externalAccountEmail: string | null; scope: string | null; lastUsedAt: Date | null; createdAt: Date | null }) => ({

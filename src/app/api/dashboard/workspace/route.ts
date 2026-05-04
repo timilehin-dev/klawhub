@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspaceById, getWorkspaceStats, checkWorkspaceUsageLimit, getWorkspaceMembers } from "@/lib/db";
 import { getWorkspaceIntegrations } from "@/lib/integrations/store";
+import { verifyWorkspaceId } from "@/lib/session";
 
 // GET /api/dashboard/workspace — returns workspace info from cookie
 export async function GET(request: NextRequest) {
-  const workspaceId = request.cookies.get("klawhub_workspace_id")?.value;
+  // Prefer the middleware-validated header, fall back to cookie verification
+  const validatedId = request.headers.get("x-validated-workspace-id");
+  const rawCookie = request.cookies.get("klawhub_workspace_id")?.value;
+  const workspaceId = validatedId || (rawCookie ? verifyWorkspaceId(rawCookie) : null);
 
   if (!workspaceId) {
     return NextResponse.json({ workspace: null });

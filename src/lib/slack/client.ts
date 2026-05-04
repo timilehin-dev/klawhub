@@ -1,5 +1,6 @@
 import { WebClient } from "@slack/web-api";
 import { getWorkspaceByTeamId } from "@/lib/db";
+import { decrypt } from "@/lib/integrations/crypto";
 
 // Per-workspace client cache (survives across requests in same serverless instance)
 const clientCache = new Map<string, WebClient>();
@@ -24,7 +25,15 @@ export async function getWorkspaceSlack(teamId?: string): Promise<WebClient> {
   try {
     const ws = await getWorkspaceByTeamId(teamId);
     if (ws && ws.length > 0 && ws[0].botToken) {
-      client = new WebClient(ws[0].botToken);
+      // Decrypt the stored bot token (handle both encrypted and legacy plaintext)
+      let token: string;
+      try {
+        token = decrypt(ws[0].botToken);
+      } catch {
+        // Legacy: token was stored before encryption was added
+        token = ws[0].botToken;
+      }
+      client = new WebClient(token);
       clientCache.set(teamId, client);
       return client;
     }
