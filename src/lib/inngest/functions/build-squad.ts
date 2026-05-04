@@ -175,7 +175,7 @@ export const buildSquadWorkflow = inngest.createFunction(
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*QA Agent* -- Test 1\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation.slice(0, 2000)}`,
+          `*QA Agent* -- Test 1\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation}`,
           undefined,
           teamId
         );
@@ -232,7 +232,7 @@ export const buildSquadWorkflow = inngest.createFunction(
           await postToThread(
             slackChannelId,
             slackThreadTs,
-            `*QA Agent* -- Test 2\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation.slice(0, 2000)}`,
+            `*QA Agent* -- Test 2\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation}`,
             undefined,
             teamId
           );

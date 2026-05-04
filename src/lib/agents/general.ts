@@ -4,7 +4,6 @@ import { generalAgentTools } from "@/lib/tools/registry";
 import { getActiveSkills, getUserSchedules, getUserSkillStats } from "@/lib/db";
 import { buildUserContext } from "@/lib/tools/memory";
 import { buildKnowledgeContext } from "@/lib/db/knowledge";
-import { getWorkspaceByTeamId } from "@/lib/db";
 
 const GENERAL_AGENT_SYSTEM = `You are Klawhub, a multi-agent AI coworker that lives inside Slack. You are NOT a generic chatbot — you are a coordinated system of specialized agents and real tools.
 
@@ -16,6 +15,13 @@ Your responses render in Slack which uses mrkdwn (NOT standard markdown).
 - NO headings with # ## ### (they do not render in Slack)
 - Use *bold text* for emphasis instead of headings
 - Use bullet points with • or numbered lists with 1. 2. 3.
+
+CRITICAL CONTEXT AWARENESS:
+When a user sends a message, you may receive previous conversation context from the thread.
+Use this context to understand what the user is referring to. If someone says "try again", "fix that",
+"make it better", or any vague instruction, look at the context to understand WHAT they mean.
+Never say "try what?" or "what do you mean?" if there is context that makes it obvious.
+Always infer intent from context before asking for clarification.
 
 Your Architecture:
 
@@ -72,13 +78,16 @@ When users share information:
 When users ask you to do something complex (multi-step research, analysis across multiple sources, comparisons):
 • Use your multi-step reasoning capability to plan before executing
 • Break the request into steps and verify each step's result
-• This is triggered automatically for complex requests
+
+When context from previous conversation is provided:
+• Use it to understand what the user is referring to
+• Do NOT re-ask questions that are already answered in the context
+• Continue the conversation naturally, building on what was already discussed
 
 Keep responses natural, professional, and helpful. You're a coworker, not a servant.`;
 
 /**
  * Determines if a request is complex enough to warrant multi-step reasoning chains.
- * Simple questions, greetings, and single-tool requests use the standard loop.
  */
 function isComplexRequest(message: string): boolean {
   const complexitySignals = [
@@ -91,19 +100,21 @@ function isComplexRequest(message: string): boolean {
     /\b(why|how come|what causes|what leads to)\b/i,
   ];
 
-  // Count complexity signals
   const signalCount = complexitySignals.filter((p) => p.test(message)).length;
-
-  // Also check message length — longer messages tend to be more complex
   const isLongMessage = message.length > 200;
 
   return signalCount >= 2 || (signalCount >= 1 && isLongMessage);
 }
 
+export interface ChatOptions {
+  workspaceId?: string;
+  threadHistory?: string;
+}
+
 export async function chatAsAgent(
   slackUserId: string,
   userMessage: string,
-  options?: { workspaceId?: string }
+  options?: ChatOptions
 ): Promise<string> {
   // Gather all user context in parallel
   const [activeSkills, userSchedules, skillStats, memoryContext, knowledgeContext] = await Promise.all([
@@ -148,7 +159,7 @@ export async function chatAsAgent(
   }
 
   const contextSection = contextBlocks.length > 0
-    ? "\n\n———\n\n" + contextBlocks.join("\n\n")
+    ? "\n\n---\n\n" + contextBlocks.join("\n\n")
     : "";
 
   const systemPrompt = GENERAL_AGENT_SYSTEM + contextSection;
@@ -158,14 +169,20 @@ export async function chatAsAgent(
     workspaceId: options?.workspaceId,
   };
 
+  // Build the user message with thread history if available
+  let fullMessage = userMessage;
+  if (options?.threadHistory) {
+    fullMessage = `[PREVIOUS CONVERSATION IN THIS THREAD (use this to understand context):\n${options.threadHistory}]\n\n---\n\n[USER'S CURRENT MESSAGE]:\n${userMessage}`;
+  }
+
   // Use multi-step reasoning for complex requests
   if (isComplexRequest(userMessage)) {
     try {
-      const result = await runReasoningChain(userMessage, {
+      const result = await runReasoningChain(fullMessage, {
         tools: generalAgentTools,
         context: toolContext,
-        maxSteps: 5,
-        maxRetriesPerStep: 1,
+        maxSteps: 8,
+        maxRetriesPerStep: 3,
         temperature: 0.6,
       });
       return result;
@@ -174,12 +191,13 @@ export async function chatAsAgent(
     }
   }
 
-  return runToolUseLoop(userMessage, {
+  return runToolUseLoop(fullMessage, {
     systemPrompt,
     tools: generalAgentTools,
     context: toolContext,
-    maxIterations: 6,
+    maxIterations: 15,
     temperature: 0.7,
+    maxTokens: 131072,
     agentName: "general",
   });
 }

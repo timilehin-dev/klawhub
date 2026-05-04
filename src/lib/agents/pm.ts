@@ -70,7 +70,7 @@ export async function createSpec(request: string, userContext: string) {
     {
       systemPrompt: PM_PROMPT,
       tools: pmAgentTools,
-      maxIterations: 8,
+      maxIterations: 12,
       temperature: 0.3,
       maxTokens: 4096,
       agentName: "pm",

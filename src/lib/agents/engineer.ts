@@ -82,7 +82,7 @@ export async function writeCode(
     {
       systemPrompt: ENGINEER_PROMPT,
       tools: engineerAgentTools,
-      maxIterations: 6,
+      maxIterations: 10,
       temperature: 0.2,
       maxTokens: 131072,
       agentName: "engineer",

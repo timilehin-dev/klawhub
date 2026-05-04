@@ -58,7 +58,7 @@ export const analyticsWorkflow = inngest.createFunction(
       await updateTask(taskId, {
         status: exec.success ? "done" : "error",
         result: {
-          stdout: (exec.stdout || "").slice(0, 2000),
+          stdout: exec.stdout || "",
           insights: String(result.insights),
         },
       });
@@ -76,7 +76,7 @@ export const analyticsWorkflow = inngest.createFunction(
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `*Analysis ${exec.success ? "Complete" : "Failed"}*\n\n${String(result.insights).slice(0, 2000)}\n${exec.output_file ? "\n_Chart uploaded above._" : ""}\n_Reply in this thread for follow-up analysis._`,
+        `*Analysis ${exec.success ? "Complete" : "Failed"}*\n\n${String(result.insights)}\n${exec.output_file ? "\n_Chart uploaded above._" : ""}\n_Reply in this thread for follow-up analysis._`,
         undefined,
         teamId
       );

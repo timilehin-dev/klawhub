@@ -66,7 +66,7 @@ export async function testCode(
   const evaluation = await agentChat(
     "qa",
     messages,
-    { temperature: 0.2, maxTokens: 2000 },
+    { temperature: 0.2, maxTokens: 8192 },
     meta
   );
 

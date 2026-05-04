@@ -9,7 +9,7 @@ RULES:
 3. Cross-reference information from multiple sources.
 4. Structure findings clearly with headings and bullet points.
 5. Always cite sources with URLs.
-6. Be thorough but concise — aim for substance over length.
+6. Be thorough — depth matters more than brevity. Exhaust all relevant sources.
 7. Highlight key takeaways and actionable insights.
 8. Do NOT fabricate information — only report what you find from sources.`;
 
@@ -22,7 +22,8 @@ export async function conductResearch(topic: string, meta?: { taskId?: string; s
   const findings = await runToolUseLoop(topic, {
     systemPrompt: RESEARCH_PROMPT,
     tools: researchAgentTools,
-    maxIterations: 10,
+    maxIterations: 20,
+    maxTokens: 131072,
     temperature: 0.4,
     context: {
       slackUserId: meta?.slackUserId,

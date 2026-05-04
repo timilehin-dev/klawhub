@@ -36,7 +36,7 @@ export const researchWorkflow = inngest.createFunction(
       await postToThread(
         slackChannelId,
         slackThreadTs,
-        `*Research Complete*\n\n${String(result.findings).slice(0, 3000)}\n\n*Sources:*\n${sourceList}`,
+        `*Research Complete*\n\n${String(result.findings)}\n\n*Sources:*\n${sourceList}`,
         undefined,
         teamId
       );
@@ -51,7 +51,7 @@ export const researchWorkflow = inngest.createFunction(
       await updateTask(taskId, {
         status: "done",
         result: {
-          findings: String(result.findings).slice(0, 1000),
+          findings: String(result.findings),
           sources,
         },
       });

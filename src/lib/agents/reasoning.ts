@@ -195,8 +195,8 @@ export async function runReasoningChain(
   const {
     tools,
     context = {},
-    maxSteps = 6,
-    maxRetriesPerStep = 2,
+    maxSteps = 10,
+    maxRetriesPerStep = 3,
     temperature = 0.5,
     onStepComplete,
   } = options;
@@ -222,7 +222,7 @@ export async function runReasoningChain(
       systemPrompt: `You are Klawhub, a multi-agent AI coworker in Slack. Respond helpfully using the available tools.`,
       tools,
       context,
-      maxIterations: 8,
+      maxIterations: 15,
       temperature,
       agentName: "reasoning-fallback",
     });

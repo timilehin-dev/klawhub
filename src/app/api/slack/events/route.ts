@@ -12,21 +12,10 @@ import { extractAndStoreKnowledge } from "@/lib/tools/knowledge-extractor";
 import { ensureMember, checkUsageLimit, ensureWorkspaceExists } from "@/lib/slack/workspace";
 import { getWorkspaceByTeamId } from "@/lib/db";
 import { trackSkillUsage } from "@/lib/db";
+import { getThreadHistory, buildFollowupContext } from "@/lib/utils/thread-context";
 
 const processedEvents = new Set<string>();
 const MAX_DEDUP = 100;
-
-const FOLLOWUP_PATTERNS = [
-  /\b(revise|revision|update|modify|change|fix|improve|adjust|tweak)\b/i,
-  /\b(make it|try again|redo|regenerate|re-do)\b/i,
-  /\binstead|different|another|alternative|more detail/i,
-  /\b(convert|translate|rewrite|reformat)\b/i,
-];
-
-const SCHEDULE_PATTERNS = [
-  /\b(schedul|remind|cron|recurring|every|daily|weekly|monthly)\b/i,
-  /\b(set up|create|add)\s+(a\s+)?(schedul|remind|cron|alert)/i,
-];
 
 const APPROVAL_PATTERNS = [
   /^\s*(approve|yes|ok|go ahead|looks good|proceed|accepted|ship it|do it|lgtm)\s*$/i,
@@ -36,6 +25,11 @@ const APPROVAL_PATTERNS = [
 const REJECTION_PATTERNS = [
   /^\s*(reject|no|cancel|stop|don't|do not|decline|nay)\s*$/i,
   /^\s*-1\s*$/,
+];
+
+const SCHEDULE_PATTERNS = [
+  /\b(schedul|remind|cron|recurring|every|daily|weekly|monthly)\b/i,
+  /\b(set up|create|add)\s+(a\s+)?(schedul|remind|cron|alert)/i,
 ];
 
 export async function POST(req: NextRequest) {
@@ -74,25 +68,16 @@ export async function POST(req: NextRequest) {
   const channelId = event.channel as string;
   const threadTs = event.thread_ts as string | undefined;
   const messageTs = event.ts as string;
-
-  // Extract team_id for multi-workspace support
   const teamId = payload.team_id as string | undefined;
 
   const isMention = event.type === "app_mention";
   const isDM = event.type === "message" && event.channel_type === "im";
   const isThreadReply = !!(threadTs && threadTs !== messageTs);
 
+  // Only process: mentions, DMs, and thread replies
   if (!isMention && !isDM && !isThreadReply) {
     return NextResponse.json({ ok: true });
   }
-
-  if (text.length > 4000) {
-    await postToThread(channelId, messageTs, "That message is too long. Please keep requests under 4000 characters.", undefined, teamId);
-    return NextResponse.json({ ok: true });
-  }
-
-  // Immediate reaction so user sees the bot is alive (fire-and-forget)
-  addReaction(channelId, messageTs, "eyes", teamId).catch(() => {});
 
   // Track user as workspace member + ensure workspace exists (fire-and-forget, non-critical)
   ensureMember(userId, teamId).catch(() => {});
@@ -107,21 +92,26 @@ export async function POST(req: NextRequest) {
     }
   } catch { /* non-critical */ }
 
+  // Immediate reaction so user sees the bot is alive (fire-and-forget)
+  addReaction(channelId, messageTs, "eyes", teamId).catch(() => {});
+
   try {
-    // ── Thread reply detection ──
+    // ══════════════════════════════════════════════════
+    // THREAD REPLY HANDLING — full context-aware dispatch
+    // ══════════════════════════════════════════════════
     if (isThreadReply && !isMention) {
-      // Check for approve/reject patterns first (for pending_approval runs/tasks)
+      // Fetch thread history for context (non-blocking, best-effort)
+      const threadHistory = await getThreadHistory(channelId, threadTs, teamId);
+
+      // 1) Check for approve/reject of pending builds/tasks
       const isApproval = APPROVAL_PATTERNS.some((p) => p.test(text));
       const isRejection = REJECTION_PATTERNS.some((p) => p.test(text));
 
       if (isApproval || isRejection) {
         const decision = isApproval ? "approved" : "rejected";
 
-        // Check for pending_approval runs in this thread (query by threadTs, not id)
-        const threadRun = await getRunByThreadTs(threadTs).catch((err) => {
-          console.error("[EVENTS] getRunByThreadTs error:", err);
-          return null;
-        });
+        // Check for pending_approval runs in this thread
+        const threadRun = await getRunByThreadTs(threadTs).catch(() => null);
         if (threadRun && threadRun.length > 0) {
           const pendingRun = threadRun[0];
           if (pendingRun.status === "pending_approval") {
@@ -134,11 +124,8 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Check for pending_approval tasks (documents) in this thread
-        const threadTask = await getTaskByThreadTs(threadTs).catch((err) => {
-          console.error("[EVENTS] getTaskByThreadTs error:", err);
-          return null;
-        });
+        // Check for pending_approval tasks (documents)
+        const threadTask = await getTaskByThreadTs(threadTs).catch(() => null);
         if (threadTask && threadTask.length > 0) {
           const pendingTask = threadTask[0];
           if (pendingTask.status === "pending_approval") {
@@ -152,87 +139,107 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const isFollowup = FOLLOWUP_PATTERNS.some((p) => p.test(text));
+      // 2) Check for existing completed/failed runs or tasks in this thread — ALWAYS handle follow-ups
+      const existingRun = await getRunByThreadTs(threadTs).catch(() => null);
+      const existingTask = await getTaskByThreadTs(threadTs).catch(() => null);
 
-      if (isFollowup) {
-        const existingRun = await getRunByThreadTs(threadTs).catch((err) => {
-          console.error("[EVENTS] getRunByThreadTs (followup) error:", err);
-          return null;
-        });
-        const existingTask = await getTaskByThreadTs(threadTs).catch((err) => {
-          console.error("[EVENTS] getTaskByThreadTs (followup) error:", err);
-          return null;
-        });
+      if (existingRun && existingRun.length > 0) {
+        const run = existingRun[0];
+        if ((run.status === "done" || run.status === "error") && run.slackThreadTs === threadTs) {
+          // There's a completed build in this thread — treat as a follow-up regardless of what the user said
+          try { await addReaction(channelId, messageTs, "gear", teamId); } catch { /* ok */ }
 
-        if (existingRun && existingRun.length > 0) {
-          const run = existingRun[0];
-          if ((run.status === "done" || run.status === "error") && run.slackThreadTs === threadTs) {
-            try { await addReaction(channelId, messageTs, "gear", teamId); } catch { /* ok */ }
-            await postToThread(channelId, messageTs, `*Build Squad re-activated!*\n_Follow-up: ${text}_\n\nPM Agent is analyzing...`, undefined, teamId);
+          // Build rich context from the previous run + thread history
+          const followupCtx = buildFollowupContext(
+            run.request,
+            {
+              spec: run.pmSpec || undefined,
+              evaluation: typeof run.finalOutput === "string" ? run.finalOutput : undefined,
+              error: run.testResult && !run.testResult.passed ? (run.testResult.error || run.finalOutput || "Build failed QA") : undefined,
+            },
+            threadHistory
+          );
 
-            const [newRun] = await createRun({
-              slackUserId: userId,
-              slackChannelId: channelId,
-              slackThreadTs: messageTs,
-              request: `${text}\n\n[Context from previous build: ${run.request.slice(0, 200)}]`,
-            });
+          await postToThread(channelId, messageTs, "*Build Squad re-activated!*\n_Reviewing previous context..._", undefined, teamId);
 
-            await inngest.send({
-              name: "slack/build.requested",
-              data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: text, runId: newRun.id, teamId },
-            });
+          const fullRequest = threadHistory
+            ? `${text}\n\n[You are continuing a previous build. Here is the context:]\n${followupCtx}`
+            : `${text}\n\n[Context from previous build: ${run.request.slice(0, 500)}${run.pmSpec ? `\n\nPrevious spec:\n${run.pmSpec.slice(0, 500)}` : ""}${run.code ? `\n\nPrevious code:\n${run.code.slice(0, 500)}` : ""}]`;
 
-            await memoryWrite(userId, `Build follow-up: ${text.slice(0, 100)}`, "preference");
-            return NextResponse.json({ ok: true });
-          }
-        }
+          const [newRun] = await createRun({
+            slackUserId: userId,
+            slackChannelId: channelId,
+            slackThreadTs: threadTs, // keep same thread
+            request: fullRequest,
+          });
 
-        if (existingTask && existingTask.length > 0) {
-          const task = existingTask[0];
-          if ((task.status === "done" || task.status === "error") && task.slackThreadTs === threadTs) {
-            const taskEmojis: Record<string, string> = { document: "page_facing_up", research: "mag", analytics: "chart_with_upwards_trend" };
-            try { await addReaction(channelId, messageTs, taskEmojis[task.type] || "speech_balloon", teamId); } catch { /* ok */ }
+          await inngest.send({
+            name: "slack/build.requested",
+            data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, runId: newRun.id, teamId },
+          });
 
-            const [newTask] = await createTask({
-              slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: task.type,
-              request: `${text}\n\n[Context from previous task: ${task.request.slice(0, 200)}]`,
-            });
-
-            await inngest.send({
-              name: `slack/${task.type}.requested`,
-              data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: text, taskId: newTask.id, teamId },
-            });
-
-            await memoryWrite(userId, `${task.type} follow-up: ${text.slice(0, 100)}`, "preference");
-            return NextResponse.json({ ok: true });
-          }
+          await memoryWrite(userId, `Build follow-up: ${text.slice(0, 100)}`, "preference");
+          return NextResponse.json({ ok: true });
         }
       }
 
-      // Thread reply — classify then handle
+      if (existingTask && existingTask.length > 0) {
+        const task = existingTask[0];
+        if ((task.status === "done" || task.status === "error") && task.slackThreadTs === threadTs) {
+          const taskEmojis: Record<string, string> = { document: "page_facing_up", research: "mag", analytics: "chart_with_upwards_trend" };
+          try { await addReaction(channelId, messageTs, taskEmojis[task.type] || "speech_balloon", teamId); } catch { /* ok */ }
+
+          const fullRequest = threadHistory
+            ? `${text}\n\n[You are continuing a previous ${task.type} task. Thread conversation:\n${threadHistory}]`
+            : `${text}\n\n[Context from previous ${task.type} task: ${task.request.slice(0, 500)}]`;
+
+          const [newTask] = await createTask({
+            slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs, type: task.type,
+            request: fullRequest,
+          });
+
+          await inngest.send({
+            name: `slack/${task.type}.requested`,
+            data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, taskId: newTask.id, teamId },
+          });
+
+          await memoryWrite(userId, `${task.type} follow-up: ${text.slice(0, 100)}`, "preference");
+          return NextResponse.json({ ok: true });
+        }
+      }
+
+      // 3) No existing run/task in thread — classify the reply
       const classification = await classify(text);
 
       if (classification.type === "chat") {
-        const responseText = await chatAsAgent(userId, text, { workspaceId });
+        // Chat with thread context so the agent knows the conversation
+        const responseText = await chatAsAgent(userId, text, {
+          workspaceId,
+          threadHistory,
+        });
         await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
         await postToThread(channelId, messageTs, responseText, undefined, teamId);
         return NextResponse.json({ ok: true });
       }
 
-      // Handle non-chat classifications in thread replies — dispatch as new tasks
+      // Handle non-chat classifications in thread replies — dispatch as new tasks in SAME thread
       if (classification.type === "build") {
         try { await addReaction(channelId, messageTs, "gear", teamId); } catch { /* ok */ }
-        await postToThread(channelId, messageTs, `*Build Squad activated!*\n_Request: ${text}_\n\nPM Agent is analyzing...`, undefined, teamId);
+        await postToThread(channelId, messageTs, "*Build Squad activated!*\n_Request: ${text}_\n\nPM Agent is analyzing...", undefined, teamId);
+
+        const contextReq = threadHistory
+          ? `${text}\n\n[Thread context:\n${threadHistory}]`
+          : text;
 
         const [newRun] = await createRun({
           slackUserId: userId,
           slackChannelId: channelId,
-          slackThreadTs: messageTs,
-          request: classification.extractedRequest || text,
+          slackThreadTs: threadTs,
+          request: contextReq,
         });
         await inngest.send({
           name: "slack/build.requested",
-          data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: classification.extractedRequest || text, runId: newRun.id, teamId },
+          data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, runId: newRun.id, teamId },
         });
         return NextResponse.json({ ok: true });
       }
@@ -244,13 +251,17 @@ export async function POST(req: NextRequest) {
         try { await addReaction(channelId, messageTs, taskEmojis[taskType] || "speech_balloon", teamId); } catch { /* ok */ }
         await postToThread(channelId, messageTs, `*${taskLabels[taskType]}...*\n_Request: ${text}_`, undefined, teamId);
 
+        const contextReq = threadHistory
+          ? `${text}\n\n[Thread context:\n${threadHistory}]`
+          : text;
+
         const [newTask] = await createTask({
-          slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs, type: taskType,
-          request: classification.extractedRequest || text,
+          slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs, type: taskType,
+          request: contextReq,
         });
         await inngest.send({
           name: `slack/${taskType}.requested`,
-          data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: classification.extractedRequest || text, taskId: newTask.id, teamId },
+          data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, taskId: newTask.id, teamId },
         });
         return NextResponse.json({ ok: true });
       }
@@ -260,13 +271,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // ── Schedule detection ──
+    // ══════════════════════════════════════════════════
+    // NEW THREAD / DM — full classification pipeline
+    // ══════════════════════════════════════════════════
+
+    // Schedule detection
     if (SCHEDULE_PATTERNS.some((p) => p.test(text))) {
       try {
         const parsed = await parseScheduleRequest(text);
         const count = await getUserScheduleCount(userId);
         if (count >= 10) {
-          await postToThread(channelId, messageTs, `:warning: You have reached the maximum of 10 active schedules. Remove one with \`/klawhub cancel-schedule\` first.`, undefined, teamId);
+          await postToThread(channelId, messageTs, ":warning: You have reached the maximum of 10 active schedules. Remove one with `/klawhub cancel-schedule` first.", undefined, teamId);
           return NextResponse.json({ ok: true });
         }
 
@@ -277,26 +292,22 @@ export async function POST(req: NextRequest) {
 
         await postToThread(channelId, messageTs, `:clock1: *Schedule created!*\n\n*${parsed.name}*\n${parsed.cronExpr} (${parsed.timezone})\nAction: ${parsed.action.slice(0, 100)}\n\nID: \`${schedule.id.slice(0, 8)}\`\nManage with \`/klawhub schedules\``, undefined, teamId);
         return NextResponse.json({ ok: true });
-      } catch (err) {
-        console.error("[EVENTS] Schedule parse failed:", err);
+      } catch {
         // Fall through to normal classification
       }
     }
 
-    // ── Classify FIRST (fast, 100 tokens) ──
+    // Classify intent
     const classification = await classify(text);
 
-    // CHAT — use the general agent (this is the heavy path)
+    // CHAT — general agent
     if (classification.type === "chat") {
       try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
       const responseText = await chatAsAgent(userId, text, { workspaceId });
       await memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction");
-      // Extract knowledge from chat messages (fire-and-forget with logging)
       extractAndStoreKnowledge(userId, text).then((stored) => {
         if (stored > 0) console.log(`[EVENTS] Chat knowledge: stored ${stored} entities for ${userId}`);
-      }).catch((err) => {
-        console.error("[EVENTS] Chat knowledge extraction failed:", err?.message || err);
-      });
+      }).catch(() => {});
       await postToThread(channelId, messageTs, responseText, undefined, teamId);
       return NextResponse.json({ ok: true });
     }
@@ -307,24 +318,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // ── Task dispatches (lightweight — just DB insert + Inngest event) ──
+    // ── Task dispatches ──
     const requestText = classification.extractedRequest || text;
 
-    // Usage limit check (chat/unclear don't count toward limits)
+    // Usage limit check
     const limitCheck = await checkUsageLimit(teamId);
     if (limitCheck && !limitCheck.allowed) {
       await postToThread(channelId, messageTs, `:warning: *Usage limit reached.*\nYou've used ${limitCheck.used}/${limitCheck.limit} agent runs this month. Upgrade your plan at https://klawhub.com/pricing to get more runs.`, undefined, teamId);
       return NextResponse.json({ ok: true });
     }
 
-    // Extract knowledge from substantive messages (fire-and-forget with logging)
     extractAndStoreKnowledge(userId, text).then((stored) => {
       if (stored > 0) console.log(`[EVENTS] Knowledge: stored ${stored} entities for ${userId}`);
-    }).catch((err) => {
-      console.error("[EVENTS] Knowledge extraction failed:", err?.message || err);
-    });
+    }).catch(() => {});
 
-    // Track skill usage at dispatch time (await to ensure DB write completes)
     try {
       if (classification.type === "build") {
         await trackSkillUsage("build", userId, channelId, requestText, "attempted");
