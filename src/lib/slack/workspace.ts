@@ -11,7 +11,7 @@ async function getCachedAuth(teamId?: string) {
   }
   const wsClient = await getWorkspaceSlack(teamId);
   const auth = await wsClient.auth.test();
-  _authCache = { teamId: auth.team_id, userId: auth.user_id, team: auth.team || auth.user || "", ts: Date.now() };
+  _authCache = { teamId: auth.team_id ?? "", userId: auth.user_id ?? "", team: auth.team || auth.user || "", ts: Date.now() };
   return auth;
 }
 
