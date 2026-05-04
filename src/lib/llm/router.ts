@@ -58,6 +58,7 @@ class LLMRouter {
     const agentName = meta?.agentName || "unknown";
     const provider = this.resolveProvider(agentName);
     const maxRetries = provider.keys.length;
+    console.log(`[LLM] agent=${agentName} provider=${provider.id} model=${provider.model}`);
 
     const startTime = Date.now();
     let lastError: Error | null = null;

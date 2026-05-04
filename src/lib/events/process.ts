@@ -374,12 +374,17 @@ async function handleNewThreadOrDM(ctx: {
   }
 
   // Classify intent
+  const t0 = Date.now();
   const classification = await classify(text);
+  console.log(`[PERF] classify('${text.slice(0, 40)}') → ${classification.type} in ${Date.now() - t0}ms`);
 
   // CHAT — general agent
   if (classification.type === "chat") {
     try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
+    const t0 = Date.now();
     const responseText = await chatAsAgent(userId, text, { workspaceId });
+    const elapsed = Date.now() - t0;
+    console.log(`[PERF] chatAsAgent completed in ${elapsed}ms`);
     await postToThread(channelId, messageTs, responseText, undefined, teamId);
     return;
   }

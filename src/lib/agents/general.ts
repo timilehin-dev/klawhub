@@ -120,6 +120,7 @@ export async function chatAsAgent(
   options?: ChatOptions
 ): Promise<string> {
   // Gather all user context in parallel
+  const t0 = Date.now();
   const [activeSkills, userSchedules, skillStats, memoryContext, knowledgeContext] = await Promise.all([
     getActiveSkills().catch(() => []),
     getUserSchedules(slackUserId).catch(() => []),
@@ -127,6 +128,7 @@ export async function chatAsAgent(
     buildUserContext(slackUserId),
     buildKnowledgeContext(slackUserId),
   ]);
+  console.log(`[PERF] chatAsAgent context gather: ${Date.now() - t0}ms`);
 
   // Build context blocks using Slack mrkdwn
   const contextBlocks: string[] = [];
@@ -181,6 +183,8 @@ export async function chatAsAgent(
   // Use multi-step reasoning for complex requests
   if (isComplexRequest(userMessage)) {
     try {
+      console.log(`[PERF] chatAsAgent using reasoning chain (complex request)`);
+      const t1 = Date.now();
       const result = await runReasoningChain(fullMessage, {
         tools: generalAgentTools,
         context: toolContext,
@@ -188,13 +192,15 @@ export async function chatAsAgent(
         maxRetriesPerStep: 1,
         temperature: 0.6,
       });
+      console.log(`[PERF] chatAsAgent reasoning chain: ${Date.now() - t1}ms`);
       return result;
     } catch {
       // If reasoning chain fails, fall back to standard loop
     }
   }
 
-  return runToolUseLoop(fullMessage, {
+  const t2 = Date.now();
+  const result = await runToolUseLoop(fullMessage, {
     systemPrompt,
     tools: generalAgentTools,
     context: toolContext,
@@ -203,4 +209,6 @@ export async function chatAsAgent(
     maxTokens: 4096,
     agentName: "general",
   });
+  console.log(`[PERF] chatAsAgent tool loop: ${Date.now() - t2}ms`);
+  return result;
 }
