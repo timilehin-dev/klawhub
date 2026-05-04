@@ -1,11 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, boolean, integer, customType } from "drizzle-orm/pg-core";
-
-/** PostgreSQL tsvector column type for full-text search */
-const tsvector = customType<{ data: string }>({
-  dataType() {
-    return "tsvector";
-  },
-});
+import { pgTable, uuid, text, timestamp, jsonb, boolean, integer } from "drizzle-orm/pg-core";
 import type { Intent } from "@/types";
 
 // ── Runs: tracks app/script build requests ──
@@ -56,7 +49,6 @@ export const memory = pgTable("memory", {
   slackUserId: text("slack_user_id").notNull(),
   content: text("content").notNull(),
   category: text("category").default("general"),
-  searchVector: tsvector("search_vector"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -114,7 +106,6 @@ export const knowledge = pgTable("knowledge", {
   entityName: text("entity_name").notNull(),
   data: jsonb("data").notNull().default({}),
   source: text("source"),
-  searchVector: tsvector("search_vector"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

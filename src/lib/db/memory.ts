@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { memory } from "./schema";
-import { eq, and, desc, sql, count, inArray, or, gt } from "drizzle-orm";
+import { eq, and, desc, sql, count, inArray } from "drizzle-orm";
 
 /** Maximum memories per user per category to keep things lean. */
 const MAX_MEMORIES_PER_CATEGORY = 20;
@@ -11,7 +11,7 @@ export function saveMemory(slackUserId: string, content: string, category = "gen
     content,
     category,
     workspaceId,
-    searchVector: sql`to_tsvector('english', ${content})`,
+    // search_vector is auto-populated by DB trigger — no need to pass it here
   });
 }
 
@@ -30,7 +30,7 @@ export async function readMemory(slackUserId: string, query: string) {
       .where(
         and(
           eq(memory.slackUserId, slackUserId),
-          sql`${memory.searchVector} @@ plainto_tsquery('english', ${query})`
+          sql`search_vector @@ plainto_tsquery('english', ${query})`
         )
       )
       .limit(5);

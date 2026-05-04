@@ -12,13 +12,13 @@ export function upsertKnowledge(
   source?: string,
   workspaceId?: string
 ) {
-  const searchText = `${entityName} ${entityType} ${Object.values(data).filter(v => typeof v === "string").join(" ")}`;
+  // search_vector is auto-populated by DB trigger — no need to pass it here
   return getDb()
     .insert(knowledge)
-    .values({ slackUserId, entityType, entityName, data, source, workspaceId, searchVector: sql`to_tsvector('english', ${searchText})` })
+    .values({ slackUserId, entityType, entityName, data, source, workspaceId })
     .onConflictDoUpdate({
       target: [knowledge.slackUserId, knowledge.entityType, knowledge.entityName],
-      set: { data, source, updatedAt: new Date(), searchVector: sql`to_tsvector('english', ${searchText})` },
+      set: { data, source, updatedAt: new Date() },
     });
 }
 
@@ -50,7 +50,7 @@ export async function searchKnowledge(slackUserId: string, query: string) {
       .where(
         and(
           eq(knowledge.slackUserId, slackUserId),
-          sql`${knowledge.searchVector} @@ plainto_tsquery('english', ${query})`
+          sql`search_vector @@ plainto_tsquery('english', ${query})`
         )
       )
       .limit(20);
