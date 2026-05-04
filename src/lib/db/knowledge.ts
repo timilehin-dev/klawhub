@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { knowledge } from "./schema";
-import { eq, and, desc, ilike, or } from "drizzle-orm";
+import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 
 type EntityType = "project" | "person" | "event" | "standing_item" | "technology" | "preference" | "relationship";
 
@@ -9,14 +9,16 @@ export function upsertKnowledge(
   entityType: EntityType,
   entityName: string,
   data: Record<string, unknown>,
-  source?: string
+  source?: string,
+  workspaceId?: string
 ) {
+  const searchText = `${entityName} ${entityType} ${Object.values(data).filter(v => typeof v === "string").join(" ")}`;
   return getDb()
     .insert(knowledge)
-    .values({ slackUserId, entityType, entityName, data, source })
+    .values({ slackUserId, entityType, entityName, data, source, workspaceId, searchVector: sql`to_tsvector('english', ${searchText})` })
     .onConflictDoUpdate({
       target: [knowledge.slackUserId, knowledge.entityType, knowledge.entityName],
-      set: { data, source, updatedAt: new Date() },
+      set: { data, source, updatedAt: new Date(), searchVector: sql`to_tsvector('english', ${searchText})` },
     });
 }
 
@@ -35,7 +37,32 @@ export function getKnowledge(
     .orderBy(desc(knowledge.updatedAt));
 }
 
-export function searchKnowledge(slackUserId: string, query: string) {
+/**
+ * Full-text search using PostgreSQL tsvector.
+ * Falls back to ILIKE if tsvector column is not yet populated.
+ */
+export async function searchKnowledge(slackUserId: string, query: string) {
+  // Try tsvector search first
+  try {
+    const tsResults = await getDb()
+      .select()
+      .from(knowledge)
+      .where(
+        and(
+          eq(knowledge.slackUserId, slackUserId),
+          sql`${knowledge.searchVector} @@ plainto_tsquery('english', ${query})`
+        )
+      )
+      .limit(20);
+
+    if (tsResults.length > 0) {
+      return tsResults;
+    }
+  } catch {
+    // search_vector column might not exist yet — fall through to ILIKE
+  }
+
+  // Fallback: ILIKE substring search
   const pattern = `%${query}%`;
   return getDb()
     .select()

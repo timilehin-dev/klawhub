@@ -1,21 +1,53 @@
 import { getDb } from "./connection";
 import { memory } from "./schema";
-import { eq, ilike, and, desc, sql, count, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, count, inArray, or, gt } from "drizzle-orm";
 
 /** Maximum memories per user per category to keep things lean. */
 const MAX_MEMORIES_PER_CATEGORY = 20;
 
 export function saveMemory(slackUserId: string, content: string, category = "general", workspaceId?: string) {
-  return getDb().insert(memory).values({ slackUserId, content, category, workspaceId });
+  return getDb().insert(memory).values({
+    slackUserId,
+    content,
+    category,
+    workspaceId,
+    searchVector: sql`to_tsvector('english', ${content})`,
+  });
 }
 
-export function readMemory(slackUserId: string, query: string) {
-  // Escape SQL LIKE wildcards in user query to prevent injection
+/**
+ * Full-text search using PostgreSQL tsvector.
+ * Falls back to ILIKE if tsvector column is not yet populated (migration pending).
+ */
+export async function readMemory(slackUserId: string, query: string) {
   const safeQuery = query.replace(/[%_\\]/g, "\\$&");
+
+  // Try tsvector search first (higher quality — matches stems, handles misspellings)
+  try {
+    const tsResults = await getDb()
+      .select()
+      .from(memory)
+      .where(
+        and(
+          eq(memory.slackUserId, slackUserId),
+          sql`${memory.searchVector} @@ plainto_tsquery('english', ${query})`
+        )
+      )
+      .limit(5);
+
+    // If tsvector column has data, use these results
+    if (tsResults.length > 0) {
+      return tsResults;
+    }
+  } catch {
+    // search_vector column might not exist yet — fall through to ILIKE
+  }
+
+  // Fallback: ILIKE substring search (legacy)
   return getDb()
     .select()
     .from(memory)
-    .where(and(eq(memory.slackUserId, slackUserId), ilike(memory.content, `%${safeQuery}%`)))
+    .where(and(eq(memory.slackUserId, slackUserId), sql`${memory.content} ILIKE ${`%${safeQuery}%`}`))
     .limit(5);
 }
 
@@ -70,16 +102,15 @@ export async function autoPruneMemory(slackUserId: string, category: string) {
       .select({ cnt: count() })
       .from(memory)
       .where(and(eq(memory.slackUserId, slackUserId), eq(memory.category, category)));
-    
+
     const cnt = rows[0]?.cnt || 0;
     if (cnt > MAX_MEMORIES_PER_CATEGORY) {
-      // Delete oldest memories beyond the limit
       const sub = getDb()
         .select({ id: memory.id })
         .from(memory)
         .where(and(eq(memory.slackUserId, slackUserId), eq(memory.category, category)))
         .orderBy(memory.createdAt)
-        .limit(cnt - MAX_MEMORIES_PER_CATEGORY + 5); // remove extra buffer
+        .limit(cnt - MAX_MEMORIES_PER_CATEGORY + 5);
 
       const toDelete = await sub;
       if (toDelete.length > 0) {

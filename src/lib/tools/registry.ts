@@ -136,7 +136,8 @@ const memorySaveTool: ToolDefinition = {
     await saveMemory(
       ctx.slackUserId,
       params.content.slice(0, 1000),
-      params.category || "general"
+      params.category || "general",
+      ctx.workspaceId
     );
     return `Saved to memory [${params.category || "general"}]: ${params.content.slice(0, 100)}`;
   },

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack/verify";
 import { inngest } from "@/lib/inngest/client";
-import { createRun, createTask } from "@/lib/db";
+import { createRun, createTask, getWorkspaceByTeamId } from "@/lib/db";
 import { slack } from "@/lib/slack/client";
 
 export async function POST(req: NextRequest) {
@@ -116,10 +116,21 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Resolve teamId from Slack payload — available at payload.team.id
+    const teamId = (payload.team?.id as string) || undefined;
+
+    // Resolve workspaceId from teamId
+    let workspaceId: string | undefined;
+    try {
+      if (teamId) {
+        const ws = await getWorkspaceByTeamId(teamId);
+        if (ws && ws.length > 0) workspaceId = ws[0].id;
+      }
+    } catch { /* non-critical — task will still work without workspaceId */ }
+
     // Post to the selected channel (or DM the user if no channel)
     let targetChannel = channelId;
     if (!targetChannel) {
-      // Try to open a DM with the user
       try {
         const im = await slack.conversations.open({ users: userId });
         targetChannel = (im as any).channel?.id || "";
@@ -133,6 +144,7 @@ export async function POST(req: NextRequest) {
         slackUserId: userId,
         slackChannelId: targetChannel,
         request: requestText,
+        workspaceId,
       });
       await inngest.send({
         name: "slack/build.requested",
@@ -142,6 +154,7 @@ export async function POST(req: NextRequest) {
           slackUserId: userId,
           messageText: requestText,
           runId: run.id,
+          teamId,
         },
       });
     } else {
@@ -150,6 +163,7 @@ export async function POST(req: NextRequest) {
         slackChannelId: targetChannel,
         type: taskType as "document" | "research" | "analytics",
         request: requestText,
+        workspaceId,
       });
       await inngest.send({
         name: `slack/${taskType}.requested`,
@@ -159,6 +173,7 @@ export async function POST(req: NextRequest) {
           slackUserId: userId,
           messageText: requestText,
           taskId: task.id,
+          teamId,
         },
       });
     }
@@ -178,6 +193,8 @@ export async function POST(req: NextRequest) {
     const channel = payload.channel as Record<string, string> | undefined;
     const messageTs = message?.ts || payload.message_ts;
     const channelId = channel?.id || payload.channel_id;
+    // Resolve teamId from block action payload for Inngest events
+    const teamId = (payload.team?.id as string) || (payload.view?.team_id as string) || undefined;
 
     for (const action of actions) {
       // ── Build spec approval ──
@@ -224,6 +241,7 @@ export async function POST(req: NextRequest) {
               slackUserId: value.userId,
               messageText: value.request,
               runId: value.runId,
+              teamId,
             },
           });
         } catch { /* invalid JSON */ }
