@@ -14,7 +14,7 @@
  *     → processSlackEvent() runs in background (fire-and-forget)
  */
 
-import { postToThread, addReaction } from "@/lib/slack/client";
+import { postToThread, addReaction, getCachedWorkspaceId } from "@/lib/slack/client";
 import { classify } from "@/lib/agents/classifier";
 import { chatAsAgent } from "@/lib/agents/general";
 import {
@@ -78,6 +78,7 @@ const SCHEDULE_PATTERNS = [
 
 export async function processSlackEvent(input: ProcessEventInput): Promise<void> {
   const { event, teamId } = input;
+  const _t0 = Date.now();
 
   // ── Instant acknowledgment — fire reaction BEFORE any DB/API calls ──
   const channelId = event.channel as string;
@@ -85,7 +86,9 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
   const userId = event.user as string;
   const threadTs = event.thread_ts as string | undefined;
 
-  addReaction(channelId, messageTs, "eyes", teamId).catch(() => {});
+  addReaction(channelId, messageTs, "eyes", teamId).catch((e) => {
+    console.warn(`[PERF] addReaction failed after ${Date.now() - _t0}ms:`, e);
+  });
 
   // Periodic cleanup (~1% chance per event — amortized, non-blocking)
   if (Math.random() < 0.01) {
@@ -98,6 +101,7 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
 
   const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
   if (!text) return;
+  console.log(`[PERF] processSlackEvent setup: ${Date.now() - _t0}ms`);
 
   const isMention = event.type === "app_mention";
   const isDM = event.type === "message" && event.channel_type === "im";
@@ -105,11 +109,17 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
 
   if (!isMention && !isDM && !isThreadReply) return;
 
-  // Resolve workspaceId in parallel with processing (non-critical, lazy)
-  const workspacePromise = teamId
-    ? getWorkspaceByTeamId(teamId).then((ws) => ws?.[0]?.id).catch(() => undefined)
-    : Promise.resolve(undefined);
-  const workspaceId = await workspacePromise;
+  // Resolve workspaceId — try cache first (populated by addReaction's getWorkspaceSlack call)
+  // Falls back to DB lookup only if cache miss
+  const _t1 = Date.now();
+  let workspaceId = getCachedWorkspaceId(teamId);
+  if (!workspaceId && teamId) {
+    try {
+      const ws = await getWorkspaceByTeamId(teamId);
+      workspaceId = ws?.[0]?.id;
+    } catch { /* non-critical */ }
+  }
+  console.log(`[PERF] workspaceId resolve (cache=${!!workspaceId || !teamId}): ${Date.now() - _t1}ms`);
 
   try {
     // ══════════════════════════════════════════════════
@@ -138,6 +148,7 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
       );
     } catch { /* give up */ }
   }
+  console.log(`[PERF] processSlackEvent total: ${Date.now() - _t0}ms`);
 }
 
 // ── Thread Reply Handler ──
@@ -192,11 +203,13 @@ async function handleThreadReply(ctx: {
   }
 
   // Fetch thread history + check active/completed runs in parallel (saves 300-800ms)
+  const _t3 = Date.now();
   const [threadHistory, activeRun, existingRun] = await Promise.all([
     getThreadHistory(channelId, threadTs, teamId),
     getActiveRunByThreadTs(threadTs).catch(() => null),
     getRunByThreadTs(threadTs).catch(() => null),
   ]);
+  console.log(`[PERF] thread context fetch: ${Date.now() - _t3}ms`);
 
   const activeTask = !activeRun
     ? await getActiveTaskByThreadTs(threadTs).catch(() => null)
@@ -286,10 +299,14 @@ async function handleThreadReply(ctx: {
   }
 
   // ── 4. No existing run/task in thread — classify the reply ──
+  const _t4 = Date.now();
   const classification = await classify(text);
+  console.log(`[PERF] classify (thread reply): ${Date.now() - _t4}ms`);
 
   if (classification.type === "chat") {
+    const _t5 = Date.now();
     const responseText = await chatAsAgent(userId, text, { workspaceId, threadHistory });
+    console.log(`[PERF] chatAsAgent (thread reply): ${Date.now() - _t5}ms`);
     memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => {});
     extractAndStoreKnowledge(userId, text).catch(() => {});
     await postToThread(channelId, messageTs, responseText, undefined, teamId);

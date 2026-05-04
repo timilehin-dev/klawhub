@@ -4,6 +4,8 @@ import { decrypt } from "@/lib/integrations/crypto";
 
 // Per-workspace client cache (survives across requests in same serverless instance)
 const clientCache = new Map<string, WebClient>();
+// Per-workspace workspaceId cache (populated alongside client cache)
+const workspaceIdCache = new Map<string, string>();
 
 // Pre-warmed default client (env var token) — avoids DB lookup on every first request
 let _prewarmedDefault: WebClient | null = null;
@@ -19,8 +21,7 @@ function getPrewarmedDefault(): WebClient {
 /**
  * Get a workspace-specific Slack WebClient.
  * Falls back to SLACK_BOT_TOKEN env var if no workspace token is stored.
- * Optimized: returns pre-warmed default client immediately on cache miss,
- * then kicks off async DB lookup for workspace-specific token if needed.
+ * Caches both client and workspaceId to avoid duplicate DB lookups.
  */
 export async function getWorkspaceSlack(teamId?: string): Promise<WebClient> {
   if (!teamId) return getPrewarmedDefault();
@@ -32,16 +33,21 @@ export async function getWorkspaceSlack(teamId?: string): Promise<WebClient> {
   // Try DB lookup for workspace-specific token (OAuth-installed workspaces)
   try {
     const ws = await getWorkspaceByTeamId(teamId);
-    if (ws && ws.length > 0 && ws[0].botToken) {
-      let token: string;
-      try {
-        token = decrypt(ws[0].botToken);
-      } catch {
-        token = ws[0].botToken; // Legacy plaintext fallback
+    if (ws && ws.length > 0) {
+      // Cache workspaceId alongside the client
+      if (ws[0].id) workspaceIdCache.set(teamId, ws[0].id);
+
+      if (ws[0].botToken) {
+        let token: string;
+        try {
+          token = decrypt(ws[0].botToken);
+        } catch {
+          token = ws[0].botToken; // Legacy plaintext fallback
+        }
+        const client = new WebClient(token);
+        clientCache.set(teamId, client);
+        return client;
       }
-      const client = new WebClient(token);
-      clientCache.set(teamId, client);
-      return client;
     }
   } catch {
     // DB lookup failed — fall through to default
@@ -54,10 +60,20 @@ export async function getWorkspaceSlack(teamId?: string): Promise<WebClient> {
 }
 
 /**
+ * Get cached workspaceId for a team (populated by getWorkspaceSlack).
+ * Returns undefined if not yet cached (caller should do their own lookup).
+ */
+export function getCachedWorkspaceId(teamId?: string): string | undefined {
+  if (!teamId) return undefined;
+  return workspaceIdCache.get(teamId);
+}
+
+/**
  * Invalidate a cached workspace client (call after token refresh / reinstall).
  */
 export function invalidateWorkspaceClient(teamId: string) {
   clientCache.delete(teamId);
+  workspaceIdCache.delete(teamId);
 }
 
 // ── Legacy singleton (for backward compat — uses default SLACK_BOT_TOKEN) ──

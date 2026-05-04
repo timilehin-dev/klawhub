@@ -1,9 +1,9 @@
 import { runToolUseLoop } from "@/lib/tools/executor";
-import { runReasoningChain } from "@/lib/agents/reasoning";
 import { generalAgentTools } from "@/lib/tools/registry";
 import { getActiveSkills, getUserSchedules, getUserSkillStats } from "@/lib/db";
 import { buildUserContext } from "@/lib/tools/memory";
 import { buildKnowledgeContext } from "@/lib/db/knowledge";
+import { agentChat } from "@/lib/llm";
 
 const GENERAL_AGENT_SYSTEM = `You are Klawhub, a multi-agent AI coworker that lives inside Slack. You are NOT a generic chatbot — you are a coordinated system of specialized agents and real tools.
 
@@ -86,32 +86,45 @@ When context from previous conversation is provided:
 
 Keep responses natural, professional, and helpful. You're a coworker, not a servant.`;
 
-/**
- * Determines if a request is complex enough to warrant multi-step reasoning chains.
- */
-function isComplexRequest(message: string): boolean {
-  const complexitySignals = [
-    /\b(compare|comparison|versus|vs\.?)\b/i,
-    /\b(analyze|analysis|investigate)\b/i,
-    /\b(multi.?step|step.?by.?step|then|after that|finally)\b/i,
-    /\b(and then|first|second|third)\b/i,
-    /\b(research.*and|find.*and.*compare|gather.*and.*synthesize)\b/i,
-    /\b(create.*report|write.*report|build.*dashboard)\b/i,
-    /\b(why|how come|what causes|what leads to)\b/i,
-    /\b(pros.*cons|advantages.*disadvantages|trade.?offs?)\b/i,
-    /\b(before.*after|impact.*of|effect.*on)\b/i,
-    /\b(breakdown|break down|deep.?dive)\b/i,
-  ];
-
-  const signalCount = complexitySignals.filter((p) => p.test(message)).length;
-  const isLongMessage = message.length > 150;
-
-  return signalCount >= 2 || (signalCount >= 1 && isLongMessage);
-}
-
 export interface ChatOptions {
   workspaceId?: string;
   threadHistory?: string;
+}
+
+/**
+ * Fast path: Single LLM call with minimal context.
+ * Used for greetings, short messages, and simple questions that don't need tools.
+ */
+const FAST_SYSTEM_PROMPT = `You are Klawhub, a multi-agent AI coworker that lives inside Slack. You are NOT a generic chatbot — you are a coordinated system of specialized agents and real tools.
+
+CRITICAL FORMATTING RULE:
+Your responses render in Slack which uses mrkdwn (NOT standard markdown).
+- Bold: *text* (single asterisks, NOT **text**)
+- Italic: _text_ (underscores)
+- NO headings with # ## ### (they do not render in Slack)
+- Use *bold text* for emphasis instead of headings
+- Use bullet points with \u2022 or numbered lists with 1. 2. 3.
+
+You have specialized sub-agents: PM Agent, Engineer Agent, QA Agent, Document Agent, Research Agent, Analyst Agent.
+You have tools: Web Search, Web Page Reader, Browser Automation, Memory System, Knowledge Graph, Google Drive, GitHub.
+
+Be concise, natural, and helpful. You're a coworker, not a servant.`;
+
+/**
+ * Detect if a message likely needs tool use (web search, code execution, etc.)
+ * vs just a conversational reply.
+ */
+function needsTools(message: string): boolean {
+  const toolSignals = [
+    /\b(search|find|look ?up|google|browse|check)\b.*(for|on|about|the|online|web|internet)/i,
+    /\b(screenshot|scrape|crawl|extract.*from|read.*url|open.*page)\b/i,
+    /\b(https?:\/\/|www\.)\S+/i,
+    /\b(execute|run|calculate|compute|convert)\b/i,
+    /\b(schedule|remind|cron|recurring|every \d)\b/i,
+    /\b(save|remember|store|note)\b.*(this|that|it)/i,
+    /\b(github|google drive|drive)\b/i,
+  ];
+  return toolSignals.some((p) => p.test(message));
 }
 
 export async function chatAsAgent(
@@ -119,8 +132,54 @@ export async function chatAsAgent(
   userMessage: string,
   options?: ChatOptions
 ): Promise<string> {
-  // Gather all user context in parallel
-  const t0 = Date.now();
+  const toolContext = {
+    slackUserId,
+    workspaceId: options?.workspaceId,
+  };
+
+  // Build the user message with thread history if available
+  let fullMessage = userMessage;
+  if (options?.threadHistory) {
+    fullMessage = `[PREVIOUS CONVERSATION IN THIS THREAD (use this to understand context):\n${options.threadHistory}]\n\n---\n\n[USER'S CURRENT MESSAGE]:\n${userMessage}`;
+  }
+
+  // ── FAST PATH: Simple chat — single LLM call, minimal context ──
+  // Covers: greetings, short questions, follow-ups, general conversation
+  if (!needsTools(userMessage)) {
+    const t0 = Date.now();
+
+    // Gather only essential context (memory + knowledge — parallel, lightweight)
+    const [memoryContext, knowledgeContext] = await Promise.all([
+      buildUserContext(slackUserId),
+      buildKnowledgeContext(slackUserId),
+    ]);
+
+    let systemPrompt = FAST_SYSTEM_PROMPT;
+    const contextParts: string[] = [];
+    if (memoryContext) contextParts.push(`*User Context*\n${memoryContext}`);
+    if (knowledgeContext) contextParts.push(`*Knowledge*\n${knowledgeContext}`);
+    if (contextParts.length > 0) {
+      systemPrompt += "\n\n---\n\n" + contextParts.join("\n\n");
+    }
+
+    try {
+      const result = await agentChat("general", [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: fullMessage },
+      ], { temperature: 0.7, maxTokens: 2048 }, { slackUserId });
+
+      console.log(`[PERF] chatAsAgent FAST path: ${Date.now() - t0}ms`);
+      return result;
+    } catch (err) {
+      console.error(`[PERF] FAST path failed, falling to tool loop:`, err);
+      // Fall through to tool loop
+    }
+  }
+
+  // ── TOOL PATH: Message needs tools — full context + tool loop ──
+  const t1 = Date.now();
+
+  // Gather all context in parallel (only when tools are actually needed)
   const [activeSkills, userSchedules, skillStats, memoryContext, knowledgeContext] = await Promise.all([
     getActiveSkills().catch(() => []),
     getUserSchedules(slackUserId).catch(() => []),
@@ -128,7 +187,6 @@ export async function chatAsAgent(
     buildUserContext(slackUserId),
     buildKnowledgeContext(slackUserId),
   ]);
-  console.log(`[PERF] chatAsAgent context gather: ${Date.now() - t0}ms`);
 
   // Build context blocks using Slack mrkdwn
   const contextBlocks: string[] = [];
@@ -169,37 +227,6 @@ export async function chatAsAgent(
 
   const systemPrompt = GENERAL_AGENT_SYSTEM + contextSection;
 
-  const toolContext = {
-    slackUserId,
-    workspaceId: options?.workspaceId,
-  };
-
-  // Build the user message with thread history if available
-  let fullMessage = userMessage;
-  if (options?.threadHistory) {
-    fullMessage = `[PREVIOUS CONVERSATION IN THIS THREAD (use this to understand context):\n${options.threadHistory}]\n\n---\n\n[USER'S CURRENT MESSAGE]:\n${userMessage}`;
-  }
-
-  // Use multi-step reasoning for complex requests
-  if (isComplexRequest(userMessage)) {
-    try {
-      console.log(`[PERF] chatAsAgent using reasoning chain (complex request)`);
-      const t1 = Date.now();
-      const result = await runReasoningChain(fullMessage, {
-        tools: generalAgentTools,
-        context: toolContext,
-        maxSteps: 4,
-        maxRetriesPerStep: 1,
-        temperature: 0.6,
-      });
-      console.log(`[PERF] chatAsAgent reasoning chain: ${Date.now() - t1}ms`);
-      return result;
-    } catch {
-      // If reasoning chain fails, fall back to standard loop
-    }
-  }
-
-  const t2 = Date.now();
   const result = await runToolUseLoop(fullMessage, {
     systemPrompt,
     tools: generalAgentTools,
@@ -209,6 +236,7 @@ export async function chatAsAgent(
     maxTokens: 4096,
     agentName: "general",
   });
-  console.log(`[PERF] chatAsAgent tool loop: ${Date.now() - t2}ms`);
+
+  console.log(`[PERF] chatAsAgent TOOL path: ${Date.now() - t1}ms`);
   return result;
 }
