@@ -1,8 +1,34 @@
 // ── Block Kit builders for Slack interactive messages ──
 
+const SLACK_BLOCK_TEXT_LIMIT = 2900; // Slack's limit is 3000; keep margin for safety
+
+/**
+ * Split long text into chunks that fit Slack's block text limit.
+ * Splits at newline boundaries when possible.
+ */
+function splitText(text: string, maxLen: number): string[] {
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining);
+      break;
+    }
+    // Try to split at a newline near the limit
+    let splitIdx = remaining.lastIndexOf("\n", maxLen);
+    if (splitIdx < maxLen * 0.5) splitIdx = maxLen; // No good newline — hard split
+    chunks.push(remaining.slice(0, splitIdx));
+    remaining = remaining.slice(splitIdx).trimStart();
+  }
+  return chunks;
+}
+
 /**
  * Create an approval message with Approve/Reject buttons.
  * Used for build specs and document outlines that need human review.
+ * Automatically splits long text into multiple section blocks to avoid Slack's 3000-char limit.
  */
 export function approvalBlocks(
   title: string,
@@ -10,14 +36,19 @@ export function approvalBlocks(
   referenceId: string,
   actionPrefix: string
 ) {
-  return [
-    {
-      type: "section" as const,
-      text: {
-        type: "mrkdwn" as const,
-        text: `*${title}*\n\n${body}`,
-      },
+  const fullText = `*${title}*\n\n${body}`;
+  const chunks = splitText(fullText, SLACK_BLOCK_TEXT_LIMIT);
+
+  const sectionBlocks = chunks.map((chunk) => ({
+    type: "section" as const,
+    text: {
+      type: "mrkdwn" as const,
+      text: chunk,
     },
+  }));
+
+  return [
+    ...sectionBlocks,
     {
       type: "actions" as const,
       block_id: `${actionPrefix}_actions`,

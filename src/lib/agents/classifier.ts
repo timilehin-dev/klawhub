@@ -39,6 +39,11 @@ const CHAT_PATTERNS = [
   /^(thanks?|thank\s+you|thx|ty|cheers)\b/i,
   /^(how\s+are\s+you|what('?s| is)\s+up|what\s+can\s+you\s+do|who\s+are\s+you|help)\b/i,
   /^(ok|okay|cool|nice|great|awesome|lol|haha|😂|👍|✅|❌)\b[.!]?\s*$/i,
+  // Continuation / affirmative patterns — follow-ups in threads that should NOT be classified as "unclear"
+  /^(yes|yep|yeah|yea|sure|go ahead|do it|proceed|try|start|run|execute|continue|go|let'?s go|let'?s do it|sounds good|perfect|exactly|that works)\b/i,
+  /^(suggest|recommend|pick|choose|decide|you decide|your choice|up to you|whatever you think|you choose)\b/i,
+  /^(what('?s| is) the (status|progress|update))/i,
+  /^status\b/i,
 ];
 
 interface RegexResult {

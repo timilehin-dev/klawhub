@@ -86,9 +86,9 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
   const userId = event.user as string;
   const threadTs = event.thread_ts as string | undefined;
 
-  addReaction(channelId, messageTs, "eyes", teamId).catch((e) => {
-    console.warn(`[PERF] addReaction failed after ${Date.now() - _t0}ms:`, e);
-  });
+  // NOTE: The addReaction is now also done in the Inngest message-handler step,
+  // but we keep this as a best-effort fallback for when processSlackEvent is called directly.
+  addReaction(channelId, messageTs, "eyes", teamId).catch(() => {});
 
   // Periodic cleanup (~1% chance per event — amortized, non-blocking)
   if (Math.random() < 0.01) {
@@ -299,8 +299,12 @@ async function handleThreadReply(ctx: {
   }
 
   // ── 4. No existing run/task in thread — classify the reply ──
+  // Pass thread history to classifier so follow-ups like "yes, go ahead" have context
   const _t4 = Date.now();
-  const classification = await classify(text);
+  const textWithContext = threadHistory
+    ? `[Thread context:\n${threadHistory}]\n\nUser's latest message: ${text}`
+    : text;
+  const classification = await classify(textWithContext);
   console.log(`[PERF] classify (thread reply): ${Date.now() - _t4}ms`);
 
   if (classification.type === "chat") {
@@ -316,7 +320,7 @@ async function handleThreadReply(ctx: {
   // Handle non-chat classifications in thread replies — dispatch as new tasks in SAME thread
   if (classification.type === "build") {
     try { await addReaction(channelId, messageTs, "gear", teamId); } catch { /* ok */ }
-    await postToThread(channelId, messageTs, "*Build Squad activated!*\n_Request: ${text}_\n\nPM Agent is analyzing...", undefined, teamId);
+    await postToThread(channelId, messageTs, `*Build Squad activated!*\n_Request: ${text}_\n\nPM Agent is analyzing...`, undefined, teamId);
 
     const contextReq = threadHistory ? `${text}\n\n[Thread context:\n${threadHistory}]` : text;
 
