@@ -1,6 +1,7 @@
 import { WebClient } from "@slack/web-api";
 import { getWorkspaceByTeamId } from "@/lib/db";
 import { decrypt } from "@/lib/integrations/crypto";
+import { toSlackMrkdwn } from "@/lib/utils/slack-mrkdwn";
 
 // Per-workspace client cache (survives across requests in same serverless instance)
 const clientCache = new Map<string, WebClient>();
@@ -108,7 +109,7 @@ export async function postToThread(
   return client.chat.postMessage({
     channel,
     thread_ts: threadTs,
-    text,
+    text: toSlackMrkdwn(text),
     ...options,
   });
 }
@@ -124,7 +125,7 @@ export async function updateMessage(
   return client.chat.update({
     channel,
     ts,
-    text,
+    text: toSlackMrkdwn(text),
     ...options,
   });
 }
@@ -140,14 +141,22 @@ export async function postEphemeral(
   return client.chat.postEphemeral({
     channel,
     user: userId,
-    text,
+    text: toSlackMrkdwn(text),
     ...options,
   });
 }
 
 export async function addReaction(channel: string, timestamp: string, emoji: string, teamId?: string) {
   const client = await getWorkspaceSlack(teamId);
-  return client.reactions.add({ channel, timestamp, name: emoji });
+  try {
+    return await client.reactions.add({ channel, timestamp, name: emoji });
+  } catch (error: any) {
+    if (error?.data?.error === "already_reacted" || error?.message?.includes("already_reacted")) {
+      console.warn(`[Slack] Reaction ${emoji} already added to ${timestamp}`);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function removeReaction(channel: string, timestamp: string, emoji: string, teamId?: string) {
