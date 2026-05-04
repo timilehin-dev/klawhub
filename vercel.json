@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "src/app/api/inngest/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/slack/**/*.ts": {
+      "maxDuration": 60
+    }
+  }
+}

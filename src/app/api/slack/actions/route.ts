@@ -4,6 +4,8 @@ import { inngest } from "@/lib/inngest/client";
 import { createRun, createTask, getWorkspaceByTeamId } from "@/lib/db";
 import { slack } from "@/lib/slack/client";
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   const body = await req.text();
 

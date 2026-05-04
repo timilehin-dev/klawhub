@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack/verify";
 import { classify } from "@/lib/agents/classifier";
-import { chatAsAgent } from "@/lib/agents/general";
 import {
   createRun,
   createTask,
@@ -21,6 +20,9 @@ import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
 import { createSchedule } from "@/lib/db";
 import { inngest } from "@/lib/inngest/client";
 import { checkUsageLimit } from "@/lib/slack/workspace";
+
+// Allow up to 60s for slash commands (classification may need LLM)
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -113,22 +115,28 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Chat — use general agent
+    // Chat — defer to Inngest via response_url (avoids Vercel timeout)
     if (classification.type === "chat") {
-      // Resolve workspaceId for integration tools
-      let workspaceId: string | undefined;
-      try {
-        const { getWorkspaceByTeamId } = await import("@/lib/db");
-        if (teamId) {
-          const ws = await getWorkspaceByTeamId(teamId);
-          if (ws && ws.length > 0) workspaceId = ws[0].id;
-        }
-      } catch { /* non-critical */ }
-
-      const responseText = await chatAsAgent(userId, classification.response || text, { workspaceId });
+      if (responseUrl) {
+        // Send to Inngest for deferred processing
+        await inngest.send({
+          name: "slack/command.chat",
+          data: {
+            userId,
+            text: classification.response || text,
+            responseUrl,
+            teamId,
+          },
+        });
+        return NextResponse.json({
+          response_type: "ephemeral",
+          text: ":speech_balloon: Thinking...",
+        });
+      }
+      // Fallback: no response_url — return a brief message
       return NextResponse.json({
         response_type: "in_channel",
-        text: responseText,
+        text: "Please @mention me in a channel for a full response.",
       });
     }
 

@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySlackRequest } from "@/lib/slack/verify";
 import { claimEvent } from "@/lib/events/dedup";
-import { processSlackEvent } from "@/lib/events/process";
+import { inngest } from "@/lib/inngest/client";
 
 /**
- * Slack Events endpoint — receives all event_callback, app_mention, and message events.
+ * Slack Events endpoint — thin relay to Inngest.
  *
- * PHASE A FIX: Returns 200 OK within ~50ms (verify + dedup only).
- * All actual processing (classification, agent dispatch, chat) runs async.
- * This prevents Slack's 3-second timeout from killing long LLM calls.
+ * Returns 200 OK within ~100ms (verify + dedup + Inngest send).
+ * ALL actual processing (classification, LLM calls, Slack responses)
+ * runs in Inngest step functions with proper execution time (up to 15 min).
+ *
+ * This fixes the critical Vercel serverless issue where fire-and-forget
+ * async work was killed immediately after the HTTP response.
  */
+
+// Allow up to 60s for the handler (safety net — should complete in <1s)
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   const body = await req.text();
 
@@ -52,14 +59,21 @@ export async function POST(req: NextRequest) {
   const isNew = await claimEvent(eventId);
   if (!isNew) return NextResponse.json({ ok: true });
 
-  // 7. Return 200 IMMEDIATELY — all processing is async
-  processSlackEvent({
-    event,
-    eventId,
-    teamId: payload.team_id,
-  }).catch((err) => {
-    console.error("[EVENTS] Async processing error:", err);
-  });
+  // 7. Dispatch to Inngest for processing — runs in its own execution context
+  //    with up to 15-minute timeout and built-in retries.
+  try {
+    await inngest.send({
+      name: "slack/message.received",
+      data: {
+        event,
+        eventId,
+        teamId: payload.team_id,
+      },
+    });
+  } catch (err) {
+    console.error("[EVENTS] Failed to send Inngest event:", err);
+    // Fail-open: event is lost, but at least Slack doesn't retry
+  }
 
   return NextResponse.json({ ok: true });
 }

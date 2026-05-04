@@ -6,8 +6,13 @@ import { documentWorkflow } from "@/lib/inngest/functions/document-task";
 import { analyticsWorkflow } from "@/lib/inngest/functions/analytics-task";
 import { scheduleRunnerWorkflow } from "@/lib/inngest/functions/schedule-runner";
 import { heartbeatWorkflow } from "@/lib/inngest/functions/heartbeat";
+import { messageHandlerWorkflow } from "@/lib/inngest/functions/message-handler";
+import { commandChatWorkflow } from "@/lib/inngest/functions/command-chat";
+
+export const maxDuration = 300;
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  functions: [buildSquadWorkflow, researchWorkflow, documentWorkflow, analyticsWorkflow, scheduleRunnerWorkflow, heartbeatWorkflow],
+  functions: [messageHandlerWorkflow, commandChatWorkflow, buildSquadWorkflow, researchWorkflow, documentWorkflow, analyticsWorkflow, scheduleRunnerWorkflow, heartbeatWorkflow],
 });
+
