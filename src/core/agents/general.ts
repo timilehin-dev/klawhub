@@ -138,7 +138,7 @@ function needsTools(message: string): boolean {
     /\b(schedule|remind|cron|recurring|every \d)\b/i,
     /\b(save|remember|store|note)\b.*(this|that|it)/i,
     /\b(github|google drive|drive)\b/i,
-    /\b(build|script|code|program|app|automate|analyze|report|document|spec)\b/i,
+    /\b(build|script|code|program|app|automate|analyze|report|document|spec|implement|create|target|task|do it|go ahead|start|execute)\b/i,
   ];
   return toolSignals.some((p) => p.test(message));
 }

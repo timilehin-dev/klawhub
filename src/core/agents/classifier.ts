@@ -56,7 +56,10 @@ function tryRegexClassify(userMessage: string): RegexResult | null {
   if (!text || text.length < 3) return { type: "chat", extractedRequest: text };
 
   // Check chat patterns first (cheapest — pure greetings/casual)
-  if (CHAT_PATTERNS.some((p) => p.test(text))) {
+  // Length guard: Only short-circuit to chat if message is brief.
+  // Long messages starting with "yes" or "go ahead" likely contain real instructions
+  // and should fall through to the LLM classifier for proper intent detection.
+  if (text.length < 80 && CHAT_PATTERNS.some((p) => p.test(text))) {
     return { type: "chat", extractedRequest: text };
   }
 
