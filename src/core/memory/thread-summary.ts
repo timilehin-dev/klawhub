@@ -24,17 +24,17 @@ export async function updateSessionSummary(
 
   const key = `session_summary:${slackUserId}`;
   try {
-    const existing = await redis.get<string>(key);
+    const existing = await redis.get(key);
     
-    // In a real production app, we would use an LLM here to summarize:
-    // newSummary = await llm.summarize(existing, userMessage, agentResponse)
-    // For now, we'll use a simple sliding log
+    let logs: any[] = [];
+    if (existing) {
+      logs = Array.isArray(existing) ? existing : (typeof existing === "string" ? JSON.parse(existing) : [existing]);
+    }
     
-    let logs = existing ? JSON.parse(existing) : [];
     logs.push({ user: userMessage, agent: agentResponse.slice(0, 200) });
     if (logs.length > 5) logs = logs.slice(-5);
     
-    await redis.set(key, JSON.stringify(logs), { ex: SESSION_EXPIRY_SECONDS });
+    await redis.set(key, logs, { ex: SESSION_EXPIRY_SECONDS });
   } catch (error) {
     console.error(`Failed to update session summary for ${slackUserId}:`, error);
   }
@@ -44,10 +44,14 @@ export async function getSessionSummary(slackUserId: string): Promise<string> {
   if (!redis) return "";
 
   try {
-    const data = await redis.get<string>(`session_summary:${slackUserId}`);
+    const data = await redis.get(`session_summary:${slackUserId}`);
     if (!data) return "";
     
-    const logs = JSON.parse(data);
+    let logs: any[] = [];
+    if (data) {
+      logs = Array.isArray(data) ? data : (typeof data === "string" ? JSON.parse(data) : [data]);
+    }
+    
     return logs.map((l: any) => `User: ${l.user}\nAgent: ${l.agent}`).join("\n---\n");
   } catch (error) {
     console.error(`Failed to fetch session summary for ${slackUserId}:`, error);
