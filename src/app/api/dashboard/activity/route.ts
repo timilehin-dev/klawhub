@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRecentRuns, getRecentTasks, getUserSchedules } from "@/lib/db";
+import { getRecentRuns, getRecentTasks, getUserSchedules } from "@/db";
 
 // GET /api/dashboard/activity?memberId=xxx
 export async function GET(request: Request) {

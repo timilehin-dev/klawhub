@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyWorkspaceId, checkRateLimit } from "@/lib/session";
+import { verifyWorkspaceId, checkRateLimit } from "@/utils/session";
 
 /**
  * Next.js middleware — runs on every matching request.

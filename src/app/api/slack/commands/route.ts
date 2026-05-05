@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySlackRequest } from "@/lib/slack/verify";
-import { classify } from "@/lib/agents/classifier";
+import { verifySlackRequest } from "@/integrations/slack/verify";
+import { classify } from "@/core/agents/classifier";
 import {
   createRun,
   createTask,
@@ -14,12 +14,12 @@ import {
   getUserScheduleCount,
   updateSchedule,
   trackSkillUsage,
-} from "@/lib/db";
-import { memoryForget } from "@/lib/tools/memory";
-import { parseScheduleRequest } from "@/lib/tools/schedule-parser";
-import { createSchedule } from "@/lib/db";
-import { inngest } from "@/lib/inngest/client";
-import { checkUsageLimit } from "@/lib/slack/workspace";
+} from "@/db";
+import { memoryForget } from "@/core/tools/memory";
+import { parseScheduleRequest } from "@/core/tools/schedule-parser";
+import { createSchedule } from "@/db";
+import { inngest } from "@/workflows/client";
+import { checkUsageLimit } from "@/integrations/slack/workspace";
 
 // Allow up to 60s for slash commands (classification may need LLM)
 export const maxDuration = 60;

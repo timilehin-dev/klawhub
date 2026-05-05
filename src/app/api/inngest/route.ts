@@ -1,13 +1,13 @@
 import { serve } from "inngest/next";
-import { inngest } from "@/lib/inngest/client";
-import { buildSquadWorkflow } from "@/lib/inngest/functions/build-squad";
-import { researchWorkflow } from "@/lib/inngest/functions/research-task";
-import { documentWorkflow } from "@/lib/inngest/functions/document-task";
-import { analyticsWorkflow } from "@/lib/inngest/functions/analytics-task";
-import { scheduleRunnerWorkflow } from "@/lib/inngest/functions/schedule-runner";
-import { heartbeatWorkflow } from "@/lib/inngest/functions/heartbeat";
-import { messageHandlerWorkflow } from "@/lib/inngest/functions/message-handler";
-import { commandChatWorkflow } from "@/lib/inngest/functions/command-chat";
+import { inngest } from "@/workflows/client";
+import { buildSquadWorkflow } from "@/workflows/build-squad";
+import { researchWorkflow } from "@/workflows/research-task";
+import { documentWorkflow } from "@/workflows/document-task";
+import { analyticsWorkflow } from "@/workflows/analytics-task";
+import { scheduleRunnerWorkflow } from "@/workflows/schedule-runner";
+import { heartbeatWorkflow } from "@/workflows/heartbeat";
+import { messageHandlerWorkflow } from "@/workflows/message-handler";
+import { commandChatWorkflow } from "@/workflows/command-chat";
 
 export const maxDuration = 300;
 

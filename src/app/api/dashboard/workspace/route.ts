@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWorkspaceById, getWorkspaceStats, checkWorkspaceUsageLimit, getWorkspaceMembers } from "@/lib/db";
-import { getWorkspaceIntegrations } from "@/lib/integrations/store";
-import { verifyWorkspaceId } from "@/lib/session";
+import { getWorkspaceById, getWorkspaceStats, checkWorkspaceUsageLimit, getWorkspaceMembers } from "@/db";
+import { getWorkspaceIntegrations } from "@/integrations/store";
+import { verifyWorkspaceId } from "@/utils/session";
 
 // GET /api/dashboard/workspace — returns workspace info from cookie
 export async function GET(request: NextRequest) {

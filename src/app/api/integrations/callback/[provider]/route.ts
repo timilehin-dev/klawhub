@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProvider } from "@/lib/integrations/providers/registry";
-import { completeOAuthFlow } from "@/lib/integrations/oauth";
-import { getWorkspaceById } from "@/lib/db";
-import { verifyOAuthState } from "@/lib/session";
+import { getProvider } from "@/integrations/providers/registry";
+import { completeOAuthFlow } from "@/integrations/oauth";
+import { getWorkspaceById } from "@/db";
+import { verifyOAuthState } from "@/utils/session";
 
 // GET /api/integrations/callback/[provider]?code=xxx&state=xxx
 export async function GET(

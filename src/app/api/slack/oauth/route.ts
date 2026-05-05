@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { WebClient } from "@slack/web-api";
-import { signWorkspaceId } from "@/lib/session";
-import { encrypt } from "@/lib/integrations/crypto";
+import { signWorkspaceId } from "@/utils/session";
+import { encrypt } from "@/integrations/crypto";
 
 // Slack OAuth callback — exchanges code for token, creates workspace record
 export async function GET(request: NextRequest) {
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Create or update workspace record
-    const { createWorkspace, upsertWorkspaceMember } = await import("@/lib/db");
+    const { createWorkspace, upsertWorkspaceMember } = await import("@/db");
 
     // Encrypt bot token before storing
     const encryptedBotToken = data.bot_token ? encrypt(data.bot_token) : undefined;
@@ -99,11 +99,11 @@ export async function GET(request: NextRequest) {
     let workspaceId: string | null = null;
 
     try {
-      const { getWorkspaceByTeamId } = await import("@/lib/db");
+      const { getWorkspaceByTeamId } = await import("@/db");
       const existing = await getWorkspaceByTeamId(data.team.id);
       if (existing && existing.length > 0) {
         // Workspace exists — update it
-        const { updateWorkspace } = await import("@/lib/db");
+        const { updateWorkspace } = await import("@/db");
         await updateWorkspace(existing[0].id, {
           slackBotUserId: botUserId,
           botToken: encryptedBotToken,
@@ -129,7 +129,7 @@ export async function GET(request: NextRequest) {
     } catch {
       // Fallback: try to fetch existing workspace
       try {
-        const { getWorkspaceByTeamId } = await import("@/lib/db");
+        const { getWorkspaceByTeamId } = await import("@/db");
         const ws = await getWorkspaceByTeamId(data.team.id);
         if (ws && ws.length > 0) workspaceId = ws[0].id;
       } catch { /* give up */ }

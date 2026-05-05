@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySlackRequest } from "@/lib/slack/verify";
-import { claimEvent } from "@/lib/events/dedup";
-import { inngest } from "@/lib/inngest/client";
+import { verifySlackRequest } from "@/integrations/slack/verify";
+import { claimEvent } from "@/events/dedup";
+import { inngest } from "@/workflows/client";
 
 /**
  * Slack Events endpoint — thin relay to Inngest.

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProvider } from "@/lib/integrations/providers/registry";
-import { buildAuthUrl } from "@/lib/integrations/oauth";
-import { createSignedOAuthState } from "@/lib/session";
+import { getProvider } from "@/integrations/providers/registry";
+import { buildAuthUrl } from "@/integrations/oauth";
+import { createSignedOAuthState } from "@/utils/session";
 
 // GET /api/integrations/connect/[provider]?workspaceId=xxx
 export async function GET(
@@ -25,7 +25,7 @@ export async function GET(
   }
 
   try {
-    const { getProviderCredentials } = await import("@/lib/integrations/providers/registry");
+    const { getProviderCredentials } = await import("@/integrations/providers/registry");
     getProviderCredentials(provider);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Provider not configured";

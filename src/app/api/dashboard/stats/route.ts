@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWorkspaceStats, getWorkspaceMembers, checkWorkspaceUsageLimit } from "@/lib/db";
-import { verifyWorkspaceId } from "@/lib/session";
+import { getWorkspaceStats, getWorkspaceMembers, checkWorkspaceUsageLimit } from "@/db";
+import { verifyWorkspaceId } from "@/utils/session";
 
 // GET /api/dashboard/stats?workspaceId=xxx
 export async function GET(request: NextRequest) {

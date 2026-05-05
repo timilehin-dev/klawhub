@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRecentUsageLogs, getAgentUsageBreakdown } from "@/lib/db";
+import { getRecentUsageLogs, getAgentUsageBreakdown } from "@/db";
 
 // GET /api/dashboard/usage?memberId=xxx
 export async function GET(request: Request) {

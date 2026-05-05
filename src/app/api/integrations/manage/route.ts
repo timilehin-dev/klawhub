@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWorkspaceIntegrations, disconnectIntegration } from "@/lib/integrations/store";
+import { getWorkspaceIntegrations, disconnectIntegration } from "@/integrations/store";
 
 // GET /api/integrations/manage?workspaceId=xxx — list active integrations
 export async function GET(request: NextRequest) {

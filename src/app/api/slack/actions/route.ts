@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySlackRequest } from "@/lib/slack/verify";
-import { inngest } from "@/lib/inngest/client";
-import { createRun, createTask, getWorkspaceByTeamId } from "@/lib/db";
-import { slack } from "@/lib/slack/client";
+import { verifySlackRequest } from "@/integrations/slack/verify";
+import { inngest } from "@/workflows/client";
+import { createRun, createTask, getWorkspaceByTeamId } from "@/db";
+import { slack } from "@/integrations/slack/client";
 
 export const maxDuration = 60;
 
