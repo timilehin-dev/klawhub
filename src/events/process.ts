@@ -36,6 +36,7 @@ import { extractAndStoreKnowledge } from "@/core/tools/knowledge-extractor";
 import { ensureMember, ensureWorkspaceExists, checkUsageLimit } from "@/integrations/slack/workspace";
 import { getThreadHistory, buildFollowupContext } from "@/utils/thread-context";
 import { updateSessionSummary } from "@/core/memory/thread-summary";
+import { matchSkill } from "@/core/skills/loader";
 import { cleanupOldEvents } from "./dedup";
 import type { Intent } from "@/types";
 
@@ -299,7 +300,29 @@ async function handleThreadReply(ctx: {
     }
   }
 
-  // ── 4. No existing run/task in thread — classify the reply ──
+  // ── 4. Fast-path Skill Routing ──
+  const matchedSkill = matchSkill(text);
+  if (matchedSkill) {
+    try { await addReaction(channelId, messageTs, "zap", teamId); } catch { /* ok */ }
+    await postToThread(channelId, messageTs, `*Executing Skill: ${matchedSkill.name}...*`, undefined, teamId);
+    
+    const skillCtx = {
+      slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs,
+      workspaceId: workspaceId || "", teamId
+    };
+    
+    try {
+      const result = await matchedSkill.execute(text, skillCtx);
+      await postToThread(channelId, messageTs, result, undefined, teamId);
+      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "success").catch(() => {});
+    } catch (err) {
+      await postToThread(channelId, messageTs, `Skill failed: ${(err as Error).message}`, undefined, teamId);
+      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "error").catch(() => {});
+    }
+    return;
+  }
+
+  // ── 5. No existing run/task in thread — classify the reply ──
   // Pass thread history to classifier so follow-ups like "yes, go ahead" have context
   const _t4 = Date.now();
   const classification = await classify(text, threadHistory);
@@ -396,6 +419,28 @@ async function handleNewThreadOrDM(ctx: {
     } catch {
       // Fall through to normal classification
     }
+  }
+
+  // Fast-path Skill Routing
+  const matchedSkill = matchSkill(text);
+  if (matchedSkill) {
+    try { await addReaction(channelId, messageTs, "zap", teamId); } catch { /* ok */ }
+    await postToThread(channelId, messageTs, `*Executing Skill: ${matchedSkill.name}...*`, undefined, teamId);
+    
+    const skillCtx = {
+      slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs,
+      workspaceId: workspaceId || "", teamId
+    };
+    
+    try {
+      const result = await matchedSkill.execute(text, skillCtx);
+      await postToThread(channelId, messageTs, result, undefined, teamId);
+      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "success").catch(() => {});
+    } catch (err) {
+      await postToThread(channelId, messageTs, `Skill failed: ${(err as Error).message}`, undefined, teamId);
+      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "error").catch(() => {});
+    }
+    return;
   }
 
   // Classify intent
