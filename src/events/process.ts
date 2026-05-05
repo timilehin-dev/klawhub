@@ -308,7 +308,7 @@ async function handleThreadReply(ctx: {
     
     const skillCtx = {
       slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs,
-      workspaceId: workspaceId || "", teamId
+      workspaceId, teamId
     };
     
     try {
@@ -429,7 +429,7 @@ async function handleNewThreadOrDM(ctx: {
     
     const skillCtx = {
       slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs,
-      workspaceId: workspaceId || "", teamId
+      workspaceId, teamId
     };
     
     try {

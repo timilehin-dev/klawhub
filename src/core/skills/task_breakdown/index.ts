@@ -24,6 +24,14 @@ Make the tasks sequential and logical. Do not provide any conversational filler.
       { role: "user", content: prompt }
     ], { temperature: 0.2, maxTokens: 1000 }, ctx);
 
-    return response;
+    // Strip rogue markdown wrapper if present
+    let cleanResponse = response.trim();
+    if (cleanResponse.startsWith("```markdown")) {
+      cleanResponse = cleanResponse.replace(/^```markdown\n?/i, "").replace(/```$/i, "").trim();
+    } else if (cleanResponse.startsWith("```")) {
+      cleanResponse = cleanResponse.replace(/^```\n?/i, "").replace(/```$/i, "").trim();
+    }
+
+    return cleanResponse;
   }
 };

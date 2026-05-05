@@ -2,7 +2,7 @@ export interface SkillContext {
   slackUserId: string;
   slackChannelId: string;
   slackThreadTs?: string;
-  workspaceId: string;
+  workspaceId?: string;
   teamId?: string;
 }
 
