@@ -65,7 +65,7 @@ export function incrementFailCount(id: string) {
     .set({
       failCount: sql`${schedules.failCount} + 1`,
       updatedAt: new Date(),
-      isActive: sql`${schedules.failCount} >= 2`, // auto-pause after 3 failures
+      isActive: sql`${schedules.failCount} < 2`, // auto-pause after 3 failures (failCount 0,1,2 -> stays active; 3+ -> paused)
     })
     .where(eq(schedules.id, id));
 }

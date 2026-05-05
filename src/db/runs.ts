@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { runs } from "./schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, sql } from "drizzle-orm";
 
 export function createRun(values: typeof runs.$inferInsert) {
   return getDb().insert(runs).values(values).returning();
@@ -38,4 +38,18 @@ export function getActiveRunByThreadTs(threadTs: string) {
 
 export function getRecentRuns(userId: string, limit = 5) {
   return getDb().select().from(runs).where(eq(runs.slackUserId, userId)).orderBy(desc(runs.createdAt)).limit(limit);
+}
+
+/** Find runs stuck in active states longer than `staleMinutes`. */
+export function getStaleRuns(staleMinutes = 15) {
+  return getDb()
+    .select()
+    .from(runs)
+    .where(
+      and(
+        inArray(runs.status, ["pending", "pm", "coding", "qa", "pending_approval"]),
+        sql`${runs.updatedAt} < NOW() - INTERVAL '${sql.raw(String(staleMinutes))} minutes'`
+      )
+    )
+    .orderBy(desc(runs.updatedAt));
 }

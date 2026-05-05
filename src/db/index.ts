@@ -1,7 +1,7 @@
 export { getDb } from "./connection";
 export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs, workspaces, workspaceMembers, integrations, engineerLearnings, processedEvents } from "./schema";
-export { createRun, updateRun, getRun, getRunByThreadTs, getActiveRunByThreadTs, getRecentRuns } from "./runs";
-export { createTask, updateTask, getRecentTasks, getTaskByThreadTs, getActiveTaskByThreadTs } from "./tasks";
+export { createRun, updateRun, getRun, getRunByThreadTs, getActiveRunByThreadTs, getRecentRuns, getStaleRuns } from "./runs";
+export { createTask, updateTask, getRecentTasks, getTaskByThreadTs, getActiveTaskByThreadTs, getStaleTasks } from "./tasks";
 export {
   saveMemory,
   readMemory,

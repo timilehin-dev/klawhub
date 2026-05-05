@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { tasks } from "./schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, sql } from "drizzle-orm";
 
 export function createTask(values: typeof tasks.$inferInsert) {
   return getDb().insert(tasks).values(values).returning();
@@ -34,4 +34,18 @@ export function getActiveTaskByThreadTs(threadTs: string) {
     )
     .orderBy(desc(tasks.createdAt))
     .limit(1);
+}
+
+/** Find tasks stuck in active states longer than `staleMinutes`. */
+export function getStaleTasks(staleMinutes = 15) {
+  return getDb()
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        inArray(tasks.status, ["pending", "pending_approval", "processing"]),
+        sql`${tasks.updatedAt} < NOW() - INTERVAL '${sql.raw(String(staleMinutes))} minutes'`
+      )
+    )
+    .orderBy(desc(tasks.updatedAt));
 }
