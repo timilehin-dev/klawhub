@@ -19,6 +19,24 @@ import {
 import { updateRun } from "@/db";
 import type { SandboxResponse } from "@/types";
 
+/**
+ * Extract a brief summary from QA evaluation for Slack display.
+ * Keeps detailed diagnosis in logs only.
+ */
+function extractQABrief(evaluation: string): string {
+  const verdictMatch = evaluation.match(/VERDICT:\s*(PASS|FAIL)/i);
+  const reasonMatch = evaluation.match(/REASON:\s*([\s\S]*?)(?=DIAGNOSIS:|OUTPUT:|$)/i);
+  const diagnosisMatch = evaluation.match(/DIAGNOSIS:\s*([\s\S]*?)(?=OUTPUT:|$)/i);
+
+  const verdict = verdictMatch?.[1] || "UNKNOWN";
+  const reason = reasonMatch?.[1]?.trim().split('\n')[0] || ""; // First line only
+  const diagnosis = diagnosisMatch?.[1]?.trim().split('\n')[0] || ""; // First line only
+
+  if (verdict === "PASS") return "All checks passed.";
+
+  return `${reason || diagnosis || "Issues found"}`.slice(0, 200);
+}
+
 interface BuildEventData {
   slackChannelId: string;
   slackThreadTs: string;
@@ -184,10 +202,11 @@ export const buildSquadWorkflow = inngest.createFunction(
           { runId, slackUserId }
         );
 
+        const qaBrief = result.passed ? "All checks passed. Ready for delivery." : extractQABrief(result.evaluation);
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*QA Agent* -- Test 1\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation}`,
+          `*QA Agent* -- Test 1: ${result.passed ? "PASS" : "FAIL"}\n${qaBrief}`,
           undefined,
           teamId
         );
@@ -241,10 +260,11 @@ export const buildSquadWorkflow = inngest.createFunction(
             { runId, slackUserId }
           );
 
+          const qaBrief2 = result.passed ? "All checks passed. Ready for delivery." : extractQABrief(result.evaluation);
           await postToThread(
             slackChannelId,
             slackThreadTs,
-            `*QA Agent* -- Test 2\n${result.passed ? "PASS" : "FAIL"}\n\n${result.evaluation}`,
+            `*QA Agent* -- Test 2: ${result.passed ? "PASS" : "FAIL"}\n${qaBrief2}`,
             undefined,
             teamId
           );

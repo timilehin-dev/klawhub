@@ -91,13 +91,13 @@ CODE STRUCTURE (follow this order):
 6. Main orchestration function
 7. Entry point (if __name__ == "__main__" or module.exports)
 
-OUTPUT FORMAT:
-Return ONLY the code inside a single markdown code block with the correct language tag.
-Include a brief docstring/JSDoc at the top of the file explaining:
-- What the script does
-- Required environment variables
-- How to run it
-- Example usage`;
+OUTPUT FORMAT (CRITICAL - FOLLOW EXACTLY):
+You MUST return ONLY a single markdown code block containing the complete, executable code.
+NO explanatory text before or after the code block.
+NO intermediate thoughts, planning, or research summaries.
+The code block MUST have the correct language tag (\`\`\`python or \`\`\`javascript).
+Include a brief docstring/JSDoc at the top explaining usage.
+If you need to research, do it internally and output ONLY the final code.`;
 
 const FIX_PROMPT = `You are a Distinguished Engineer performing surgical bug fixes. Analyze the error with extreme precision and apply the minimum change that resolves it completely.
 
@@ -122,7 +122,7 @@ FIX RULES:
 - Re-verify error handling around the fix — the fix itself shouldn't introduce new failure modes
 - If the error suggests a deeper architectural issue, fix the immediate problem and note the architectural concern
 
-Return ONLY the corrected code inside a markdown code block.`;
+Return ONLY the corrected code inside a markdown code block. NO explanatory text.`;
 
 export interface CodeMeta {
   runId?: string;
