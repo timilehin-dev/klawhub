@@ -45,4 +45,5 @@ export {
 } from "./workspaces";
 export type { UsageLogInsert, UsageStats } from "./usage";
 export { saveEngineerLearning, getRelevantLearnings, getLearningStats } from "./engineer-learnings";
+export { saveAgentState, getAgentState, updateAgentState, getActiveAgents } from "./agent-states";
 export type { WorkspaceStats, UsageLimitResult } from "./workspaces";

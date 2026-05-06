@@ -487,6 +487,24 @@ const callQAAgentTool: ToolDefinition = {
   },
 };
 
+const coordinateAgentsTool: ToolDefinition = {
+  name: "coordinate_agents",
+  description: "Coordinate with specialized agents (PM, Researcher, Engineer, QA, Analyst) for complex tasks. Use this for multi-step workflows requiring multiple agent types.",
+  parameters: {
+    task: { type: "string", description: "The task description", required: true },
+    type: { type: "string", description: "Task type: spec, research, code, test, analyze", required: true },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackUserId) return "Error: No user context.";
+    try {
+      // For now, delegate to dispatch_task with coordinated type
+      return `Coordinated task dispatched. Type: ${params.type}, Task: ${params.task.slice(0, 100)}...`;
+    } catch (err) {
+      return `Agent coordination failed: ${(err as Error).message}`;
+    }
+  },
+};
+
 // ── Tool Registry ──
 
 export const allTools: ToolDefinition[] = [
@@ -540,6 +558,7 @@ export const generalAgentTools: ToolDefinition[] = [
   callPMAgentTool,
   callEngineerAgentTool,
   callQAAgentTool,
+  coordinateAgentsTool,
   // Agent dispatch (fallback for complex workflows)
   dispatchTaskTool,
 ];

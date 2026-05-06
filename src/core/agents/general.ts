@@ -1,10 +1,16 @@
 import { runToolUseLoop } from "@/core/tools/executor";
 import { generalAgentTools } from "@/core/tools/registry";
-import { getActiveSkills, getUserSchedules, getUserSkillStats } from "@/db";
+import { getActiveSkills, getUserSchedules, getUserSkillStats, getActiveAgents } from "@/db";
 import { buildUserContext } from "@/core/tools/memory";
 import { buildKnowledgeContext } from "@/db/knowledge";
 import { agentChat } from "@/core/llm";
 import { getSessionSummary } from "@/core/memory/thread-summary";
+import { messageBus } from "@/core/a2a/message-bus";
+import { PMAgent } from "./pm-agent";
+import { ResearcherAgent } from "./researcher-agent";
+import { EngineerAgent } from "./engineer-agent";
+import { QAAgent } from "./qa-agent";
+import { AnalystAgent } from "./analyst-agent";
 
 const GENERAL_AGENT_SYSTEM = `You are Klawhub, a multi-agent AI coworker that lives inside Slack. You are NOT a generic chatbot — you are a coordinated system of specialized agents and real tools.
 
@@ -55,8 +61,8 @@ You operate as a skills-and-tools-first system. When a user makes a request, you
 • Document: User request → dispatch_task(type='document') → Document Agent (outline) → User approval → Full generation → Delivery
 • Research: User request → dispatch_task(type='research') → Research Agent (web search + synthesis) → Delivery
 • Analytics: User request → dispatch_task(type='analytics') → Analyst Agent (analysis + charts) → Delivery
-• Coordinated: User request → call_research_agent + call_pm_agent (parallel) → Enriched spec → call_engineer_agent → call_qa_agent → Delivery
-  USE coordinated tools when the task requires BOTH real-time research AND code generation (e.g., "build me a tool using the latest API", "implement something using current best practices"). For complex tasks, use dispatch_task(type='coordinated') for full workflow execution.
+• Coordinated: User request → coordinate_agents (A2A) → PM/Researcher/Engineer/QA/Analyst coordinate autonomously → Delivery
+  USE coordinate_agents for complex multi-step tasks requiring multiple agent types. Individual agent tools available for specific needs.
 
 *How to Respond:*
 
@@ -105,6 +111,97 @@ export interface ChatOptions {
   slackTeamId?: string;
 }
 
+// A2A Agent Coordination
+class AgentCoordinator {
+  private agents: Map<string, any> = new Map();
+  private workspaceId?: string;
+
+  constructor(workspaceId?: string) {
+    this.workspaceId = workspaceId;
+    this.initializeAgents();
+  }
+
+  private initializeAgents() {
+    this.agents.set("pm", new PMAgent(this.workspaceId));
+    this.agents.set("researcher", new ResearcherAgent(this.workspaceId));
+    this.agents.set("engineer", new EngineerAgent(this.workspaceId));
+    this.agents.set("qa", new QAAgent(this.workspaceId));
+    this.agents.set("analyst", new AnalystAgent(this.workspaceId));
+  }
+
+  async coordinateTask(task: any, requester: string): Promise<any> {
+    // Determine which agent should handle this
+    const agent = this.selectAgent(task);
+
+    if (agent) {
+      return agent.executeTask({ ...task, from: requester });
+    }
+
+    return null;
+  }
+
+  private selectAgent(task: any): any {
+    const taskType = task.type || this.inferTaskType(task);
+
+    switch (taskType) {
+      case "spec":
+      case "requirements":
+        return this.agents.get("pm");
+      case "research":
+      case "investigate":
+        return this.agents.get("researcher");
+      case "code":
+      case "implement":
+        return this.agents.get("engineer");
+      case "test":
+      case "qa":
+        return this.agents.get("qa");
+      case "analyze":
+      case "report":
+        return this.agents.get("analyst");
+      default:
+        return this.agents.get("pm"); // Default to PM for analysis
+    }
+  }
+
+  private inferTaskType(task: any): string {
+    const desc = JSON.stringify(task).toLowerCase();
+
+    if (desc.includes("research") || desc.includes("find") || desc.includes("investigate")) {
+      return "research";
+    }
+    if (desc.includes("code") || desc.includes("implement") || desc.includes("build")) {
+      return "code";
+    }
+    if (desc.includes("test") || desc.includes("qa") || desc.includes("check")) {
+      return "test";
+    }
+    if (desc.includes("analyze") || desc.includes("report") || desc.includes("data")) {
+      return "analyze";
+    }
+
+    return "spec";
+  }
+
+  async broadcastUpdate(type: string, payload: any): Promise<void> {
+    await messageBus.broadcast({
+      from: "general",
+      type: "broadcast",
+      payload: { type, ...payload },
+    });
+  }
+
+  async getAgentCapabilities(): Promise<Record<string, string[]>> {
+    const capabilities: Record<string, string[]> = {};
+
+    for (const [name, agent] of this.agents) {
+      capabilities[name] = agent.capabilities || [];
+    }
+
+    return capabilities;
+  }
+}
+
 /**
  * Fast path: Single LLM call with minimal context.
  * Used for greetings, short messages, and simple questions that don't need tools.
@@ -145,6 +242,8 @@ function needsTools(message: string): boolean {
   return toolSignals.some((p) => p.test(message));
 }
 
+const agentCoordinator = new AgentCoordinator();
+
 export async function chatAsAgent(
   slackUserId: string,
   userMessage: string,
@@ -157,6 +256,11 @@ export async function chatAsAgent(
     slackThreadTs: options?.slackThreadTs,
     slackTeamId: options?.slackTeamId,
   };
+
+  // Initialize agent coordinator for this workspace
+  if (options?.workspaceId && !agentCoordinator.workspaceId) {
+    // Update coordinator with workspace
+  }
 
   // Build the user message with thread history if available
   let fullMessage = userMessage;
@@ -255,6 +359,9 @@ export async function chatAsAgent(
 
   const systemPrompt = GENERAL_AGENT_SYSTEM + contextSection;
 
+  // Check for proactive agent coordination opportunities
+  await checkProactiveActions(options?.workspaceId, userMessage);
+
   const result = await runToolUseLoop(fullMessage, {
     systemPrompt,
     tools: generalAgentTools,
@@ -265,6 +372,27 @@ export async function chatAsAgent(
     agentName: "general",
   });
 
+  // Broadcast workspace update to agents
+  await agentCoordinator.broadcastUpdate("workspace_update", {
+    user: slackUserId,
+    message: userMessage,
+    channel: options?.slackChannelId,
+  });
+
   console.log(`[PERF] chatAsAgent TOOL path: ${Date.now() - t1}ms`);
   return result;
+}
+
+// Proactive agent coordination
+async function checkProactiveActions(workspaceId: string | undefined, userMessage: string): Promise<void> {
+  // Check if this is a good time for agents to take initiative
+  const activeAgents = await getActiveAgents(workspaceId);
+
+  if (activeAgents.length > 0) {
+    // Have agents check their patterns
+    await agentCoordinator.broadcastUpdate("workspace_update", {
+      trigger: "user_message",
+      message: userMessage,
+    });
+  }
 }

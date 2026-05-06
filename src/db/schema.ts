@@ -191,6 +191,18 @@ export const processedEvents = pgTable("processed_events", {
 // ── Intent list for classifier ──
 export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];
 
+// ── Agent States: persistent state for A2A coordination ──
+
+export const agentStates = pgTable("agent_states", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+  agentName: text("agent_name").notNull().$type<"general" | "pm" | "researcher" | "engineer" | "qa" | "analyst">(),
+  state: jsonb("state").notNull().default({}),
+  lastActiveAt: timestamp("last_active_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 // ── Usage Logs: track every LLM call for observability + billing ──
 
 export const usageLogs = pgTable("usage_logs", {
