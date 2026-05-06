@@ -1,5 +1,29 @@
-import { pgTable, uuid, text, timestamp, jsonb, boolean, integer } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, jsonb, boolean, integer, customType, unique } from "drizzle-orm/pg-core";
 import type { Intent } from "@/types";
+
+// ── Custom pgvector Column Type ──
+
+export const vector = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return "vector(384)";
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(",")}]`;
+  },
+  fromDriver(value: string): number[] {
+    return value
+      .replace(/[\[\]]/g, "")
+      .split(",")
+      .map((v) => parseFloat(v));
+  },
+});
+
+export const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
 
 // ── Runs: tracks app/script build requests ──
 
@@ -49,6 +73,8 @@ export const memory = pgTable("memory", {
   slackUserId: text("slack_user_id").notNull(),
   content: text("content").notNull(),
   category: text("category").default("general"),
+  embedding: vector("embedding"),
+  searchVector: tsvector("search_vector"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -106,6 +132,8 @@ export const knowledge = pgTable("knowledge", {
   entityName: text("entity_name").notNull(),
   data: jsonb("data").notNull().default({}),
   source: text("source"),
+  embedding: vector("embedding"),
+  searchVector: tsvector("search_vector"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -201,7 +229,9 @@ export const agentStates = pgTable("agent_states", {
   lastActiveAt: timestamp("last_active_at", { withTimezone: true }).defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  unique("agent_states_workspace_id_agent_name_unique").on(t.workspaceId, t.agentName),
+]);
 
 // ── Usage Logs: track every LLM call for observability + billing ──
 
@@ -220,4 +250,34 @@ export const usageLogs = pgTable("usage_logs", {
   runId: uuid("run_id"),
   taskId: uuid("task_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+// ── Webhooks: Phase 6 integrations ──
+
+export const webhooks = pgTable("webhooks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  method: text("method").default("POST").notNull(),
+  headers: jsonb("headers").$type<Record<string, string>>().default({}),
+  secret: text("secret_encrypted"), // AES encrypted webhook secret
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+// ── Workflow Learnings: Phase 7 feedback loop ──
+
+export const workflowLearnings = pgTable("workflow_learnings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+  slackUserId: text("slack_user_id").notNull(),
+  category: text("category").default("general").notNull(), // general, document, research, analytics
+  triggerPrompt: text("trigger_prompt").notNull(),
+  feedback: text("feedback").notNull(), // what the user corrected
+  correction: text("correction").notNull(), // corrected instruction or state
+  rating: integer("rating").default(1).notNull(), // 1 for thumbs up, -1 for thumbs down
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
