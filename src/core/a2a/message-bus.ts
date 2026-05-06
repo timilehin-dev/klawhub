@@ -9,7 +9,7 @@ const redis = new Redis({
 export interface AgentMessage {
   from: string;
   to: string;
-  type: 'request' | 'response' | 'broadcast' | 'status';
+  type: string;
   payload: any;
   correlationId?: string;
   timestamp: number;
