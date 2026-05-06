@@ -9,6 +9,8 @@ export async function resendSendEmail(to: string, subject: string, body: string)
     throw new Error("RESEND_API_KEY environment variable is not set. Please add it to your environment.");
   }
 
+  const fromEmail = process.env.RESEND_FROM_EMAIL || "Klawhub AI Coworker <onboarding@resend.dev>";
+
   // Format the request body following Resend's standard specifications
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -17,7 +19,7 @@ export async function resendSendEmail(to: string, subject: string, body: string)
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: "Klawhub AI Coworker <onboarding@resend.dev>",
+      from: fromEmail,
       to: [to],
       subject: subject,
       html: body,
