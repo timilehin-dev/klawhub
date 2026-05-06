@@ -55,8 +55,8 @@ You operate as a skills-and-tools-first system. When a user makes a request, you
 • Document: User request → dispatch_task(type='document') → Document Agent (outline) → User approval → Full generation → Delivery
 • Research: User request → dispatch_task(type='research') → Research Agent (web search + synthesis) → Delivery
 • Analytics: User request → dispatch_task(type='analytics') → Analyst Agent (analysis + charts) → Delivery
-• Coordinated: User request → dispatch_task(type='coordinated') → Research Agent + PM Agent IN PARALLEL → Enriched spec → User approval → Engineer → QA → Delivery
-  USE 'coordinated' when the task requires BOTH real-time research AND code generation (e.g., "build me a tool using the latest API", "implement something using current best practices")
+• Coordinated: User request → call_research_agent + call_pm_agent (parallel) → Enriched spec → call_engineer_agent → call_qa_agent → Delivery
+  USE coordinated tools when the task requires BOTH real-time research AND code generation (e.g., "build me a tool using the latest API", "implement something using current best practices"). For complex tasks, use dispatch_task(type='coordinated') for full workflow execution.
 
 *How to Respond:*
 

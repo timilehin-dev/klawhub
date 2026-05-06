@@ -10,6 +10,10 @@ import {
   searchKnowledge,
 } from "@/db/knowledge";
 import { dispatchTaskTool } from "./implementations/dispatch";
+import { conductResearch } from "@/core/agents/researcher";
+import { createSpec } from "@/core/agents/pm";
+import { writeCodeFromLearnings, fixCode } from "@/core/agents/engineer";
+import { testCode } from "@/core/agents/qa";
 
 // ── Tool Types ──
 
@@ -390,6 +394,99 @@ const browserScreenshotTool: ToolDefinition = {
   },
 };
 
+// ── Agent Calling Tools (for direct multi-agent coordination) ──
+
+const callResearchAgentTool: ToolDefinition = {
+  name: "call_research_agent",
+  description: "Call the Research Agent to conduct web research and synthesize findings. Use this for gathering real-time data, API docs, or external information needed for tasks.",
+  parameters: {
+    instructions: { type: "string", description: "Detailed research instructions", required: true },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackUserId) return "Error: No user context for research.";
+    try {
+      const result = await conductResearch(params.instructions, { taskId: ctx.runId || "direct", slackUserId: ctx.slackUserId });
+      return `Research completed. Sources: ${result.sources.length}. Findings: ${result.findings.slice(0, 2000)}...`;
+    } catch (err) {
+      return `Research failed: ${(err as Error).message}`;
+    }
+  },
+};
+
+const callPMAgentTool: ToolDefinition = {
+  name: "call_pm_agent",
+  description: "Call the PM Agent to analyze requirements and create a technical specification. Use this to break down tasks and write specs for code generation.",
+  parameters: {
+    instructions: { type: "string", description: "Task description and requirements", required: true },
+    user_context: { type: "string", description: "Optional user preferences or context" },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackUserId) return "Error: No user context for PM.";
+    try {
+      const userContext = params.user_context || "";
+      const result = await createSpec(params.instructions, userContext);
+      return `Spec created. Language: ${result.language}. Dependencies: ${result.dependencies || "none"}. Spec: ${result.spec.slice(0, 2000)}...`;
+    } catch (err) {
+      return `PM spec failed: ${(err as Error).message}`;
+    }
+  },
+};
+
+const callEngineerAgentTool: ToolDefinition = {
+  name: "call_engineer_agent",
+  description: "Call the Engineer Agent to write code based on a specification. Use this for implementing features or generating code.",
+  parameters: {
+    spec: { type: "string", description: "Technical specification", required: true },
+    language: { type: "string", description: "Programming language (python, javascript, etc.)", required: true },
+    instructions: { type: "string", description: "Original task instructions", required: true },
+    dependencies: { type: "string", description: "Optional dependencies or libraries" },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackUserId) return "Error: No user context for engineering.";
+    try {
+      const result = await writeCodeFromLearnings(
+        params.spec,
+        params.language,
+        params.instructions,
+        {
+          runId: ctx.runId || "direct",
+          slackUserId: ctx.slackUserId,
+          dependencies: params.dependencies,
+        }
+      );
+      return `Code written. Code: ${result.code.slice(0, 2000)}...`;
+    } catch (err) {
+      return `Engineering failed: ${(err as Error).message}`;
+    }
+  },
+};
+
+const callQAAgentTool: ToolDefinition = {
+  name: "call_qa_agent",
+  description: "Call the QA Agent to test code in a sandbox. Use this to validate code execution and catch issues.",
+  parameters: {
+    code: { type: "string", description: "The code to test", required: true },
+    language: { type: "string", description: "Programming language", required: true },
+    spec: { type: "string", description: "Original specification for validation", required: true },
+    instructions: { type: "string", description: "Original task instructions", required: true },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackUserId) return "Error: No user context for QA.";
+    try {
+      const result = await testCode(
+        params.code,
+        params.language,
+        params.spec,
+        params.instructions,
+        { runId: ctx.runId || "direct", slackUserId: ctx.slackUserId }
+      );
+      return `QA completed. Passed: ${result.passed}. Evaluation: ${result.evaluation.slice(0, 1000)}...`;
+    } catch (err) {
+      return `QA failed: ${(err as Error).message}`;
+    }
+  },
+};
+
 // ── Tool Registry ──
 
 export const allTools: ToolDefinition[] = [
@@ -438,7 +535,12 @@ export const generalAgentTools: ToolDefinition[] = [
   browserLinksTool,
   browserInteractTool,
   browserScreenshotTool,
-  // Agent dispatch
+  // Agent calling tools (for direct multi-agent coordination)
+  callResearchAgentTool,
+  callPMAgentTool,
+  callEngineerAgentTool,
+  callQAAgentTool,
+  // Agent dispatch (fallback for complex workflows)
   dispatchTaskTool,
 ];
 
