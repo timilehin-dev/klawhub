@@ -8,7 +8,7 @@ import type { OAuthProviderConfig } from "./providers/registry";
 
 export interface CreateIntegrationInput {
   workspaceId: string;
-  provider: "google_drive" | "github";
+  provider: "google_drive" | "github" | "google";
   accessToken: string;
   refreshToken?: string;
   expiresAt?: Date;
@@ -50,7 +50,7 @@ export async function getWorkspaceIntegrations(workspaceId: string) {
     .orderBy(desc(integrations.createdAt));
 }
 
-export async function getIntegrationByProvider(workspaceId: string, provider: "google_drive" | "github") {
+export async function getIntegrationByProvider(workspaceId: string, provider: "google_drive" | "github" | "google") {
   const rows = await getDb()
     .select()
     .from(integrations)
@@ -121,7 +121,7 @@ export function decryptRefreshToken(integration: { refreshToken: string | null }
 // ── Token Refresh ──
 
 export async function refreshAccessToken(
-  integration: { id: string; provider: "google_drive" | "github"; refreshToken: string | null; expiresAt: Date | null },
+  integration: { id: string; provider: "google_drive" | "github" | "google"; refreshToken: string | null; expiresAt: Date | null },
   providerConfig: OAuthProviderConfig
 ): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: Date } | null> {
   const refreshToken = decryptRefreshToken(integration);
@@ -194,7 +194,7 @@ function getProviderCredentialsFromConfig(provider: OAuthProviderConfig) {
 // ── Get Valid Access Token (auto-refresh if expired) ──
 
 export async function getValidAccessToken(
-  integration: { id: string; provider: "google_drive" | "github"; accessToken: string; refreshToken: string | null; expiresAt: Date | null },
+  integration: { id: string; provider: "google_drive" | "github" | "google"; accessToken: string; refreshToken: string | null; expiresAt: Date | null },
   providerConfig: OAuthProviderConfig
 ): Promise<string | null> {
   const now = new Date();
