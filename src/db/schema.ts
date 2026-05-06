@@ -266,20 +266,6 @@ export const usageLogs = pgTable("usage_logs", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-// ── Webhooks: Phase 6 integrations ──
-
-export const webhooks = pgTable("webhooks", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  url: text("url").notNull(),
-  method: text("method").default("POST").notNull(),
-  headers: jsonb("headers").$type<Record<string, string>>().default({}),
-  secret: text("secret_encrypted"), // AES encrypted webhook secret
-  isActive: boolean("is_active").default(true).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
 
 // ── Workflow Learnings: Phase 7 feedback loop ──
 
