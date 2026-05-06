@@ -8,8 +8,14 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
+  console.log(`[SLACK-ACTIONS] Received interactive action request. URL: ${req.url}, Method: ${req.method}`);
+  console.log(`[SLACK-ACTIONS] Raw body content sample: ${body.slice(0, 100)}... (Length: ${body.length})`);
 
-  if (!verifySlackRequest(req, body)) {
+  const isValid = verifySlackRequest(req, body);
+  console.log(`[SLACK-ACTIONS] Signature verification result: ${isValid}`);
+
+  if (!isValid) {
+    console.error(`[SLACK-ACTIONS] ERROR: Invalid Slack signature! Check your SLACK_SIGNING_SECRET env var.`);
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
