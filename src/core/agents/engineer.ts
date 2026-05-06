@@ -95,7 +95,7 @@ OUTPUT FORMAT (CRITICAL - FOLLOW EXACTLY):
 You MUST return ONLY a single markdown code block containing the complete, executable code.
 NO explanatory text before or after the code block.
 NO intermediate thoughts, planning, or research summaries.
-The code block MUST have the correct language tag (```python or ```javascript).
+The code block MUST have the correct language tag (\`\`\`python or \`\`\`javascript).
 Include a brief docstring/JSDoc at the top explaining usage.
 If you need to research, do it internally and output ONLY the final code.
 Failure to provide the code block will cause a system execution error. Do not write friendly conversational intros or outros like "Sure! Here is your code:" or "I hope this helps!". Just output the code block.`;
