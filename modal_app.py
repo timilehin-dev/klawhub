@@ -59,7 +59,7 @@ def verify_request(request: Request) -> bool:
 # Code Execution
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=90)
+@app.function(image=image, timeout=300)
 def execute_code(code: str, language: str = "python", dependencies: str = ""):
     if language not in ["python", "javascript"]:
         return {"success": False, "error": f"Unsupported language: {language}"}

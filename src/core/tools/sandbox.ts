@@ -1,6 +1,6 @@
 import type { SandboxRequest, SandboxResponse } from "@/types";
 
-const SANDBOX_TIMEOUT = 120_000; // 2 minutes
+const SANDBOX_TIMEOUT = 300_000; // 5 minutes
 
 export async function sandbox(request: SandboxRequest): Promise<SandboxResponse> {
   const modalUrl = process.env.MODAL_FUNCTION_URL;
