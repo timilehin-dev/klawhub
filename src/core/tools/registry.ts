@@ -660,7 +660,7 @@ const googleCalendarListEventsTool: ToolDefinition = {
         return "No upcoming Google Calendar events found.";
       }
 
-      const formatted = events.map((e) => {
+      const formatted = events.map((e: any) => {
         const startStr = new Date(e.start).toLocaleString();
         const endStr = new Date(e.end).toLocaleString();
         const desc = e.description ? `\n  Description: ${e.description}` : "";
