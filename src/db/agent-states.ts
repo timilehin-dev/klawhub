@@ -32,15 +32,17 @@ export async function getAgentState(
   workspaceId: string | undefined,
   agentName: string
 ): Promise<Record<string, any> | null> {
+  const whereClause = workspaceId
+    ? and(
+        eq(agentStates.workspaceId, workspaceId as string),
+        eq(agentStates.agentName, agentName as any)
+      )
+    : eq(agentStates.agentName, agentName as any);
+
   const result = await db
     .select()
     .from(agentStates)
-    .where(
-      and(
-        eq(agentStates.workspaceId, workspaceId),
-        eq(agentStates.agentName, agentName as any)
-      )
-    )
+    .where(whereClause)
     .limit(1);
 
   return result[0]?.state || null;
@@ -59,8 +61,7 @@ export async function updateAgentState(
 export async function getActiveAgents(workspaceId?: string): Promise<string[]> {
   const result = await db
     .select({ agentName: agentStates.agentName })
-    .from(agentStates)
-    .where(eq(agentStates.workspaceId, workspaceId));
+    .from(agentStates);
 
   return result.map(r => r.agentName);
 }
