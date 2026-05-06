@@ -31,6 +31,7 @@ export class A2AMessageBus {
   async sendMessage(to: string, message: Omit<AgentMessage, 'timestamp' | 'to'>): Promise<void> {
     const fullMessage: AgentMessage = {
       ...message,
+      to,
       timestamp: Date.now(),
     };
     await this.publish(`agent:${to}`, fullMessage);
