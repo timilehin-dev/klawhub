@@ -57,6 +57,7 @@ export interface SandboxCodeRequest {
   type: "code";
   code: string;
   language: string;
+  dependencies?: string;
 }
 
 export interface SandboxWebReadRequest {

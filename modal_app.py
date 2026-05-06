@@ -59,10 +59,39 @@ def verify_request(request: Request) -> bool:
 # Code Execution
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=60)
-def execute_code(code: str, language: str = "python"):
+@app.function(image=image, timeout=90)
+def execute_code(code: str, language: str = "python", dependencies: str = ""):
     if language not in ["python", "javascript"]:
         return {"success": False, "error": f"Unsupported language: {language}"}
+
+    if dependencies:
+        import re
+        if language == "python":
+            cleaned = dependencies.replace("pip install", "").replace("-r requirements.txt", "").strip()
+            packages = [p.strip() for p in re.split(r"[\s,]+", cleaned) if p.strip()]
+            if packages:
+                try:
+                    subprocess.run(["pip", "install"] + packages, capture_output=True, check=True)
+                except subprocess.CalledProcessError as e:
+                    return {
+                        "success": False,
+                        "stdout": "",
+                        "stderr": e.stderr or "",
+                        "error": f"Failed to install python dependencies: {e.stderr or str(e)}"
+                    }
+        elif language == "javascript":
+            cleaned = dependencies.replace("npm install", "").replace("npm i", "").strip()
+            packages = [p.strip() for p in re.split(r"[\s,]+", cleaned) if p.strip()]
+            if packages:
+                try:
+                    subprocess.run(["npm", "install"] + packages, capture_output=True, check=True)
+                except subprocess.CalledProcessError as e:
+                    return {
+                        "success": False,
+                        "stdout": "",
+                        "stderr": e.stderr or "",
+                        "error": f"Failed to install javascript dependencies: {e.stderr or str(e)}"
+                    }
 
     try:
         ext = ".py" if language == "python" else ".js"
@@ -325,7 +354,11 @@ async def execute(request: Request):
     task_type = payload.get("type", "code")
 
     if task_type == "code":
-        return execute_code.remote(payload["code"], payload.get("language", "python"))
+        return execute_code.remote(
+            payload["code"],
+            payload.get("language", "python"),
+            payload.get("dependencies", "")
+        )
     elif task_type == "web_read":
         return read_web_page.remote(payload["url"])
     elif task_type == "document":

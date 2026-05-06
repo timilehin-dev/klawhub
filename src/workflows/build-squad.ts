@@ -16,7 +16,7 @@ import {
   replaceActionsWithDecision,
   retryBlocks,
 } from "@/integrations/slack/blocks";
-import { updateRun } from "@/db";
+import { updateRun, getRun } from "@/db";
 import type { SandboxResponse } from "@/types";
 
 /**
@@ -56,8 +56,11 @@ export const buildSquadWorkflow = inngest.createFunction(
     try {
       // Step 1: PM researches and writes spec
       const specResult = await step.run("pm-spec", async () => {
+        const runsList = await getRun(runId).catch(() => null);
+        const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
+
         const userContext = await memoryRead(slackUserId, "preference");
-        const spec = await createSpec(messageText, userContext);
+        const spec = await createSpec(actualRequest, userContext);
 
         await updateRun(runId, {
           status: "pm",
@@ -158,10 +161,13 @@ export const buildSquadWorkflow = inngest.createFunction(
 
         await updateRun(runId, { status: "coding" });
 
+        const runsList = await getRun(runId).catch(() => null);
+        const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
+
         const result = await writeCodeFromLearnings(
           specResult.spec,
           specResult.language,
-          messageText,
+          actualRequest,
           {
             runId,
             slackUserId,
@@ -194,12 +200,15 @@ export const buildSquadWorkflow = inngest.createFunction(
 
       // Step 5: QA Test 1
       const test1 = await step.run("qa-test-1", async () => {
+        const runsList = await getRun(runId).catch(() => null);
+        const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
+
         const result = await testCode(
           codeResult.code,
           specResult.language,
           specResult.spec,
-          messageText,
-          { runId, slackUserId }
+          actualRequest,
+          { runId, slackUserId, dependencies: specResult.dependencies }
         );
 
         const qaBrief = result.passed ? "All checks passed. Ready for delivery." : extractQABrief(result.evaluation);
@@ -252,12 +261,15 @@ export const buildSquadWorkflow = inngest.createFunction(
 
         // Step 7: QA Test 2
         finalTest = await step.run("qa-test-2", async () => {
+          const runsList = await getRun(runId).catch(() => null);
+          const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
+
           const result = await testCode(
             finalCode,
             specResult.language,
             specResult.spec,
-            messageText,
-            { runId, slackUserId }
+            actualRequest,
+            { runId, slackUserId, dependencies: specResult.dependencies }
           );
 
           const qaBrief2 = result.passed ? "All checks passed. Ready for delivery." : extractQABrief(result.evaluation);

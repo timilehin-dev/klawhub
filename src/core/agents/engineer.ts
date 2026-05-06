@@ -95,9 +95,10 @@ OUTPUT FORMAT (CRITICAL - FOLLOW EXACTLY):
 You MUST return ONLY a single markdown code block containing the complete, executable code.
 NO explanatory text before or after the code block.
 NO intermediate thoughts, planning, or research summaries.
-The code block MUST have the correct language tag (\`\`\`python or \`\`\`javascript).
+The code block MUST have the correct language tag (```python or ```javascript).
 Include a brief docstring/JSDoc at the top explaining usage.
-If you need to research, do it internally and output ONLY the final code.`;
+If you need to research, do it internally and output ONLY the final code.
+Failure to provide the code block will cause a system execution error. Do not write friendly conversational intros or outros like "Sure! Here is your code:" or "I hope this helps!". Just output the code block.`;
 
 const FIX_PROMPT = `You are a Distinguished Engineer performing surgical bug fixes. Analyze the error with extreme precision and apply the minimum change that resolves it completely.
 
@@ -161,7 +162,21 @@ export async function writeCode(
   );
 
   const codeMatch = codeText.match(/```(?:\w+)?\n?([\s\S]*?)```/);
-  return { code: codeMatch?.[1]?.trim() || codeText.trim() };
+  if (codeMatch) {
+    return { code: codeMatch[1].trim() };
+  }
+
+  // If no code block found, check for conversational leaks
+  const hasConversationalMarkers = /\b(sure|here is|hope this|hi|hello|you can|let me|explain|created|built)\b/i.test(codeText);
+  if (hasConversationalMarkers || codeText.length > 2000) {
+    if (language === "python") {
+      return { code: `raise RuntimeError("AI Agent conversational fallback triggered. No code block was generated. Raw text:\\n${codeText.replace(/"/g, '\\"').slice(0, 500)}")` };
+    } else {
+      return { code: `throw new Error("AI Agent conversational fallback triggered. No code block was generated. Raw text:\\n${codeText.replace(/"/g, '\\"').slice(0, 500)}")` };
+    }
+  }
+
+  return { code: codeText.trim() };
 }
 
 export async function writeCodeFromLearnings(
@@ -209,5 +224,20 @@ export async function fixCode(
   );
 
   const codeMatch = codeText.match(/```(?:\w+)?\n?([\s\S]*?)```/);
-  return { code: codeMatch?.[1]?.trim() || codeText.trim() };
+  if (codeMatch) {
+    return { code: codeMatch[1].trim() };
+  }
+
+  // If no code block found, check for conversational leaks
+  const hasConversationalMarkers = /\b(sure|here is|hope this|hi|hello|you can|let me|explain|created|built)\b/i.test(codeText);
+  if (hasConversationalMarkers) {
+    const language = code.includes("def ") || code.includes("import ") ? "python" : "javascript";
+    if (language === "python") {
+      return { code: `raise RuntimeError("AI Agent conversational fallback triggered. No code block was generated during fix. Raw text:\\n${codeText.replace(/"/g, '\\"').slice(0, 500)}")` };
+    } else {
+      return { code: `throw new Error("AI Agent conversational fallback triggered. No code block was generated during fix. Raw text:\\n${codeText.replace(/"/g, '\\"').slice(0, 500)}")` };
+    }
+  }
+
+  return { code: codeText.trim() };
 }

@@ -102,10 +102,15 @@ export async function testCode(
   language: string,
   spec: string,
   requestText: string,
-  meta?: { runId?: string; slackUserId?: string }
+  meta?: { runId?: string; slackUserId?: string; dependencies?: string }
 ): Promise<TestResult> {
   // Execute code in sandbox first
-  const execution = await sandbox({ type: "code", code, language });
+  const execution = await sandbox({
+    type: "code",
+    code,
+    language,
+    dependencies: meta?.dependencies,
+  });
 
   // Use tool-use loop so QA can verify library usage via web_search
   const evaluation = await runToolUseLoop(

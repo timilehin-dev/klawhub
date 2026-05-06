@@ -236,6 +236,25 @@ async function handleThreadReply(ctx: {
     return;
   }
 
+  // ── Classify thread reply to prevent casual chat from reactivating tasks ──
+  const RUN_CONTROL_PATTERNS = [
+    /^\s*(retry|re-run|re-execute|try again|run again|go again|execute again)\s*$/i,
+    /\b(fix|bug|error|fail|issue|modify|change|update|add|remove|refactor)\b/i
+  ];
+
+  const classification = await classify(text, threadHistory);
+  const isControlSignal = RUN_CONTROL_PATTERNS.some((p) => p.test(text));
+
+  if (classification.type === "chat" && !isControlSignal) {
+    try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
+    const responseText = await chatAsAgent(userId, text, { workspaceId, threadHistory, slackChannelId: channelId, slackThreadTs: threadTs, slackTeamId: teamId });
+    memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => {});
+    extractAndStoreKnowledge(userId, text).catch(() => {});
+    updateSessionSummary(userId, text, responseText).catch(() => {});
+    await postToThread(channelId, messageTs, responseText, undefined, teamId);
+    return;
+  }
+
   // ── 2. Follow-up on completed/failed runs (existingRun already fetched above) ──
   if (existingRun && existingRun.length > 0) {
     const run = existingRun[0];
@@ -322,11 +341,7 @@ async function handleThreadReply(ctx: {
     return;
   }
 
-  // ── 5. No existing run/task in thread — classify the reply ──
-  // Pass thread history to classifier so follow-ups like "yes, go ahead" have context
-  const _t4 = Date.now();
-  const classification = await classify(text, threadHistory);
-  console.log(`[PERF] classify (thread reply): ${Date.now() - _t4}ms`);
+  // ── 5. No existing run/task in thread — reuse classification from above ──
 
   if (classification.type === "chat") {
     const _t5 = Date.now();

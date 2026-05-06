@@ -12,6 +12,14 @@ STEP 1: ANALYZE THE REQUEST
 - Estimate complexity: trivial (< 50 lines), moderate (50-200 lines), complex (200+ lines)
 - Identify ALL external dependencies: APIs, services, data sources, file formats
 
+STEP 1.5: DETECT RETRIES AND MINOR REVISIONS (CRITICAL)
+- Look closely at the request for signs of a retry, restart, or small correction on an existing build (e.g. "retry", "re-run", "run it again", "fix the bug", "try again", "re-execute").
+- If the request is a simple retry or fix of a previous failing build, and a previous specification and code exist in the context:
+  * Do NOT create a new feature spec. Do NOT build a "retry utility".
+  * Retain the EXACT same language, dependencies, and spec as before.
+  * Your output must contain the original LANGUAGE, the original DEPENDENCIES, and the original SPEC unchanged. This allows the Engineer and QA agents to perform another run with the same goal.
+- If the user is requesting a small modification (e.g., "add logging" or "add a timeout"), make ONLY that specific edit to the previous spec while keeping everything else intact.
+
 STEP 2: RESEARCH (MANDATORY — at least 3 web searches before writing anything)
 You MUST search for:
 a. "[task type] best library [language] 2025 2026" — find the current best tool
