@@ -1,28 +1,54 @@
 import { getDb } from "./connection";
 import { memory } from "./schema";
 import { eq, and, desc, sql, count, inArray } from "drizzle-orm";
+import { generateEmbedding } from "@/core/embeddings";
 
 /** Maximum memories per user per category to keep things lean. */
 const MAX_MEMORIES_PER_CATEGORY = 20;
 
-export function saveMemory(slackUserId: string, content: string, category = "general", workspaceId?: string) {
+export async function saveMemory(slackUserId: string, content: string, category = "general", workspaceId?: string) {
+  const embedding = await generateEmbedding(content);
   return getDb().insert(memory).values({
     slackUserId,
     content,
     category,
     workspaceId,
+    embedding: embedding || null,
     // search_vector is auto-populated by DB trigger — no need to pass it here
   });
 }
 
 /**
- * Full-text search using PostgreSQL tsvector.
- * Falls back to ILIKE if tsvector column is not yet populated (migration pending).
+ * Semantic search using FastEmbed + pgvector, falling back to full-text search.
  */
-export async function readMemory(slackUserId: string, query: string) {
+export async function readMemory(slackUserId: string, query: string, workspaceId?: string) {
   const safeQuery = query.replace(/[%_\\]/g, "\\$&");
 
-  // Try tsvector search first (higher quality — matches stems, handles misspellings)
+  // Try semantic vector search first
+  try {
+    const embedding = await generateEmbedding(query);
+    if (embedding) {
+      const results = await getDb()
+        .select()
+        .from(memory)
+        .where(
+          and(
+            eq(memory.slackUserId, slackUserId),
+            workspaceId ? eq(memory.workspaceId, workspaceId) : sql`true`
+          )
+        )
+        .orderBy(sql`embedding <=> ${JSON.stringify(embedding)}::vector`)
+        .limit(5);
+
+      if (results.length > 0) {
+        return results;
+      }
+    }
+  } catch (err) {
+    console.warn("[EMBEDDING] Semantic memory search failed:", (err as Error).message);
+  }
+
+  // Try tsvector search second (higher quality — matches stems, handles misspellings)
   try {
     const tsResults = await getDb()
       .select()

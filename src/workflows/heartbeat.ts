@@ -19,11 +19,11 @@ import { getWorkspaceSlack } from "@/integrations/slack/client";
 
 // In-memory cache of last update timestamps (survives within a single serverless invocation)
 const lastUpdateCache = new Map<string, number>();
-const CACHE_TTL = 25 * 60 * 1000; // 25 minutes — heartbeat runs every 30 min
+const CACHE_TTL = 12 * 60 * 1000; // 12 minutes — heartbeat runs every 15 min
 
 export const heartbeatWorkflow = inngest.createFunction(
   { id: "heartbeat", name: "Heartbeat Monitor" },
-  { cron: "*/30 * * * *" }, // Every 30 minutes
+  { cron: "*/15 * * * *" }, // Every 15 minutes
   async ({ step }) => {
     // Step 1: Get all active workspaces with channels to notify
     const workspacesData = await step.run("fetch-workspaces", async () => {
@@ -109,6 +109,33 @@ export const heartbeatWorkflow = inngest.createFunction(
             }
           } catch {
             // Google Drive check failed — skip silently
+          }
+        }
+
+        // Check Gmail integrations
+        const gmailIntegrations = await getDb()
+          .select()
+          .from(integrations)
+          .where(and(
+            eq(integrations.workspaceId, workspace.id),
+            eq(integrations.provider, "google"),
+            eq(integrations.status, "active"),
+          ))
+          .limit(1);
+
+        if (gmailIntegrations.length > 0) {
+          try {
+            const { gmailListMessages } = await import("@/integrations/clients");
+            const emails = await gmailListMessages(workspace.id, 5, "is:unread");
+            if (emails && emails.length > 0) {
+              const emailList = emails
+                .slice(0, 3)
+                .map((m: any) => `• *From:* ${m.from}\n  *Subject:* ${m.subject}\n  *Snippet:* ${m.snippet}`)
+                .join("\n");
+              workspaceUpdates.push(`*Gmail Activity*\n${emails.length} new unread email(s):\n${emailList}`);
+            }
+          } catch {
+            // Gmail check failed — skip silently
           }
         }
 

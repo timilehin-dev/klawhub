@@ -282,3 +282,35 @@ export async function gmailListMessages(workspaceId: string, maxResults = 10, qu
   
   return details.filter((m): m is Exclude<typeof m, null> => m !== null);
 }
+
+// ═══════════════════════════════════════════════════════════
+// GOOGLE CALENDAR
+// ═══════════════════════════════════════════════════════════
+
+export async function googleCalendarListUpcomingEvents(workspaceId: string, maxResults = 10) {
+  const token = await getAccessToken(workspaceId, "google_drive");
+  if (!token) throw new Error("Google Workspace is not connected");
+
+  const now = new Date().toISOString();
+  const resp = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(now)}&singleEvents=true&orderBy=startTime&maxResults=${maxResults}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    throw new Error(`Google Calendar list events failed with status ${resp.status}: ${errorText}`);
+  }
+
+  const data = await resp.json();
+  return (data.items || []).map((e: Record<string, any>) => ({
+    id: e.id,
+    summary: e.summary || "No Title",
+    description: e.description || "",
+    location: e.location || "",
+    start: e.start?.dateTime || e.start?.date || "",
+    end: e.end?.dateTime || e.end?.date || "",
+    attendees: (e.attendees || []).map((a: any) => a.email).filter(Boolean),
+    htmlLink: e.htmlLink || "",
+  }));
+}

@@ -84,12 +84,18 @@ export interface SandboxParseDocumentRequest {
   filename: string;
 }
 
+export interface SandboxGenerateEmbeddingRequest {
+  type: "generate_embedding";
+  text: string;
+}
+
 export type SandboxRequest =
   | SandboxCodeRequest
   | SandboxWebReadRequest
   | SandboxDocumentRequest
   | SandboxAnalyticsRequest
-  | SandboxParseDocumentRequest;
+  | SandboxParseDocumentRequest
+  | SandboxGenerateEmbeddingRequest;
 
 export interface SandboxResponse {
   success: boolean;
@@ -100,6 +106,7 @@ export interface SandboxResponse {
   filename?: string;
   content?: string; // text content from web_read
   text?: string; // text content from document parsing
+  embedding?: number[]; // vector array from local FastEmbed
 }
 
 export interface WebSearchResult {

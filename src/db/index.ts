@@ -1,5 +1,6 @@
 export { getDb } from "./connection";
-export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs, workspaces, workspaceMembers, integrations, engineerLearnings, processedEvents } from "./schema";
+export { runs, tasks, memory, skills, skillUsage, schedules, knowledge, usageLogs, workspaces, workspaceMembers, integrations, engineerLearnings, processedEvents, webhooks } from "./schema";
+export { saveWebhook, getWebhooks, getWebhookByName, decryptWebhookHeaders } from "./webhooks";
 export { createRun, updateRun, getRun, getRunByThreadTs, getActiveRunByThreadTs, getRecentRuns, getStaleRuns } from "./runs";
 export { createTask, updateTask, getRecentTasks, getTaskByThreadTs, getActiveTaskByThreadTs, getStaleTasks } from "./tasks";
 export {

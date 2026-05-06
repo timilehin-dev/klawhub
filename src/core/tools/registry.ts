@@ -5,6 +5,8 @@ import {
   saveMemory,
   readMemory,
   getRecentMemories,
+  getWebhookByName,
+  decryptWebhookHeaders,
 } from "@/db";
 import {
   searchKnowledge,
@@ -188,7 +190,7 @@ const memorySearchTool: ToolDefinition = {
   },
   async execute(params, ctx) {
     if (!ctx.slackUserId) return "Cannot search memory: no user context.";
-    const results = await readMemory(ctx.slackUserId, params.query);
+    const results = await readMemory(ctx.slackUserId, params.query, ctx.workspaceId);
     if (results.length === 0) return "No matching memories found.";
     return results
       .map((r: any) => `[${r.category}] ${r.content}`)
@@ -209,7 +211,7 @@ const knowledgeSearchTool: ToolDefinition = {
   },
   async execute(params, ctx) {
     if (!ctx.slackUserId) return "Cannot search knowledge: no user context.";
-    const results = await searchKnowledge(ctx.slackUserId, params.query);
+    const results = await searchKnowledge(ctx.slackUserId, params.query, ctx.workspaceId);
     if (results.length === 0) return "No knowledge entries found matching your query.";
     return results
       .map((k: any) => {
@@ -563,6 +565,117 @@ const coordinateAgentsTool: ToolDefinition = {
   },
 };
 
+const webhookCustomRequestTool: ToolDefinition = {
+  name: "webhook_custom_request",
+  description: "Query a user-specified HTTP endpoint or dispatch a request via a saved custom webhook name. Authorization and secret headers are decrypted securely at rest.",
+  parameters: {
+    webhook_name: { type: "string", description: "Optional name of a saved webhook configuration to use (e.g., 'Stripe', 'HubSpot'). If omitted, 'url' parameter must be provided." },
+    url: { type: "string", description: "Optional target URL for the custom HTTP request. Required if webhook_name is not provided." },
+    method: { type: "string", description: "HTTP method to use (GET, POST, PUT, DELETE, PATCH). Default is POST." },
+    body: { type: "string", description: "Optional JSON string or plain text body to send with POST, PUT, or PATCH requests." },
+    headers: { type: "string", description: "Optional dynamic request headers to send as a JSON-serialized string." },
+  },
+  async execute(params, ctx) {
+    try {
+      const wsId = requireWorkspace(ctx);
+      let targetUrl = params.url;
+      let targetMethod = (params.method || "POST").toUpperCase();
+      const finalHeaders: Record<string, string> = { "Content-Type": "application/json" };
+
+      if (params.webhook_name) {
+        const wh = await getWebhookByName(wsId, params.webhook_name);
+        if (!wh) {
+          return `Error: Stored webhook with name "${params.webhook_name}" was not found in this workspace. Let the user know to configure it first.`;
+        }
+        const storedHeaders = decryptWebhookHeaders(wh.headersEncrypted);
+        Object.assign(finalHeaders, storedHeaders);
+        if (!targetUrl) targetUrl = wh.url;
+        if (!params.method) targetMethod = wh.method.toUpperCase();
+      }
+
+      if (params.headers) {
+        try {
+          const parsedDynamic = JSON.parse(params.headers);
+          Object.assign(finalHeaders, parsedDynamic);
+        } catch {
+          return `Error: Failed to parse headers parameter as valid JSON. Received: ${params.headers}`;
+        }
+      }
+
+      if (!targetUrl) {
+        return "Error: Missing target URL. Please provide either a valid 'url' parameter or a saved 'webhook_name' that contains a URL.";
+      }
+
+      const fetchOptions: RequestInit = {
+        method: targetMethod,
+        headers: finalHeaders,
+      };
+
+      if (params.body && ["POST", "PUT", "PATCH", "DELETE"].includes(targetMethod)) {
+        fetchOptions.body = params.body;
+      }
+
+      const response = await fetch(targetUrl, fetchOptions);
+      const responseText = await response.text();
+
+      return `Custom HTTP request complete.\nStatus: ${response.status} ${response.statusText}\nTarget URL: ${targetUrl}\nMethod: ${targetMethod}\n\nResponse Content (truncated to 1000 chars):\n${responseText.slice(0, 1000)}`;
+    } catch (err) {
+      return `Custom HTTP request failed: ${(err as Error).message}`;
+    }
+  },
+};
+
+const resendSendEmailTool: ToolDefinition = {
+  name: "resend_send_email",
+  description: "Send a transactional email using the lightweight Resend engine. Best for summaries, status updates, client alerts, and standard notifications.",
+  parameters: {
+    to: { type: "string", description: "The recipient's email address.", required: true },
+    subject: { type: "string", description: "The subject line of the email.", required: true },
+    body: { type: "string", description: "The body content of the email (HTML supported).", required: true },
+  },
+  async execute(params, ctx) {
+    try {
+      const { resendSendEmail } = await import("@/integrations/resend");
+      await resendSendEmail(params.to, params.subject, params.body);
+      return `Successfully dispatched email to ${params.to} with subject: "${params.subject}" via Resend.`;
+    } catch (err) {
+      return `Resend email dispatch failed: ${(err as Error).message}`;
+    }
+  },
+};
+
+const googleCalendarListEventsTool: ToolDefinition = {
+  name: "google_calendar_list_events",
+  description: "Retrieve upcoming meetings and agendas from the connected Google Calendar. Use this to prepare documentation, meeting briefings, or agendas.",
+  parameters: {
+    max_results: { type: "number", description: "Maximum number of events to fetch. Default is 5, max is 15." },
+  },
+  async execute(params, ctx) {
+    try {
+      const wsId = requireWorkspace(ctx);
+      const { googleCalendarListUpcomingEvents } = await import("@/integrations/clients");
+      const events = await googleCalendarListUpcomingEvents(wsId, params.max_results || 5);
+      
+      if (events.length === 0) {
+        return "No upcoming Google Calendar events found.";
+      }
+
+      const formatted = events.map((e) => {
+        const startStr = new Date(e.start).toLocaleString();
+        const endStr = new Date(e.end).toLocaleString();
+        const desc = e.description ? `\n  Description: ${e.description}` : "";
+        const loc = e.location ? `\n  Location: ${e.location}` : "";
+        const att = e.attendees.length > 0 ? `\n  Attendees: ${e.attendees.join(", ")}` : "";
+        return `- **${e.summary}**\n  Time: ${startStr} - ${endStr}${loc}${desc}${att}\n  Link: ${e.htmlLink}`;
+      }).join("\n\n");
+
+      return `Upcoming Google Calendar Events:\n\n${formatted}`;
+    } catch (err) {
+      return integrationError("Google Calendar", err);
+    }
+  },
+};
+
 // ── Tool Registry ──
 
 export const allTools: ToolDefinition[] = [
@@ -587,6 +700,10 @@ export const allTools: ToolDefinition[] = [
   browserLinksTool,
   browserInteractTool,
   browserScreenshotTool,
+  // Custom Webhook and Communication Tools
+  webhookCustomRequestTool,
+  resendSendEmailTool,
+  googleCalendarListEventsTool,
 ];
 
 export function getToolsByName(names: string[]): ToolDefinition[] {
@@ -617,6 +734,10 @@ export const generalAgentTools: ToolDefinition[] = [
   browserLinksTool,
   browserInteractTool,
   browserScreenshotTool,
+  // Custom Webhook and Communication Tools
+  webhookCustomRequestTool,
+  resendSendEmailTool,
+  googleCalendarListEventsTool,
   // Agent calling tools (for direct multi-agent coordination)
   callResearchAgentTool,
   callPMAgentTool,

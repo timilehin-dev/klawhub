@@ -34,7 +34,9 @@ image = (
         "reportlab",
         "pdfplumber",
         "pypdf",
+        "fastembed",
     )
+    .run_commands("python -c 'from fastembed import TextEmbedding; TextEmbedding()'")
 )
 
 
@@ -409,6 +411,29 @@ def parse_document(file_b64: str, filename: str):
         }
 
 
+@app.function(image=image, timeout=30, secrets=[webhook_secret])
+def generate_embedding(text: str) -> dict:
+    try:
+        from fastembed import TextEmbedding
+        model = TextEmbedding()
+        embeddings = list(model.embed([text]))
+        if len(embeddings) > 0:
+            return {
+                "success": True,
+                "embedding": embeddings[0].tolist()
+            }
+        else:
+            return {
+                "success": False,
+                "error": "No embeddings returned"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Embedding generation failed: {str(e)}"
+        }
+
+
 # ─────────────────────────────────────────────
 # Unified Entry Point
 # ─────────────────────────────────────────────
@@ -437,6 +462,8 @@ async def execute(request: Request):
         return run_analytics.remote(payload)
     elif task_type == "parse_document":
         return parse_document.remote(payload["file"], payload["filename"])
+    elif task_type == "generate_embedding":
+        return generate_embedding.remote(payload["text"])
     else:
         return {"success": False, "error": f"Unknown task type: {task_type}"}
 

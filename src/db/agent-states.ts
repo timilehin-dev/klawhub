@@ -34,9 +34,9 @@ export async function getAgentState(
 ): Promise<Record<string, any> | null> {
   const whereClause = workspaceId
     ? and(
-        eq(agentStates.workspaceId, workspaceId as string),
-        eq(agentStates.agentName, agentName as any)
-      )
+      eq(agentStates.workspaceId, workspaceId as string),
+      eq(agentStates.agentName, agentName as any)
+    )
     : eq(agentStates.agentName, agentName as any);
 
   const result = await db

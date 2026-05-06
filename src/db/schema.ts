@@ -193,6 +193,20 @@ export const integrations = pgTable("integrations", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// ── Webhooks: custom integration targets ──
+
+export const webhooks = pgTable("webhooks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  method: text("method").default("POST").notNull(),
+  headersEncrypted: text("headers_encrypted"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 // ── Engineer Learnings: stores QA feedback and corrections for continuous improvement ──
 
 export const engineerLearnings = pgTable("engineer_learnings", {

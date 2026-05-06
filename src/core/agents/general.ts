@@ -275,8 +275,8 @@ export async function chatAsAgent(
 
     // Gather only essential context (memory + knowledge — parallel, lightweight)
     const [memoryContext, knowledgeContext, sessionSummary] = await Promise.all([
-      buildUserContext(slackUserId),
-      buildKnowledgeContext(slackUserId),
+      buildUserContext(slackUserId, userMessage, options?.workspaceId),
+      buildKnowledgeContext(slackUserId, userMessage, options?.workspaceId),
       getSessionSummary(slackUserId),
     ]);
 
@@ -311,8 +311,8 @@ export async function chatAsAgent(
     getActiveSkills().catch(() => []),
     getUserSchedules(slackUserId).catch(() => []),
     getUserSkillStats(slackUserId).catch(() => []),
-    buildUserContext(slackUserId),
-    buildKnowledgeContext(slackUserId),
+    buildUserContext(slackUserId, userMessage, options?.workspaceId),
+    buildKnowledgeContext(slackUserId, userMessage, options?.workspaceId),
     getSessionSummary(slackUserId),
   ]);
 

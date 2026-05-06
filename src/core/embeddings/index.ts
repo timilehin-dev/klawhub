@@ -1,68 +1,33 @@
-/**
- * Embedding Service — generates vector embeddings for semantic search.
- *
- * Uses the Ollama-compatible /v1/embeddings endpoint with a lightweight
- * embedding model (all-minilm, 384 dimensions). Falls back gracefully
- * if the embedding service is unavailable.
- */
+import { sandbox } from "../tools/sandbox";
 
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "all-minilm";
 const EMBEDDING_DIMENSIONS = 384;
-
-/** Get the embedding API base URL from the same Ollama provider we already use. */
-function getEmbeddingUrl(): string {
-  return (process.env.OLLAMA_BASE_URL || "https://api.ollama.com/v1") + "/embeddings";
-}
-
-function getApiKey(): string {
-  return process.env.OLLAMA_API_KEY_1 || process.env.OLLAMA_API_KEY_2 || "";
-}
 
 /**
  * Generate a vector embedding for a text string.
+ * Uses local FastEmbed (BAAI/bge-small-en-v1.5) inside the secure isolated Modal sandbox.
  * Returns a 384-dimensional float array, or null if the service is unavailable.
  */
 export async function generateEmbedding(text: string): Promise<number[] | null> {
   if (!text || text.trim().length === 0) return null;
 
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    console.warn("[EMBEDDING] No API key configured, skipping embedding generation");
-    return null;
-  }
-
   try {
-    const response = await fetch(getEmbeddingUrl(), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: EMBEDDING_MODEL,
-        input: text.slice(0, 2000), // Limit input to prevent token overflow
-      }),
-      signal: AbortSignal.timeout(10000), // 10s timeout
+    const response = await sandbox({
+      type: "generate_embedding",
+      text: text.slice(0, 4000), // FastEmbed token boundary safe slice
     });
 
-    if (!response.ok) {
-      console.warn(`[EMBEDDING] API returned ${response.status}: ${await response.text().catch(() => "")}`);
-      return null;
+    if (response.success && response.embedding) {
+      if (response.embedding.length !== EMBEDDING_DIMENSIONS) {
+        console.warn(`[EMBEDDING] Unexpected dimensions: got ${response.embedding.length}, expected ${EMBEDDING_DIMENSIONS}`);
+        return null;
+      }
+      return response.embedding;
     }
 
-    const data = (await response.json()) as {
-      data?: Array<{ embedding: number[] }>;
-    };
-
-    const embedding = data?.data?.[0]?.embedding;
-    if (!embedding || embedding.length !== EMBEDDING_DIMENSIONS) {
-      console.warn(`[EMBEDDING] Unexpected dimensions: got ${embedding?.length}, expected ${EMBEDDING_DIMENSIONS}`);
-      return null;
-    }
-
-    return embedding;
+    console.warn(`[EMBEDDING] Sandbox returned unsuccessful: ${response.error}`);
+    return null;
   } catch (err) {
-    console.warn("[EMBEDDING] Generation failed:", (err as Error).message);
+    console.warn("[EMBEDDING] FastEmbed sandboxed generation failed:", (err as Error).message);
     return null;
   }
 }

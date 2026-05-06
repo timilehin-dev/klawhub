@@ -2,9 +2,11 @@ import { getDb } from "./connection";
 import { knowledge } from "./schema";
 import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 
+import { generateEmbedding } from "@/core/embeddings";
+
 type EntityType = "project" | "person" | "event" | "standing_item" | "technology" | "preference" | "relationship";
 
-export function upsertKnowledge(
+export async function upsertKnowledge(
   slackUserId: string,
   entityType: EntityType,
   entityName: string,
@@ -12,13 +14,16 @@ export function upsertKnowledge(
   source?: string,
   workspaceId?: string
 ) {
+  const content = `${entityName} (${entityType}): ${Object.entries(data).map(([k, v]) => `${k}=${v}`).join(", ")}`;
+  const embedding = await generateEmbedding(content);
+
   // search_vector is auto-populated by DB trigger — no need to pass it here
   return getDb()
     .insert(knowledge)
-    .values({ slackUserId, entityType, entityName, data, source, workspaceId })
+    .values({ slackUserId, entityType, entityName, data, source, workspaceId, embedding: embedding || null })
     .onConflictDoUpdate({
       target: [knowledge.slackUserId, knowledge.entityType, knowledge.entityName],
-      set: { data, source, updatedAt: new Date() },
+      set: { data, source, embedding: embedding || null, updatedAt: new Date() },
     });
 }
 
@@ -38,11 +43,34 @@ export function getKnowledge(
 }
 
 /**
- * Full-text search using PostgreSQL tsvector.
- * Falls back to ILIKE if tsvector column is not yet populated.
+ * Semantic search using FastEmbed + pgvector, falling back to full-text search.
  */
-export async function searchKnowledge(slackUserId: string, query: string) {
-  // Try tsvector search first
+export async function searchKnowledge(slackUserId: string, query: string, workspaceId?: string) {
+  // Try semantic vector search first
+  try {
+    const embedding = await generateEmbedding(query);
+    if (embedding) {
+      const results = await getDb()
+        .select()
+        .from(knowledge)
+        .where(
+          and(
+            eq(knowledge.slackUserId, slackUserId),
+            workspaceId ? eq(knowledge.workspaceId, workspaceId) : sql`true`
+          )
+         )
+        .orderBy(sql`embedding <=> ${JSON.stringify(embedding)}::vector`)
+        .limit(20);
+
+      if (results.length > 0) {
+        return results;
+      }
+    }
+  } catch (err) {
+    console.warn("[EMBEDDING] Semantic knowledge search failed:", (err as Error).message);
+  }
+
+  // Try tsvector search second
   try {
     const tsResults = await getDb()
       .select()
@@ -92,10 +120,13 @@ export function getAllKnowledge(slackUserId: string) {
     .limit(50);
 }
 
-/** Build a concise context string from all user knowledge for agents. */
-export async function buildKnowledgeContext(slackUserId: string): Promise<string> {
+/** Build a concise context string from relevant user knowledge for agents. */
+export async function buildKnowledgeContext(slackUserId: string, query?: string, workspaceId?: string): Promise<string> {
   try {
-    const items = await getAllKnowledge(slackUserId);
+    const items = query
+      ? await searchKnowledge(slackUserId, query, workspaceId)
+      : await getAllKnowledge(slackUserId);
+
     if (items.length === 0) return "";
 
     const lines = items.map((k) => {

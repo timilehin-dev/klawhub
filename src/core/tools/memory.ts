@@ -10,12 +10,15 @@ import {
  * Build a concise user context string from recent memories.
  * Used by agents to personalize their responses.
  */
-export async function buildUserContext(slackUserId: string): Promise<string> {
+export async function buildUserContext(slackUserId: string, query?: string, workspaceId?: string): Promise<string> {
   try {
-    const recentMem = await getRecentMemories(slackUserId, undefined, 15);
-    if (recentMem.length === 0) return "";
+    const memories = query
+      ? await readMemory(slackUserId, query, workspaceId)
+      : await getRecentMemories(slackUserId, undefined, 15);
 
-    const formatted = recentMem
+    if (memories.length === 0) return "";
+
+    const formatted = memories
       .map((m) => `[${m.category}] ${m.content}`)
       .join("\n");
     return formatted.slice(0, 2000); // cap to avoid bloating prompts
