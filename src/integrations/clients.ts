@@ -197,3 +197,88 @@ export async function githubSearchCode(workspaceId: string, query: string) {
     url: i.html_url,
   }));
 }
+
+// ═══════════════════════════════════════════════════════════
+// GMAIL
+// ═══════════════════════════════════════════════════════════
+
+export async function gmailSendEmail(workspaceId: string, to: string, subject: string, body: string) {
+  const token = await getAccessToken(workspaceId, "google_drive");
+  if (!token) throw new Error("Google Workspace is not connected");
+
+  // Construct raw mime format
+  const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString("base64")}?=`;
+  const messageParts = [
+    `To: ${to}`,
+    "Content-Type: text/html; charset=utf-8",
+    "MIME-Version: 1.0",
+    `Subject: ${utf8Subject}`,
+    "",
+    body,
+  ];
+  const message = messageParts.join("\n");
+  const base64SafeMessage = Buffer.from(message)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const resp = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/send`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ raw: base64SafeMessage }),
+    }
+  );
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Gmail send failed: ${resp.status} - ${errText}`);
+  }
+  return await resp.json();
+}
+
+export async function gmailListMessages(workspaceId: string, maxResults = 10, query?: string) {
+  const token = await getAccessToken(workspaceId, "google_drive");
+  if (!token) throw new Error("Google Workspace is not connected");
+
+  const qParam = query ? `&q=${encodeURIComponent(query)}` : "";
+  const resp = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}${qParam}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (!resp.ok) throw new Error(`Gmail list messages failed: ${resp.status}`);
+  const data = await resp.json();
+  const messages = data.messages || [];
+  
+  // Fetch details for each message
+  const details = await Promise.all(
+    messages.map(async (msg: { id: string }) => {
+      try {
+        const detailResp = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!detailResp.ok) return null;
+        const detailData = await detailResp.json();
+        
+        const headers = detailData.payload?.headers || [];
+        const subject = headers.find((h: any) => h.name?.toLowerCase() === "subject")?.value || "No Subject";
+        const from = headers.find((h: any) => h.name?.toLowerCase() === "from")?.value || "Unknown Sender";
+        const date = headers.find((h: any) => h.name?.toLowerCase() === "date")?.value || "";
+        const snippet = detailData.snippet || "";
+        
+        return { id: msg.id, subject, from, date, snippet };
+      } catch {
+        return null;
+      }
+    })
+  );
+  
+  return details.filter((m): m is Exclude<typeof m, null> => m !== null);
+}

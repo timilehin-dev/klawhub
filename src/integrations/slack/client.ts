@@ -199,3 +199,65 @@ export async function uploadBinaryFile(
     title,
   });
 }
+
+// ── Passive Listening & Proactive Support Helpers ──
+
+const channelNameCache = new Map<string, string>();
+
+/** Fetch and cache channel name to avoid hitting Slack rate limits. */
+export async function getChannelName(channelId: string, teamId?: string): Promise<string | undefined> {
+  const cached = channelNameCache.get(channelId);
+  if (cached) return cached;
+
+  try {
+    const client = await getWorkspaceSlack(teamId);
+    const info = await client.conversations.info({ channel: channelId });
+    if (info.ok && info.channel?.name) {
+      channelNameCache.set(channelId, info.channel.name);
+      return info.channel.name;
+    }
+  } catch {
+    // Non-critical: ignore errors and return undefined
+  }
+  return undefined;
+}
+
+/** Get the decrypted bot token for direct HTTP fetches or outside tool use. */
+export async function getWorkspaceToken(teamId?: string): Promise<string> {
+  if (!teamId) {
+    const token = process.env.SLACK_BOT_TOKEN;
+    if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
+    return token;
+  }
+
+  const ws = await getWorkspaceByTeamId(teamId);
+  if (ws && ws.length > 0 && ws[0].botToken) {
+    try {
+      return decrypt(ws[0].botToken);
+    } catch {
+      return ws[0].botToken;
+    }
+  }
+
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
+  return token;
+}
+
+/** Download a file directly from Slack using authorization token. */
+export async function downloadSlackFile(fileUrl: string, teamId?: string): Promise<Buffer> {
+  const token = await getWorkspaceToken(teamId);
+  const response = await fetch(fileUrl, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to download Slack file: ${response.statusText}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+

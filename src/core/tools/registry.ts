@@ -123,6 +123,30 @@ const codeExecuteTool: ToolDefinition = {
   },
 };
 
+const parseDocumentTool: ToolDefinition = {
+  name: "parse_document",
+  description:
+    "Parse and extract text and structured tabular data from a PDF, Word document (DOCX), text file, CSV, JSON, XML, or spreadsheet. Executes in a secure isolated sandbox.",
+  parameters: {
+    file_b64: { type: "string", description: "Base64-encoded file content", required: true },
+    filename: { type: "string", description: "Name of the file including extension (e.g. invoice.pdf)", required: true },
+  },
+  async execute(params, _ctx) {
+    if (!process.env.MODAL_FUNCTION_URL) {
+      return "Document parsing is not available — sandbox service is not configured.";
+    }
+    const result = await sandbox({
+      type: "parse_document",
+      file: params.file_b64,
+      filename: params.filename,
+    });
+    if (!result.success) {
+      return `Failed to parse document: ${result.error || "Unknown sandbox error"}`;
+    }
+    return `Document successfully parsed.\n\nParsed Content:\n${result.text}`;
+  },
+};
+
 const memorySaveTool: ToolDefinition = {
   name: "memory_save",
   description:
@@ -249,6 +273,40 @@ const googleDriveReadTool: ToolDefinition = {
         return `Spreadsheet content (CSV):\n${sheet.content}`;
       }
     } catch (err) { return integrationError("Google Drive", err); }
+  },
+};
+
+const gmailSendEmailTool: ToolDefinition = {
+  name: "gmail_send_email",
+  description: "Send an email via Gmail from the connected Google Workspace account. Best for sending client invoices, team briefings, and system alerts.",
+  parameters: {
+    to: { type: "string", description: "Recipient email address", required: true },
+    subject: { type: "string", description: "Email subject line", required: true },
+    body: { type: "string", description: "Email body content (HTML or plain text)", required: true },
+  },
+  async execute(params, ctx) {
+    try {
+      const { gmailSendEmail } = await import("@/integrations/clients");
+      await gmailSendEmail(requireWorkspace(ctx), params.to, params.subject, params.body);
+      return `Email successfully sent to ${params.to} with subject "${params.subject}".`;
+    } catch (err) { return integrationError("Gmail", err); }
+  },
+};
+
+const gmailListMessagesTool: ToolDefinition = {
+  name: "gmail_list_messages",
+  description: "List recent emails from the connected Gmail account. Use to monitor and extract customer requests, invoices, or feedback.",
+  parameters: {
+    max_results: { type: "number", description: "Maximum number of emails to retrieve (default 5, max 10)" },
+    query: { type: "string", description: "Search query or filter (e.g. 'from:example@domain.com' or 'subject:invoice')" },
+  },
+  async execute(params, ctx) {
+    try {
+      const { gmailListMessages } = await import("@/integrations/clients");
+      const messages = await gmailListMessages(requireWorkspace(ctx), params.max_results || 5, params.query);
+      if (messages.length === 0) return "No emails found matching your query.";
+      return messages.map((m: any) => `- ID: ${m.id}\n  From: ${m.from}\n  Subject: ${m.subject}\n  Date: ${m.date}\n  Snippet: ${m.snippet}`).join("\n\n");
+    } catch (err) { return integrationError("Gmail", err); }
   },
 };
 
@@ -511,12 +569,15 @@ export const allTools: ToolDefinition[] = [
   webSearchTool,
   webReadTool,
   codeExecuteTool,
+  parseDocumentTool,
   memorySaveTool,
   memorySearchTool,
   knowledgeSearchTool,
   // Integration tools
   googleDriveSearchTool,
   googleDriveReadTool,
+  gmailSendEmailTool,
+  gmailListMessagesTool,
   githubSearchTool,
   githubReadFileTool,
   githubIssuesTool,
@@ -538,12 +599,15 @@ export function getToolsByName(names: string[]): ToolDefinition[] {
 export const generalAgentTools: ToolDefinition[] = [
   webSearchTool,
   webReadTool,
+  parseDocumentTool,
   memorySaveTool,
   memorySearchTool,
   knowledgeSearchTool,
   // Integration tools — the agent will handle "not connected" gracefully
   googleDriveSearchTool,
   googleDriveReadTool,
+  gmailSendEmailTool,
+  gmailListMessagesTool,
   githubSearchTool,
   githubReadFileTool,
   githubIssuesTool,

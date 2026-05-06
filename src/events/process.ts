@@ -14,7 +14,8 @@
  *     → processSlackEvent() runs in background (fire-and-forget)
  */
 
-import { postToThread, addReaction, getCachedWorkspaceId } from "@/integrations/slack/client";
+import { postToThread, addReaction, getCachedWorkspaceId, getChannelName, downloadSlackFile } from "@/integrations/slack/client";
+import { sandbox } from "@/core/tools/sandbox";
 import { classify } from "@/core/agents/classifier";
 import { chatAsAgent } from "@/core/agents/general";
 import {
@@ -52,6 +53,7 @@ export interface SlackEvent {
   bot_id?: string;
   subtype?: string;
   thread_ts?: string;
+  files?: any[];
 }
 
 export interface ProcessEventInput {
@@ -102,14 +104,26 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
   ensureWorkspaceExists(teamId).catch(() => {});
 
   const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
-  if (!text) return;
+  const hasFiles = !!(event.files && event.files.length > 0);
+  if (!text && !hasFiles) return;
   console.log(`[PERF] processSlackEvent setup: ${Date.now() - _t0}ms`);
 
   const isMention = event.type === "app_mention";
   const isDM = event.type === "message" && event.channel_type === "im";
   const isThreadReply = !!(threadTs && threadTs !== messageTs);
 
-  if (!isMention && !isDM && !isThreadReply) return;
+  let isPassiveListen = false;
+  if (!isMention && !isDM && !isThreadReply && channelId) {
+    const channelName = await getChannelName(channelId, teamId);
+    if (channelName) {
+      const isProactiveChannel = /invoice|finance|billing|receipts|legal/i.test(channelName);
+      if (isProactiveChannel && event.subtype !== "bot_message") {
+        isPassiveListen = true;
+      }
+    }
+  }
+
+  if (!isMention && !isDM && !isThreadReply && !isPassiveListen) return;
 
   // Resolve workspaceId — try cache first (populated by addReaction's getWorkspaceSlack call)
   // Falls back to DB lookup only if cache miss
@@ -122,6 +136,43 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
     } catch { /* non-critical */ }
   }
   console.log(`[PERF] workspaceId resolve (cache=${!!workspaceId || !teamId}): ${Date.now() - _t1}ms`);
+
+  // Handle file downloading and parsing proactively if we are passive listening and files exist
+  let fileTextContext = "";
+  if (hasFiles && isPassiveListen && event.files) {
+    const file = event.files[0];
+    const allowedExtensions = [".pdf", ".docx", ".txt", ".csv", ".json", ".xml", ".yaml", ".yml", ".md"];
+    const ext = "." + (file.name || "").split(".").pop()?.toLowerCase();
+
+    if (allowedExtensions.includes(ext)) {
+      try {
+        await addReaction(channelId, messageTs, "hourglass", teamId);
+        await postToThread(channelId, messageTs,
+          `:mag: *Klawhub Passive Monitoring:* I detected an uploaded document (\`${file.name}\`) in this finance channel. Running secure ephemeral parsing inside the isolated sandbox...`,
+          undefined, teamId
+        );
+
+        const fileBuffer = await downloadSlackFile(file.url_private, teamId);
+        const fileB64 = fileBuffer.toString("base64");
+
+        const result = await sandbox({
+          type: "parse_document",
+          file: fileB64,
+          filename: file.name || "document.pdf",
+        });
+
+        if (result.success && result.text) {
+          fileTextContext = `[Uploaded File: ${file.name}]\nExtracted Content:\n${result.text}`;
+          await postToThread(channelId, messageTs,
+            `:white_check_mark: Secure parsing complete! Document context loaded. Formulating proactive recommendations...`,
+            undefined, teamId
+          );
+        }
+      } catch (err) {
+        console.error("[PASSIVE] Error downloading or parsing file:", err);
+      }
+    }
+  }
 
   try {
     // ══════════════════════════════════════════════════
@@ -139,6 +190,7 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
     // ══════════════════════════════════════════════════
     await handleNewThreadOrDM({
       userId, channelId, messageTs, text, teamId, workspaceId, isMention, isDM,
+      isPassiveListen, fileTextContext,
     });
   } catch (error) {
     console.error("[EVENTS] Processing error:", error);
@@ -407,8 +459,27 @@ async function handleNewThreadOrDM(ctx: {
   workspaceId?: string;
   isMention: boolean;
   isDM: boolean;
+  isPassiveListen?: boolean;
+  fileTextContext?: string;
 }): Promise<void> {
-  const { userId, channelId, messageTs, text, teamId, workspaceId } = ctx;
+  const { userId, channelId, messageTs, text, teamId, workspaceId, isPassiveListen, fileTextContext } = ctx;
+
+  if (isPassiveListen) {
+    try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
+    const prompt = `[PROACTIVE MONITORING COWORKER]
+A file or message was posted in a monitored channel.
+User message: "${text || "(No text message, file uploaded)"}"
+${fileTextContext ? `Extracted Document Context:\n${fileTextContext}` : ""}
+
+Please analyze this document/message proactively as a human coworker would.
+1. Formulate helpful recommendations (e.g., draft email to client with invoice, summarize receipt/transaction, log expense, etc.).
+2. Present clear, actionable next steps.
+3. Be friendly, brief, conversational, and direct. Do NOT sound like a bot. Keep your response short and useful.`;
+
+    const responseText = await chatAsAgent(userId, prompt, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
+    await postToThread(channelId, messageTs, responseText, undefined, teamId);
+    return;
+  }
 
   // Schedule detection
   if (SCHEDULE_PATTERNS.some((p) => p.test(text))) {

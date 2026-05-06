@@ -32,6 +32,8 @@ image = (
         "seaborn",
         "python-docx",
         "reportlab",
+        "pdfplumber",
+        "pypdf",
     )
 )
 
@@ -340,6 +342,74 @@ _chart_ts = str(int(time.time()))
 
 
 # ─────────────────────────────────────────────
+# Document Parsing and OCR Extraction
+# ─────────────────────────────────────────────
+
+@app.function(image=image, timeout=60)
+def parse_document(file_b64: str, filename: str):
+    import base64
+    import tempfile
+    import os
+    
+    file_bytes = base64.b64decode(file_b64)
+    ext = os.path.splitext(filename)[1].lower()
+    
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+            f.write(file_bytes)
+            temp_path = f.name
+            
+        text_content = ""
+        metadata = {}
+        
+        if ext == ".pdf":
+            import pdfplumber
+            with pdfplumber.open(temp_path) as pdf:
+                pages_text = []
+                for i, page in enumerate(pdf.pages):
+                    page_text = page.extract_text() or ""
+                    # Try to extract structured table data for invoices
+                    tables = page.extract_tables()
+                    if tables:
+                        table_str = "\n--- Structured Table Data on Page " + str(i+1) + " ---\n"
+                        for row in tables:
+                            table_str += " | ".join([str(cell or "").strip() for cell in row]) + "\n"
+                        page_text += table_str
+                    pages_text.append(f"--- Page {i+1} ---\n{page_text}")
+                text_content = "\n\n".join(pages_text)
+                metadata = {"pages": len(pdf.pages)}
+        elif ext in [".txt", ".csv", ".json", ".xml", ".yaml", ".yml", ".md"]:
+            text_content = file_bytes.decode("utf-8", errors="ignore")
+        elif ext == ".docx":
+            from docx import Document
+            doc = Document(temp_path)
+            paragraphs = [p.text for p in doc.paragraphs]
+            tables_text = []
+            for table in doc.tables:
+                for row in table.rows:
+                    tables_text.append(" | ".join([cell.text.strip() for cell in row.cells]))
+            text_content = "\n".join(paragraphs) + "\n\n--- Tables ---\n" + "\n".join(tables_text)
+        else:
+            text_content = file_bytes.decode("utf-8", errors="ignore")
+            
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+            
+        return {
+            "success": True,
+            "text": text_content,
+            "metadata": metadata
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to parse document: {str(e)}"
+        }
+
+
+# ─────────────────────────────────────────────
 # Unified Entry Point
 # ─────────────────────────────────────────────
 
@@ -365,6 +435,8 @@ async def execute(request: Request):
         return generate_document.remote(payload)
     elif task_type == "analytics":
         return run_analytics.remote(payload)
+    elif task_type == "parse_document":
+        return parse_document.remote(payload["file"], payload["filename"])
     else:
         return {"success": False, "error": f"Unknown task type: {task_type}"}
 

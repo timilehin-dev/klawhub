@@ -78,11 +78,18 @@ export interface SandboxAnalyticsRequest {
   data?: string;
 }
 
+export interface SandboxParseDocumentRequest {
+  type: "parse_document";
+  file: string; // base64-encoded file content
+  filename: string;
+}
+
 export type SandboxRequest =
   | SandboxCodeRequest
   | SandboxWebReadRequest
   | SandboxDocumentRequest
-  | SandboxAnalyticsRequest;
+  | SandboxAnalyticsRequest
+  | SandboxParseDocumentRequest;
 
 export interface SandboxResponse {
   success: boolean;
@@ -92,6 +99,7 @@ export interface SandboxResponse {
   output_file?: string; // base64-encoded file
   filename?: string;
   content?: string; // text content from web_read
+  text?: string; // text content from document parsing
 }
 
 export interface WebSearchResult {

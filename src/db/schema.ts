@@ -176,7 +176,7 @@ export const workspaceMembers = pgTable("workspace_members", {
 export const integrations = pgTable("integrations", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
-  provider: text("provider").notNull().$type<"google_drive" | "github">(),
+  provider: text("provider").notNull().$type<"google_drive" | "github" | "google">(),
   status: text("status").$type<"active" | "expired" | "error" | "disconnected">().default("active").notNull(),
   accessToken: text("access_token_encrypted").notNull(),
   refreshToken: text("refresh_token_encrypted"),
