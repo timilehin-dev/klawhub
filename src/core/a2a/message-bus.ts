@@ -28,7 +28,7 @@ export class A2AMessageBus {
     // For now, agents will poll or use direct calls
   }
 
-  async sendMessage(to: string, message: Omit<AgentMessage, 'timestamp'>): Promise<void> {
+  async sendMessage(to: string, message: Omit<AgentMessage, 'timestamp' | 'to'>): Promise<void> {
     const fullMessage: AgentMessage = {
       ...message,
       timestamp: Date.now(),
