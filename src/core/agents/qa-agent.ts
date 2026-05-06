@@ -26,9 +26,9 @@ export class QAAgent extends BaseAgent {
         }
         break;
       case "broadcast":
-        if (message.payload.type === "code_generated") {
+        if (message.payload.eventType === "code_generated") {
           await this.offerTesting(message.payload);
-        } else if (message.payload.type === "workspace_update") {
+        } else if (message.payload.eventType === "workspace_update") {
           await this.checkWorkspacePatterns();
         }
         break;
@@ -102,13 +102,14 @@ export class QAAgent extends BaseAgent {
   }
 
   private async offerTesting(codeData: any): Promise<void> {
-    // Offer to test newly generated code
-    await this.sendMessage(codeData.requester, "request", {
-      type: "offer_testing",
-      message: "I can test the generated code for quality and correctness. Would you like me to proceed?",
-      code: codeData.code,
-      language: codeData.language,
-    });
+      // Offer to test newly generated code
+      await this.broadcast("broadcast", {
+        eventType: "offer_testing",
+        message: "I can test the generated code for quality and correctness. Would you like me to proceed?",
+        code: codeData.code,
+        language: codeData.language,
+        requester: codeData.requester,
+      });
   }
 
   private async handleDelegation(task: any): Promise<void> {

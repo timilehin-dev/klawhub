@@ -183,13 +183,13 @@ class AgentCoordinator {
     return "spec";
   }
 
-  async broadcastUpdate(type: string, payload: any): Promise<void> {
-    await messageBus.broadcast({
-      from: "general",
-      type: "broadcast",
-      payload: { type, ...payload },
-    });
-  }
+   async broadcastUpdate(eventType: string, payload: any): Promise<void> {
+     await messageBus.broadcast({
+       from: "general",
+       type: eventType,
+       payload,
+     });
+   }
 
   async getAgentCapabilities(): Promise<Record<string, string[]>> {
     const capabilities: Record<string, string[]> = {};

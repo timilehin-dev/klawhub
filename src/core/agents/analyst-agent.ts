@@ -25,9 +25,9 @@ export class AnalystAgent extends BaseAgent {
         }
         break;
       case "broadcast":
-        if (message.payload.type === "research_available") {
+        if (message.payload.eventType === "research_available") {
           await this.checkResearchAndOfferAnalysis(message.payload);
-        } else if (message.payload.type === "workspace_update") {
+        } else if (message.payload.eventType === "workspace_update") {
           await this.checkWorkspacePatterns();
         }
         break;

@@ -36,10 +36,10 @@ export abstract class BaseAgent {
     });
   }
 
-  async broadcast(type: AgentMessage['type'], payload: any): Promise<void> {
+  async broadcast(eventType: string, payload: any): Promise<void> {
     await messageBus.broadcast({
       from: this.name,
-      type,
+      type: eventType,
       payload,
     });
   }

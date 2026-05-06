@@ -59,12 +59,13 @@ export class ResearcherAgent extends BaseAgent {
         },
       });
 
-      // Notify other agents that might benefit
-      await this.broadcast("research_available", {
-        topic: query,
-        summary: result.findings.slice(0, 200),
-        requester,
-      });
+        // Notify other agents that might benefit
+        await this.broadcast("broadcast", {
+          eventType: "research_available",
+          topic: query,
+          summary: result.findings.slice(0, 200),
+          requester,
+        });
     } catch (error) {
       await this.sendMessage(requester, "response", {
         type: "error",

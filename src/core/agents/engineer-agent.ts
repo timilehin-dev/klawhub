@@ -107,14 +107,15 @@ export class EngineerAgent extends BaseAgent {
   }
 
   private async checkSpecAndOfferHelp(specData: any): Promise<void> {
-    // If spec involves code, offer to implement
-    if (specData.spec.language || specData.spec.includes("code")) {
-      await this.sendMessage(specData.requester, "request", {
-        type: "offer_help",
-        message: "I can implement the code for this specification. Would you like me to proceed?",
-        spec: specData.spec,
-      });
-    }
+      // If spec involves code, offer to implement
+      if (specData.spec.language || specData.spec.includes("code")) {
+        await this.broadcast("broadcast", {
+          eventType: "offer_help",
+          message: "I can implement the code for this specification. Would you like me to proceed?",
+          spec: specData.spec,
+          requester: specData.requester,
+        });
+      }
   }
 
   protected async checkWorkspacePatterns(): Promise<void> {
