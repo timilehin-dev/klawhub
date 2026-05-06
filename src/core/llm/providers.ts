@@ -49,7 +49,7 @@ export function getProviders(): ProviderConfig[] {
   const aihubmix = fromEnv(
     "aihubmix",
     "https://aihubmix.com/v1",
-    ["AIHUBMIX_API_KEY_1", "AIHUBMIX_API_KEY_2"],
+    ["AIHUBMIX_API_KEY_1", "AIHUBMIX_API_KEY_2", "AIHUBMIX_API_KEY_3"],
     process.env.AIHUBMIX_MODEL || "xiaomi-mimo-v2.5-pro-free",
     "aihubmix"
   );
