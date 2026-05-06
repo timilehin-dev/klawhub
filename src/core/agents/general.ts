@@ -114,7 +114,7 @@ export interface ChatOptions {
 // A2A Agent Coordination
 class AgentCoordinator {
   private agents: Map<string, any> = new Map();
-  private workspaceId?: string;
+  public workspaceId?: string;
 
   constructor(workspaceId?: string) {
     this.workspaceId = workspaceId;
