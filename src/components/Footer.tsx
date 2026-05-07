@@ -79,10 +79,20 @@ export function Footer() {
                 <span className="text-sm text-surface-700">About</span>
               </li>
               <li>
-                <span className="text-sm text-surface-700">Privacy Policy</span>
+                <Link
+                  href="/privacy-policy"
+                  className="text-sm text-surface-700 transition-colors hover:text-brand-600"
+                >
+                  Privacy Policy
+                </Link>
               </li>
               <li>
-                <span className="text-sm text-surface-700">Terms of Service</span>
+                <Link
+                  href="/terms-of-service"
+                  className="text-sm text-surface-700 transition-colors hover:text-brand-600"
+                >
+                  Terms of Service
+                </Link>
               </li>
             </ul>
           </div>
