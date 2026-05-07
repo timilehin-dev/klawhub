@@ -1,4 +1,4 @@
-const postgres = require("postgres");
+const { Client } = require("pg");
 const fs = require("fs");
 const path = require("path");
 
@@ -26,26 +26,25 @@ async function run() {
   loadEnv();
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
-    console.error("DATABASE_URL is not set in env");
-    process.exit(1);
+    console.error("DATABASE_URL is not set");
+    return;
   }
-
-  const sql = postgres(connectionString);
+  console.log("Connecting using 'pg' client...");
+  const client = new Client({ connectionString });
+  await client.connect();
   try {
-    const res = await sql`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'workspaces' AND column_name IN ('agent_name', 'agent_personality', 'enabled_skills');
-    `;
-    const foundColumns = res.map(row => row.column_name);
-    console.log("--- COLUMN CHECK RESULT ---");
-    console.log("Found columns:", foundColumns);
-    console.log("----------------------------");
+    console.log("Applying ALTER TABLE column additions...");
+    await client.query(`
+      ALTER TABLE workspaces 
+      ADD COLUMN IF NOT EXISTS agent_name TEXT NOT NULL DEFAULT 'Klawhub',
+      ADD COLUMN IF NOT EXISTS agent_personality TEXT,
+      ADD COLUMN IF NOT EXISTS enabled_skills JSONB NOT NULL DEFAULT '["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator", "email_dispatch"]'::jsonb;
+    `);
+    console.log("✅ Done!");
   } catch (err) {
-    console.error("Column check failed:", err.message);
+    console.error("Query failed:", err);
   } finally {
-    await sql.end();
+    await client.end();
   }
 }
-
 run();

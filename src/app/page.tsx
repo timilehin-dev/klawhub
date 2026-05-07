@@ -8,6 +8,8 @@ import {
 import Link from "next/link";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
+import { cookies } from "next/headers";
+import { verifyWorkspaceId } from "@/utils/session";
 
 const capabilities = [
   {
@@ -104,7 +106,12 @@ const steps = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get("kh_auth_session")?.value;
+  const workspaceId = sessionCookie ? await verifyWorkspaceId(sessionCookie) : null;
+  const isLoggedIn = !!workspaceId;
+
   return (
     <>
       <Header />
@@ -144,16 +151,29 @@ export default function Home() {
 
             {/* CTA Buttons */}
             <div className="animate-fade-in-up-delay-3 mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link
-                href="/install"
-                className="group inline-flex items-center gap-2 rounded-full gradient-bg px-8 py-3.5 text-base font-semibold text-white shadow-lg shadow-brand-500/25 transition-all hover:shadow-xl hover:shadow-brand-500/30 hover:brightness-110"
-              >
-                Add to Slack — Free
-                <ArrowRight
-                  size={18}
-                  className="transition-transform group-hover:translate-x-0.5"
-                />
-              </Link>
+              {isLoggedIn ? (
+                <Link
+                  href="/dashboard"
+                  className="group inline-flex items-center gap-2 rounded-full gradient-bg px-8 py-3.5 text-base font-semibold text-white shadow-lg shadow-brand-500/25 transition-all hover:shadow-xl hover:shadow-brand-500/30 hover:brightness-110"
+                >
+                  Go to Dashboard
+                  <ArrowRight
+                    size={18}
+                    className="transition-transform group-hover:translate-x-0.5"
+                  />
+                </Link>
+              ) : (
+                <Link
+                  href="/install"
+                  className="group inline-flex items-center gap-2 rounded-full gradient-bg px-8 py-3.5 text-base font-semibold text-white shadow-lg shadow-brand-500/25 transition-all hover:shadow-xl hover:shadow-brand-500/30 hover:brightness-110"
+                >
+                  Add to Slack — Free
+                  <ArrowRight
+                    size={18}
+                    className="transition-transform group-hover:translate-x-0.5"
+                  />
+                </Link>
+              )}
               <Link
                 href="/#how-it-works"
                 className="inline-flex items-center gap-2 rounded-full border border-surface-300 bg-white px-8 py-3.5 text-base font-semibold text-surface-900 transition-all hover:border-surface-400 hover:bg-surface-50"

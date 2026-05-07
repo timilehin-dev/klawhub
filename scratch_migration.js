@@ -1,4 +1,5 @@
 const postgres = require("postgres");
+// We can load from .env.local manually if dotenv is not installed in scratch space, or just rely on process.env since Next.js loads it
 const fs = require("fs");
 const path = require("path");
 
@@ -26,23 +27,23 @@ async function run() {
   loadEnv();
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
-    console.error("DATABASE_URL is not set in env");
+    console.error("DATABASE_URL is not set in .env.local");
     process.exit(1);
   }
 
+  console.log("Connecting to Postgres...");
   const sql = postgres(connectionString);
   try {
-    const res = await sql`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'workspaces' AND column_name IN ('agent_name', 'agent_personality', 'enabled_skills');
+    console.log("Running ALTER TABLE queries on workspaces...");
+    await sql`
+      ALTER TABLE workspaces 
+      ADD COLUMN IF NOT EXISTS agent_name TEXT NOT NULL DEFAULT 'Klawhub',
+      ADD COLUMN IF NOT EXISTS agent_personality TEXT,
+      ADD COLUMN IF NOT EXISTS enabled_skills JSONB NOT NULL DEFAULT '["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator", "email_dispatch"]'::jsonb;
     `;
-    const foundColumns = res.map(row => row.column_name);
-    console.log("--- COLUMN CHECK RESULT ---");
-    console.log("Found columns:", foundColumns);
-    console.log("----------------------------");
+    console.log("✅ Database columns added successfully!");
   } catch (err) {
-    console.error("Column check failed:", err.message);
+    console.error("❌ Migration query failed:", err);
   } finally {
     await sql.end();
   }

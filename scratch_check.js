@@ -25,24 +25,18 @@ function loadEnv() {
 async function run() {
   loadEnv();
   const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    console.error("DATABASE_URL is not set in env");
-    process.exit(1);
-  }
-
   const sql = postgres(connectionString);
   try {
-    const res = await sql`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'workspaces' AND column_name IN ('agent_name', 'agent_personality', 'enabled_skills');
-    `;
-    const foundColumns = res.map(row => row.column_name);
-    console.log("--- COLUMN CHECK RESULT ---");
-    console.log("Found columns:", foundColumns);
-    console.log("----------------------------");
+    const rows = await sql`SELECT * FROM workspaces LIMIT 1`;
+    if (rows.length > 0) {
+      console.log("Keys in workspaces row:", Object.keys(rows[0]));
+      console.log("Row agent_name:", rows[0].agent_name);
+      console.log("Row enabled_skills:", rows[0].enabled_skills);
+    } else {
+      console.log("No workspaces in database yet.");
+    }
   } catch (err) {
-    console.error("Column check failed:", err.message);
+    console.error("Query failed:", err);
   } finally {
     await sql.end();
   }

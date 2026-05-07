@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { verifyWorkspaceId } from "@/utils/session";
 
 export const metadata: Metadata = {
   title: "Install Klawhub — Add to Your Slack Workspace",
@@ -100,6 +103,16 @@ export default async function InstallPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+  // Check if they are already logged in via active session cookie
+  const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get("kh_auth_session")?.value;
+  if (sessionCookie) {
+    const workspaceId = await verifyWorkspaceId(sessionCookie);
+    if (workspaceId) {
+      redirect("/dashboard");
+    }
+  }
+
   const params = await searchParams;
   const success = params.success === "1";
   const workspace = typeof params.workspace === "string" ? params.workspace : null;

@@ -11,6 +11,8 @@ import {
   Loader2,
   Zap,
   AlertTriangle,
+  Layers,
+  Settings,
 } from "lucide-react";
 
 // ── Types ──
@@ -21,6 +23,9 @@ interface WorkspaceInfo {
   domain: string | null;
   plan: string;
   isActive: boolean;
+  agentName: string;
+  agentPersonality: string | null;
+  enabledSkills: string[] | null;
   installedAt: string | null;
   memberCount: number;
 }
@@ -137,6 +142,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 const navItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Integrations", href: "/dashboard/integrations", icon: Plug },
+  { label: "Skills & Tools", href: "/dashboard/skills", icon: Layers },
+  { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
 function Sidebar({ workspaceName }: { workspaceName: string }) {
