@@ -40,7 +40,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Session validation
-  const sessionCookie = request.cookies.get("klawhub_session")?.value;
+  const sessionCookie = request.cookies.get("kh_auth_session")?.value;
   if (!sessionCookie) {
     if (pathname.startsWith("/api/")) {
       const cookiesList = request.cookies.getAll().map((c) => `${c.name}=${c.value ? c.value.slice(0, 10) + "..." : "empty"}`).join("; ");
@@ -48,7 +48,7 @@ export function middleware(request: NextRequest) {
         { 
           error: "Authentication required. Please install Klawhub first.",
           debug: {
-            reason: "Cookie 'klawhub_session' is missing",
+            reason: "Cookie 'kh_auth_session' is missing",
             cookies: cookiesList || "none",
             host: request.headers.get("host") || "unknown",
           }
@@ -100,7 +100,7 @@ export function middleware(request: NextRequest) {
         )
       : NextResponse.redirect(new URL("/install?error=session_invalid", request.url));
 
-    response.cookies.set("klawhub_session", "", {
+    response.cookies.set("kh_auth_session", "", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",

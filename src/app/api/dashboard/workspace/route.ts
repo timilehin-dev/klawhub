@@ -7,7 +7,7 @@ import { verifyWorkspaceId } from "@/utils/session";
 export async function GET(request: NextRequest) {
   // Prefer the middleware-validated header, fall back to cookie verification
   const validatedId = request.headers.get("x-validated-workspace-id");
-  const rawCookie = request.cookies.get("klawhub_session")?.value;
+  const rawCookie = request.cookies.get("kh_auth_session")?.value;
   const workspaceId = validatedId || (rawCookie ? verifyWorkspaceId(rawCookie) : null);
 
   if (!workspaceId) {
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
           verifyError = "verifyWorkspaceId returned null (signature mismatch or bad key)";
         }
       } else {
-        verifyError = "No klawhub_session cookie present in request";
+        verifyError = "No kh_auth_session cookie present in request";
       }
     } catch (err) {
       verifyError = err instanceof Error ? err.message : "Error during verification";
