@@ -173,7 +173,7 @@ export async function GET(request: NextRequest) {
     console.error("[OAUTH] Installation failed:", message);
     return NextResponse.redirect(
       new URL(
-        `/install?error=server_error`,
+        `/install?error=server_error&detail=${encodeURIComponent(message)}`,
         request.url
       )
     );
