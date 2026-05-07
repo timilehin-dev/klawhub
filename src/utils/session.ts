@@ -8,8 +8,9 @@ import { createHmac, timingSafeEqual } from "crypto";
  */
 
 function getSecret(): Buffer {
-  const secret = process.env.SESSION_SECRET || process.env.INTEGRATION_ENCRYPTION_KEY;
-  if (!secret) throw new Error("SESSION_SECRET or INTEGRATION_ENCRYPTION_KEY is required");
+  // Prioritize INTEGRATION_ENCRYPTION_KEY to ensure absolute consistency across Serverless and Edge runtimes
+  const secret = process.env.INTEGRATION_ENCRYPTION_KEY || process.env.SESSION_SECRET;
+  if (!secret) throw new Error("INTEGRATION_ENCRYPTION_KEY or SESSION_SECRET is required");
   
   // If it's a valid hex string of even length, use hex
   if (secret.length >= 32 && secret.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(secret)) {
