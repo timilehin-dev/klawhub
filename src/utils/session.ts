@@ -23,18 +23,40 @@ function getSecret(): Buffer {
  * Sign a workspace ID for use in an httpOnly cookie.
  * Format: "workspaceId.hmacHex"
  */
-export function signWorkspaceId(workspaceId: string): string {
-  const hmac = createHmac("sha256", getSecret());
-  hmac.update(workspaceId);
-  const sig = hmac.digest("hex").slice(0, 32); // 32 hex chars = 16 bytes
-  return `${workspaceId}.${sig}`;
+export async function signWorkspaceId(workspaceId: string): Promise<string> {
+  const secret = process.env.INTEGRATION_ENCRYPTION_KEY || process.env.SESSION_SECRET;
+  if (!secret) throw new Error("INTEGRATION_ENCRYPTION_KEY or SESSION_SECRET is required");
+
+  // Use global, standard Web Crypto API available natively in both standard Node.js and Edge Runtime.
+  // This bypasses any buggy node-crypto polyfills.
+  const subtle = typeof crypto !== "undefined" && crypto.subtle ? crypto.subtle : (globalThis as any).crypto?.subtle;
+  if (!subtle) throw new Error("Web Crypto API (subtle) is not available in this runtime environment");
+
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+  const data = encoder.encode(workspaceId);
+
+  const key = await subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signature = await subtle.sign("HMAC", key, data);
+  const sigHex = Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  return `${workspaceId}.${sigHex.slice(0, 32)}`;
 }
 
 /**
  * Verify and extract a signed workspace ID from a cookie value.
  * Returns null if the signature is invalid.
  */
-export function verifyWorkspaceId(cookieValue: string): string | null {
+export async function verifyWorkspaceId(cookieValue: string): Promise<string | null> {
   try {
     const dotIndex = cookieValue.lastIndexOf(".");
     if (dotIndex === -1) {
@@ -45,23 +67,36 @@ export function verifyWorkspaceId(cookieValue: string): string | null {
     const workspaceId = cookieValue.slice(0, dotIndex);
     const sig = cookieValue.slice(dotIndex + 1);
 
-    const hmac = createHmac("sha256", getSecret());
-    hmac.update(workspaceId);
-    const expected = hmac.digest("hex").slice(0, 32);
+    const secret = process.env.INTEGRATION_ENCRYPTION_KEY || process.env.SESSION_SECRET;
+    if (!secret) return null;
 
-    const expectedBuf = Buffer.from(expected, "utf8");
-    const actualBuf = Buffer.from(sig, "utf8");
-    if (expectedBuf.length !== actualBuf.length) {
-      console.warn("[SESSION] Cookie signature length mismatch. Expected length:", expectedBuf.length, "Actual:", actualBuf.length);
-      return null;
+    const subtle = typeof crypto !== "undefined" && crypto.subtle ? crypto.subtle : (globalThis as any).crypto?.subtle;
+    if (!subtle) throw new Error("Web Crypto API (subtle) is not available in this runtime environment");
+
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const data = encoder.encode(workspaceId);
+
+    const key = await subtle.importKey(
+      "raw",
+      keyData,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+
+    const signature = await subtle.sign("HMAC", key, data);
+    const expectedSigHex = Array.from(new Uint8Array(signature))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 32);
+
+    if (expectedSigHex === sig) {
+      return workspaceId;
     }
     
-    const matched = timingSafeEqual(expectedBuf, actualBuf);
-    if (!matched) {
-      console.warn("[SESSION] Cookie signature mismatch verification failed. WorkspaceId:", workspaceId);
-      return null;
-    }
-    return workspaceId;
+    console.warn("[SESSION] Cookie signature mismatch verification failed. WorkspaceId:", workspaceId);
+    return null;
   } catch (err) {
     console.error("[SESSION] Error during cookie verification:", err);
     return null;

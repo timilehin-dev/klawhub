@@ -159,7 +159,7 @@ export async function GET(request: NextRequest) {
       response.cookies.set("klawhub_workspace_id", "", { path: "/", maxAge: 0 });
       response.cookies.set("klawhub_session", "", { path: "/", maxAge: 0 });
 
-      response.cookies.set("kh_auth_session", signWorkspaceId(workspaceId), {
+      response.cookies.set("kh_auth_session", await signWorkspaceId(workspaceId), {
         httpOnly: true,
         secure: request.url.startsWith("https://"),
         sameSite: "lax",

@@ -9,7 +9,7 @@ import { verifyWorkspaceId, checkRateLimit } from "@/utils/session";
  * - Enforces rate limits
  * - Adds x-workspace-id header for downstream route handlers
  */
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Routes that require authenticated workspace session
@@ -63,7 +63,7 @@ export function middleware(request: NextRequest) {
   let verifyError: string | null = null;
   let workspaceId: string | null = null;
   try {
-    workspaceId = verifyWorkspaceId(sessionCookie);
+    workspaceId = await verifyWorkspaceId(sessionCookie);
     if (!workspaceId) {
       verifyError = "verifyWorkspaceId returned null";
     }

@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   // Prefer the middleware-validated header, fall back to cookie verification
   const validatedId = request.headers.get("x-validated-workspace-id");
   const rawCookie = request.cookies.get("kh_auth_session")?.value;
-  const workspaceId = validatedId || (rawCookie ? verifyWorkspaceId(rawCookie) : null);
+  const workspaceId = validatedId || (rawCookie ? await verifyWorkspaceId(rawCookie) : null);
 
   if (!workspaceId) {
     const cookiesList = request.cookies.getAll().map((c) => `${c.name}=${c.value ? c.value.slice(0, 15) + "..." : "empty"}`).join("; ");
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     let verifySuccessId: string | null = null;
     try {
       if (rawCookie) {
-        verifySuccessId = verifyWorkspaceId(rawCookie);
+        verifySuccessId = await verifyWorkspaceId(rawCookie);
         if (!verifySuccessId) {
           verifyError = "verifyWorkspaceId returned null (signature mismatch or bad key)";
         }
