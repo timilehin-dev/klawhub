@@ -63,12 +63,17 @@ export function middleware(request: NextRequest) {
         )
       : NextResponse.redirect(new URL("/install?error=session_invalid", request.url));
 
+    const host = request.headers.get("host") || "";
+    const domain = host.split(":")[0];
+    const cookieDomain = domain.endsWith("klawhub.xyz") ? ".klawhub.xyz" : undefined;
+
     response.cookies.set("klawhub_workspace_id", "", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 0,
       path: "/",
+      domain: cookieDomain,
     });
     return response;
   }

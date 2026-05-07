@@ -151,12 +151,17 @@ export async function GET(request: NextRequest) {
 
     // Store signed workspace ID in an httpOnly cookie
     if (workspaceId) {
+      const host = request.headers.get("host") || "";
+      const domain = host.split(":")[0];
+      const cookieDomain = domain.endsWith("klawhub.xyz") ? ".klawhub.xyz" : undefined;
+
       response.cookies.set("klawhub_workspace_id", signWorkspaceId(workspaceId), {
         httpOnly: true,
         secure: request.url.startsWith("https://"),
         sameSite: "lax",
         maxAge: 60 * 60 * 24 * 30, // 30 days (renews on next install)
         path: "/",
+        domain: cookieDomain,
       });
       // Also store workspace name for display (not httpOnly — readable by client)
       response.cookies.set("klawhub_workspace_name", workspaceName, {
@@ -164,6 +169,7 @@ export async function GET(request: NextRequest) {
         sameSite: "lax",
         maxAge: 60 * 60 * 24 * 30,
         path: "/",
+        domain: cookieDomain,
       });
     }
 
