@@ -144,7 +144,7 @@ function Sidebar({ workspaceName }: { workspaceName: string }) {
   const router = useRouter();
 
   const handleLogout = () => {
-    document.cookie = "klawhub_workspace_id=; path=/; max-age=0";
+    document.cookie = "klawhub_session=; path=/; max-age=0";
     document.cookie = "klawhub_workspace_name=; path=/; max-age=0";
     router.push("/install");
   };

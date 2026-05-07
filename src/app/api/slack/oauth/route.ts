@@ -155,7 +155,7 @@ export async function GET(request: NextRequest) {
       const domain = host.split(":")[0];
       const cookieDomain = domain.endsWith("klawhub.xyz") ? ".klawhub.xyz" : undefined;
 
-      response.cookies.set("klawhub_workspace_id", signWorkspaceId(workspaceId), {
+      response.cookies.set("klawhub_session", signWorkspaceId(workspaceId), {
         httpOnly: true,
         secure: request.url.startsWith("https://"),
         sameSite: "lax",
