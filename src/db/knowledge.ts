@@ -17,14 +17,43 @@ export async function upsertKnowledge(
   const content = `${entityName} (${entityType}): ${Object.entries(data).map(([k, v]) => `${k}=${v}`).join(", ")}`;
   const embedding = await generateEmbedding(content);
 
-  // search_vector is auto-populated by DB trigger — no need to pass it here
-  return getDb()
-    .insert(knowledge)
-    .values({ slackUserId, entityType, entityName, data, source, workspaceId, embedding: embedding || null })
-    .onConflictDoUpdate({
-      target: [knowledge.slackUserId, knowledge.entityType, knowledge.entityName],
-      set: { data, source, embedding: embedding || null, updatedAt: new Date() },
-    });
+  const existing = await getDb()
+    .select()
+    .from(knowledge)
+    .where(
+      and(
+        eq(knowledge.slackUserId, slackUserId),
+        eq(knowledge.entityType, entityType),
+        eq(knowledge.entityName, entityName)
+      )
+    )
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    return getDb()
+      .update(knowledge)
+      .set({
+        data,
+        source,
+        embedding: embedding || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledge.id, existing[0].id));
+  } else {
+    return getDb()
+      .insert(knowledge)
+      .values({
+        slackUserId,
+        entityType,
+        entityName,
+        data,
+        source,
+        workspaceId,
+        embedding: embedding || null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+  }
 }
 
 export function getKnowledge(

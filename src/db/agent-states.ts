@@ -10,22 +10,40 @@ export async function saveAgentState(
   agentName: string,
   state: Record<string, any>
 ): Promise<void> {
-  await db
-    .insert(agentStates)
-    .values({
-      workspaceId,
-      agentName: agentName as any,
-      state,
-      lastActiveAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [agentStates.workspaceId, agentStates.agentName],
-      set: {
+  const whereClause = workspaceId
+    ? and(
+        eq(agentStates.workspaceId, workspaceId),
+        eq(agentStates.agentName, agentName as any)
+      )
+    : eq(agentStates.agentName, agentName as any);
+
+  const existing = await db
+    .select()
+    .from(agentStates)
+    .where(whereClause)
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    await db
+      .update(agentStates)
+      .set({
         state,
         lastActiveAt: new Date(),
         updatedAt: new Date(),
-      },
-    });
+      })
+      .where(eq(agentStates.id, existing[0].id));
+  } else {
+    await db
+      .insert(agentStates)
+      .values({
+        workspaceId,
+        agentName: agentName as any,
+        state,
+        lastActiveAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+  }
 }
 
 export async function getAgentState(

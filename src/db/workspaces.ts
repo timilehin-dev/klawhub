@@ -22,26 +22,43 @@ export function updateWorkspace(id: string, updates: Partial<typeof workspaces.$
 
 // ── Workspace Members ──
 
-export function upsertWorkspaceMember(
+export async function upsertWorkspaceMember(
   workspaceId: string,
   slackUserId: string,
   data: { slackUserName?: string; slackUserEmail?: string; isWorkspaceAdmin?: boolean }
 ) {
-  return getDb()
-    .insert(workspaceMembers)
-    .values({
-      workspaceId,
-      slackUserId,
-      ...data,
-    })
-    .onConflictDoUpdate({
-      target: [workspaceMembers.workspaceId, workspaceMembers.slackUserId],
-      set: {
+  const existing = await getDb()
+    .select()
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, workspaceId),
+        eq(workspaceMembers.slackUserId, slackUserId)
+      )
+    )
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    return getDb()
+      .update(workspaceMembers)
+      .set({
         ...data,
         lastActiveAt: new Date(),
         updatedAt: new Date(),
-      },
-    });
+      })
+      .where(eq(workspaceMembers.id, existing[0].id));
+  } else {
+    return getDb()
+      .insert(workspaceMembers)
+      .values({
+        workspaceId,
+        slackUserId,
+        ...data,
+        lastActiveAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+  }
 }
 
 export function touchMemberActivity(workspaceId: string, slackUserId: string) {
