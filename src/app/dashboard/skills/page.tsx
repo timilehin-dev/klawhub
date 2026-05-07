@@ -4,7 +4,7 @@ import { useDashboard } from "../layout";
 import { useState, useEffect } from "react";
 import {
   Globe,
-  Chrome,
+  Compass,
   Terminal,
   FileCode,
   Mail,
@@ -41,7 +41,7 @@ const ALL_SKILLS: SkillItem[] = [
     name: "Puppeteer Web Scraping",
     label: "Puppeteer Web Scraper",
     description: "Enables deep loading, rendering, and parsing of full HTML web pages to extract comprehensive text contents.",
-    icon: Chrome,
+    icon: Compass,
     category: "research",
     color: "text-emerald-600",
     bg: "bg-emerald-50 border-emerald-100",
