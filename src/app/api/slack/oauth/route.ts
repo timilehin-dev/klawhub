@@ -153,14 +153,14 @@ export async function GET(request: NextRequest) {
     if (workspaceId) {
       response.cookies.set("klawhub_workspace_id", signWorkspaceId(workspaceId), {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: request.url.startsWith("https://"),
         sameSite: "lax",
         maxAge: 60 * 60 * 24 * 30, // 30 days (renews on next install)
         path: "/",
       });
       // Also store workspace name for display (not httpOnly — readable by client)
       response.cookies.set("klawhub_workspace_name", workspaceName, {
-        secure: process.env.NODE_ENV === "production",
+        secure: request.url.startsWith("https://"),
         sameSite: "lax",
         maxAge: 60 * 60 * 24 * 30,
         path: "/",

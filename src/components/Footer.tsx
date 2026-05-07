@@ -80,6 +80,14 @@ export function Footer() {
               </li>
               <li>
                 <Link
+                  href="/support"
+                  className="text-sm text-surface-700 transition-colors hover:text-brand-600"
+                >
+                  Support & Help
+                </Link>
+              </li>
+              <li>
+                <Link
                   href="/privacy-policy"
                   className="text-sm text-surface-700 transition-colors hover:text-brand-600"
                 >

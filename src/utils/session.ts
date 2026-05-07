@@ -10,7 +10,13 @@ import { createHmac, timingSafeEqual } from "crypto";
 function getSecret(): Buffer {
   const secret = process.env.SESSION_SECRET || process.env.INTEGRATION_ENCRYPTION_KEY;
   if (!secret) throw new Error("SESSION_SECRET or INTEGRATION_ENCRYPTION_KEY is required");
-  return Buffer.from(secret, "hex");
+  
+  // If it's a valid hex string of even length, use hex
+  if (secret.length >= 32 && secret.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(secret)) {
+    return Buffer.from(secret, "hex");
+  }
+  // Fall back to treating it as utf8 (highly robust for plain-text keys)
+  return Buffer.from(secret, "utf8");
 }
 
 // ── Cookie Signing ──
@@ -31,22 +37,35 @@ export function signWorkspaceId(workspaceId: string): string {
  * Returns null if the signature is invalid.
  */
 export function verifyWorkspaceId(cookieValue: string): string | null {
-  const dotIndex = cookieValue.lastIndexOf(".");
-  if (dotIndex === -1) return null;
-
-  const workspaceId = cookieValue.slice(0, dotIndex);
-  const sig = cookieValue.slice(dotIndex + 1);
-
-  const hmac = createHmac("sha256", getSecret());
-  hmac.update(workspaceId);
-  const expected = hmac.digest("hex").slice(0, 32);
-
   try {
+    const dotIndex = cookieValue.lastIndexOf(".");
+    if (dotIndex === -1) {
+      console.warn("[SESSION] Cookie missing signature dot delimiter:", cookieValue);
+      return null;
+    }
+
+    const workspaceId = cookieValue.slice(0, dotIndex);
+    const sig = cookieValue.slice(dotIndex + 1);
+
+    const hmac = createHmac("sha256", getSecret());
+    hmac.update(workspaceId);
+    const expected = hmac.digest("hex").slice(0, 32);
+
     const expectedBuf = Buffer.from(expected, "utf8");
     const actualBuf = Buffer.from(sig, "utf8");
-    if (expectedBuf.length !== actualBuf.length) return null;
-    return timingSafeEqual(expectedBuf, actualBuf) ? workspaceId : null;
-  } catch {
+    if (expectedBuf.length !== actualBuf.length) {
+      console.warn("[SESSION] Cookie signature length mismatch. Expected length:", expectedBuf.length, "Actual:", actualBuf.length);
+      return null;
+    }
+    
+    const matched = timingSafeEqual(expectedBuf, actualBuf);
+    if (!matched) {
+      console.warn("[SESSION] Cookie signature mismatch verification failed. WorkspaceId:", workspaceId);
+      return null;
+    }
+    return workspaceId;
+  } catch (err) {
+    console.error("[SESSION] Error during cookie verification:", err);
     return null;
   }
 }
