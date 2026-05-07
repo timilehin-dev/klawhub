@@ -42,10 +42,17 @@ export function middleware(request: NextRequest) {
   // Session validation
   const sessionCookie = request.cookies.get("klawhub_workspace_id")?.value;
   if (!sessionCookie) {
-    // No session cookie — redirect to install page (for page routes) or return 401 (for API routes)
     if (pathname.startsWith("/api/")) {
+      const cookiesList = request.cookies.getAll().map((c) => `${c.name}=${c.value ? c.value.slice(0, 10) + "..." : "empty"}`).join("; ");
       return NextResponse.json(
-        { error: "Authentication required. Please install Klawhub first." },
+        { 
+          error: "Authentication required. Please install Klawhub first.",
+          debug: {
+            reason: "Cookie 'klawhub_workspace_id' is missing",
+            cookies: cookiesList || "none",
+            host: request.headers.get("host") || "unknown",
+          }
+        },
         { status: 401 }
       );
     }
@@ -53,19 +60,45 @@ export function middleware(request: NextRequest) {
   }
 
   // Verify the signed cookie
-  const workspaceId = verifyWorkspaceId(sessionCookie);
-  if (!workspaceId) {
-    // Invalid/tampered signature — clear the cookie and redirect
-    const response = pathname.startsWith("/api/")
-      ? NextResponse.json(
-          { error: "Session invalid. Please re-authenticate." },
-          { status: 401 }
-        )
-      : NextResponse.redirect(new URL("/install?error=session_invalid", request.url));
+  let verifyError: string | null = null;
+  let workspaceId: string | null = null;
+  try {
+    workspaceId = verifyWorkspaceId(sessionCookie);
+    if (!workspaceId) {
+      verifyError = "verifyWorkspaceId returned null";
+    }
+  } catch (err) {
+    verifyError = err instanceof Error ? err.message : "Error during verification";
+  }
 
+  if (!workspaceId) {
     const host = request.headers.get("host") || "";
     const domain = host.split(":")[0];
     const cookieDomain = domain.endsWith("klawhub.xyz") ? ".klawhub.xyz" : undefined;
+
+    const cookiesList = request.cookies.getAll().map((c) => `${c.name}=${c.value ? c.value.slice(0, 10) + "..." : "empty"}`).join("; ");
+    const sessionSecretPresent = !!process.env.SESSION_SECRET;
+    const integrationKeyPresent = !!process.env.INTEGRATION_ENCRYPTION_KEY;
+
+    const response = pathname.startsWith("/api/")
+      ? NextResponse.json(
+          { 
+            error: "Session invalid. Please re-authenticate.",
+            debug: {
+              reason: "Cookie signature verification failed",
+              verifyError,
+              cookies: cookiesList || "none",
+              sessionCookieValue: sessionCookie.slice(0, 10) + "...",
+              host,
+              env: {
+                SESSION_SECRET: sessionSecretPresent,
+                INTEGRATION_ENCRYPTION_KEY: integrationKeyPresent,
+              }
+            }
+          },
+          { status: 401 }
+        )
+      : NextResponse.redirect(new URL("/install?error=session_invalid", request.url));
 
     response.cookies.set("klawhub_workspace_id", "", {
       httpOnly: true,

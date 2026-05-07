@@ -98,7 +98,19 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       setError(null);
       const res = await fetch("/api/dashboard/workspace");
-      if (!res.ok) throw new Error("Failed to load dashboard");
+      if (!res.ok) {
+        let errMsg = "Failed to load dashboard";
+        try {
+          const errJson = await res.json();
+          if (errJson.error) {
+            errMsg = errJson.error;
+            if (errJson.debug) {
+              setData({ workspace: null, stats: null, usage: null, members: [], integrations: [], debug: errJson.debug } as any);
+            }
+          }
+        } catch {}
+        throw new Error(errMsg);
+      }
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       setData(json);
