@@ -12,11 +12,8 @@ function getSecret(): Buffer {
   const secret = process.env.INTEGRATION_ENCRYPTION_KEY || process.env.SESSION_SECRET;
   if (!secret) throw new Error("INTEGRATION_ENCRYPTION_KEY or SESSION_SECRET is required");
   
-  // If it's a valid hex string of even length, use hex
-  if (secret.length >= 32 && secret.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(secret)) {
-    return Buffer.from(secret, "hex");
-  }
-  // Fall back to treating it as utf8 (highly robust for plain-text keys)
+  // Force treating as utf8 under both standard Node and Next.js Edge runtimes.
+  // This bypasses Next.js Edge hex-decoding polyfill bugs and aligns keys perfectly.
   return Buffer.from(secret, "utf8");
 }
 
