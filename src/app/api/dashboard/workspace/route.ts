@@ -11,13 +11,52 @@ export async function GET(request: NextRequest) {
   const workspaceId = validatedId || (rawCookie ? verifyWorkspaceId(rawCookie) : null);
 
   if (!workspaceId) {
-    return NextResponse.json({ workspace: null });
+    const cookiesList = request.cookies.getAll().map((c) => `${c.name}=${c.value ? c.value.slice(0, 15) + "..." : "empty"}`).join("; ");
+    const sessionSecretPresent = !!process.env.SESSION_SECRET;
+    const integrationKeyPresent = !!process.env.INTEGRATION_ENCRYPTION_KEY;
+    
+    let verifyError: string | null = null;
+    let verifySuccessId: string | null = null;
+    try {
+      if (rawCookie) {
+        verifySuccessId = verifyWorkspaceId(rawCookie);
+        if (!verifySuccessId) {
+          verifyError = "verifyWorkspaceId returned null (signature mismatch or bad key)";
+        }
+      } else {
+        verifyError = "No klawhub_workspace_id cookie present in request";
+      }
+    } catch (err) {
+      verifyError = err instanceof Error ? err.message : "Error during verification";
+    }
+
+    return NextResponse.json({
+      workspace: null,
+      debug: {
+        validatedIdHeader: validatedId || "missing",
+        rawCookiePresent: !!rawCookie,
+        cookies: cookiesList || "none",
+        verifyError,
+        verifySuccessId,
+        host: request.headers.get("host") || "unknown",
+        env: {
+          SESSION_SECRET: sessionSecretPresent,
+          INTEGRATION_ENCRYPTION_KEY: integrationKeyPresent,
+        }
+      }
+    });
   }
 
   try {
     const ws = await getWorkspaceById(workspaceId);
     if (!ws || ws.length === 0) {
-      return NextResponse.json({ workspace: null });
+      return NextResponse.json({
+        workspace: null,
+        debug: {
+          error: "Workspace ID was validated but the record was not found in the database",
+          workspaceId,
+        }
+      });
     }
 
     const workspace = ws[0];

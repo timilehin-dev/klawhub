@@ -222,26 +222,40 @@ function LayoutShell({ children }: { children: ReactNode }) {
   }
 
   if (error || !data?.workspace) {
+    const debug = (data as any)?.debug;
+
     return (
-      <div className="flex h-screen items-center justify-center bg-surface-50">
-        <div className="max-w-md text-center rounded-2xl border border-surface-200 bg-white p-8">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50">
-            <AlertTriangle size={28} className="text-amber-600" />
-          </div>
-          <h2 className="text-xl font-bold text-surface-900">No Workspace Connected</h2>
-          <p className="mt-2 text-sm text-surface-700">
-            Connect your Slack workspace to access the Klawhub dashboard.
-            {error && (
-              <span className="block mt-2 text-red-600">Error: {error}</span>
+      <div className="flex h-screen overflow-y-auto items-center justify-center bg-surface-50 py-10">
+        <div className="max-w-2xl w-full mx-auto px-4">
+          <div className="text-center rounded-2xl border border-surface-200 bg-white p-8 shadow-sm">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50">
+              <AlertTriangle size={28} className="text-amber-600" />
+            </div>
+            <h2 className="text-xl font-bold text-surface-900">No Workspace Connected</h2>
+            <p className="mt-2 text-sm text-surface-700">
+              Connect your Slack workspace to access the Klawhub dashboard.
+              {error && (
+                <span className="block mt-2 text-red-600">Error: {error}</span>
+              )}
+            </p>
+            <div className="mt-6 flex flex-wrap gap-4 justify-center">
+              <Link
+                href="/install"
+                className="inline-flex items-center gap-2 rounded-full gradient-bg px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/25 transition-all hover:shadow-xl hover:brightness-110"
+              >
+                <Zap size={16} />
+                Connect Slack
+              </Link>
+            </div>
+
+            {/* Diagnostic Console */}
+            {debug && (
+              <div className="mt-8 text-left rounded-xl border border-surface-200 bg-surface-950 p-6 text-xs text-green-400 font-mono overflow-x-auto max-w-full">
+                <p className="text-amber-400 font-bold mb-2">⚡ KLAWHUB SERVER TELEMETRY DIAGNOSTICS:</p>
+                <pre>{JSON.stringify(debug, null, 2)}</pre>
+              </div>
             )}
-          </p>
-          <Link
-            href="/install"
-            className="mt-6 inline-flex items-center gap-2 rounded-full gradient-bg px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/25 transition-all hover:shadow-xl hover:brightness-110"
-          >
-            <Zap size={16} />
-            Connect Slack
-          </Link>
+          </div>
         </div>
       </div>
     );
