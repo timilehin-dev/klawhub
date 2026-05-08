@@ -266,7 +266,6 @@ export async function listUserChannels(teamId?: string) {
   const client = await getWorkspaceSlack(teamId);
   const result = await client.conversations.list({
     types: "public_channel,private_channel",
-    filter_full_members: true,
   });
   
   if (!result.ok) throw new Error("Failed to list Slack channels");
