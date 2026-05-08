@@ -16,6 +16,7 @@ export type ChatResult = {
 };
 
 export type UsageMeta = {
+  workspaceId?: string;
   agentName?: string;
   slackUserId?: string;
   runId?: string;
@@ -107,6 +108,7 @@ class LLMRouter {
 
         const durationMs = Date.now() - startTime;
         logUsage({
+          workspaceId: meta?.workspaceId,
           slackUserId: meta?.slackUserId,
           agentName,
           provider: provider.provider,
@@ -135,6 +137,7 @@ class LLMRouter {
     // All keys exhausted
     const durationMs = Date.now() - startTime;
     logUsage({
+      workspaceId: meta?.workspaceId,
       slackUserId: meta?.slackUserId,
       agentName,
       provider: provider.provider,

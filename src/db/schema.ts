@@ -254,6 +254,7 @@ export const agentStates = pgTable("agent_states", {
 
 export const usageLogs = pgTable("usage_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
   slackUserId: text("slack_user_id"),
   agentName: text("agent_name").notNull(),
   provider: text("provider").notNull().default("ollama"),

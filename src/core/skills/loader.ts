@@ -1,11 +1,11 @@
 import { Skill } from "./types";
-import { meetingSummarizationSkill } from "./meeting_summarization/executor";
-import { taskBreakdownSkill } from "./task_breakdown/executor";
-import { competitorResearchSkill } from "./competitor_research/executor";
-import { sprintPlanningSkill } from "./sprint_planning/executor";
-import { slackThreadAnalysisSkill } from "./slack_thread_analysis/executor";
-import { bugTriageSkill } from "./bug_triage/executor";
-import { calendarConflictResolutionSkill } from "./calendar_conflict_resolution/executor";
+import { meetingSummarizationSkill } from "./meeting_summarization";
+import { taskBreakdownSkill } from "./task_breakdown";
+import { competitorResearchSkill } from "./competitor_research";
+import { sprintPlanningSkill } from "./sprint_planning";
+import { slackThreadAnalysisSkill } from "./slack_thread_analysis";
+import { bugTriageSkill } from "./bug_triage";
+import { calendarConflictResolutionSkill } from "./calendar_conflict_resolution";
 
 /**
  * Static registry of all active skills.

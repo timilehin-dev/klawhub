@@ -3,6 +3,7 @@ import { usageLogs } from "./schema";
 import { desc, sql, count, sum, avg, and, eq, gte } from "drizzle-orm";
 
 export interface UsageLogInsert {
+  workspaceId?: string;
   slackUserId?: string;
   agentName: string;
   provider?: string;
