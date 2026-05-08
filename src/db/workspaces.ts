@@ -20,6 +20,10 @@ export function updateWorkspace(id: string, updates: Partial<typeof workspaces.$
   return getDb().update(workspaces).set({ ...updates, updatedAt: new Date() }).where(eq(workspaces.id, id));
 }
 
+export function getAllWorkspaces() {
+  return getDb().select().from(workspaces);
+}
+
 // ── Workspace Members ──
 
 export async function upsertWorkspaceMember(

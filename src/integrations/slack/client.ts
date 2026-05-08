@@ -261,3 +261,38 @@ export async function downloadSlackFile(fileUrl: string, teamId?: string): Promi
   return Buffer.from(arrayBuffer);
 }
 
+/** List all public channels the bot is a member of. */
+export async function listUserChannels(teamId?: string) {
+  const client = await getWorkspaceSlack(teamId);
+  const result = await client.conversations.list({
+    types: "public_channel,private_channel",
+    filter_full_members: true,
+  });
+  
+  if (!result.ok) throw new Error("Failed to list Slack channels");
+  
+  // Filter for channels where is_member is true
+  return (result.channels || []).filter(c => c.is_member).map(c => ({
+    id: c.id!,
+    name: c.name!,
+  }));
+}
+
+/** Get recent message history for a channel. Messages are NOT stored. */
+export async function getChannelHistory(channelId: string, limit: number = 20, teamId?: string) {
+  const client = await getWorkspaceSlack(teamId);
+  const result = await client.conversations.history({
+    channel: channelId,
+    limit,
+  });
+  
+  if (!result.ok) throw new Error(`Failed to fetch history for channel ${channelId}`);
+  
+  return (result.messages || []).map(m => ({
+    user: m.user,
+    text: m.text || "",
+    ts: m.ts!,
+    thread_ts: m.thread_ts,
+  }));
+}
+

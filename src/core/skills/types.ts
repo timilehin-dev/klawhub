@@ -16,9 +16,18 @@ export interface Skill {
   /** Regex pattern to match user intent for fast-path routing */
   matchPattern: RegExp;
   
+  /** JSON Schema defining the expected parameters */
+  schema?: Record<string, any>;
+  
   /** 
    * Execute the skill logic directly, bypassing the heavy orchestrator.
    * Returns a markdown string to be sent to the user.
    */
   execute: (request: string, context: SkillContext) => Promise<string>;
+  
+  /**
+   * Optional hook to extract key information to save to the memory vector DB after execution.
+   * Forces skills to participate in organizational learning.
+   */
+  onCompleteSaveToMemory?: (request: string, result: string, context: SkillContext) => Promise<string | null>;
 }

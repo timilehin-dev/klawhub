@@ -37,6 +37,7 @@ export {
   getWorkspaceByTeamId,
   getWorkspaceById,
   updateWorkspace,
+  getAllWorkspaces,
   upsertWorkspaceMember,
   touchMemberActivity,
   getWorkspaceMembers,

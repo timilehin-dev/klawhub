@@ -94,7 +94,36 @@ export const taskMonitorWorkflow = inngest.createFunction(
       });
     }
 
-    console.log(`[TASK-MONITOR] Stale runs: ${staleRuns.length}, tasks: ${staleTasks.length}, notified: ${notified}`);
+    // Step 4: Proactive Workflow Optimization (for tasks > 1 hour)
+    const longRunningThreshold = 60; // 1 hour
+    const longRunningTasks = await step.run("fetch-long-running", async () => {
+      // Re-using stale logic but with higher threshold for optimization analysis
+      return await getStaleTasks(longRunningThreshold);
+    });
+
+    for (const task of longRunningTasks) {
+      await step.run(`optimize-task-${task.id.slice(0, 8)}`, async () => {
+        const channelId = task.slackChannelId;
+        const threadTs = task.slackThreadTs || undefined;
+
+        // Use PM agent to suggest an improvement
+        const prompt = `The following task has been running for over an hour: "${task.title}" (Type: ${task.type}).
+        Proactively suggest ONE specific way to speed this up or break it down for the user.
+        Example: "I noticed this is taking a while. Should I break this into 3 smaller sub-tasks to process in parallel?"
+        Keep it short (1 sentence).`;
+
+        const suggestion = await agentChat("pm", [
+          { role: "system", content: "You are a workflow optimization expert." },
+          { role: "user", content: prompt }
+        ], { temperature: 0.3, maxTokens: 200 }, { workspaceId: task.workspaceId });
+
+        if (suggestion) {
+          await postToThread(channelId, threadTs || channelId, `:zap: *Optimization Suggestion:* ${suggestion}`);
+        }
+      });
+    }
+
+    console.log(`[TASK-MONITOR] Stale runs: ${staleRuns.length}, tasks: ${staleTasks.length}, notified: ${notified}, optimized: ${longRunningTasks.length}`);
     return { staleRuns: staleRuns.length, staleTasks: staleTasks.length, notified };
   }
 );

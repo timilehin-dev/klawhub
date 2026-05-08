@@ -1,6 +1,11 @@
 import { Skill } from "./types";
-import { meetingSummarizationSkill } from "./meeting_summarization";
-import { taskBreakdownSkill } from "./task_breakdown";
+import { meetingSummarizationSkill } from "./meeting_summarization/executor";
+import { taskBreakdownSkill } from "./task_breakdown/executor";
+import { competitorResearchSkill } from "./competitor_research/executor";
+import { sprintPlanningSkill } from "./sprint_planning/executor";
+import { slackThreadAnalysisSkill } from "./slack_thread_analysis/executor";
+import { bugTriageSkill } from "./bug_triage/executor";
+import { calendarConflictResolutionSkill } from "./calendar_conflict_resolution/executor";
 
 /**
  * Static registry of all active skills.
@@ -10,6 +15,11 @@ import { taskBreakdownSkill } from "./task_breakdown";
 export const activeSkills: Skill[] = [
   meetingSummarizationSkill,
   taskBreakdownSkill,
+  competitorResearchSkill,
+  sprintPlanningSkill,
+  slackThreadAnalysisSkill,
+  bugTriageSkill,
+  calendarConflictResolutionSkill,
 ];
 
 /**
