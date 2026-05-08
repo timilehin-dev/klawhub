@@ -123,7 +123,23 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
     }
   }
 
-  if (!isMention && !isDM && !isThreadReply && !isPassiveListen) return;
+  const matchedSkill = matchSkill(text);
+
+  if (!isMention && !isDM && !isThreadReply && !isPassiveListen) {
+    // Proactive "Listening Coworker" mode:
+    // If a skill matches with high confidence in a regular channel, offer help.
+    if (matchedSkill && event.subtype !== "bot_message") {
+      try {
+        await addReaction(channelId, messageTs, "bulb", teamId);
+        const suggestion = `I noticed you're discussing *${matchedSkill.name}*. Would you like me to help with that? 
+_I can start a task for you right now._`;
+        await postToThread(channelId, messageTs, suggestion, undefined, teamId);
+      } catch (e) {
+        console.warn("[LISTENING] Failed to post suggestion:", e);
+      }
+    }
+    return;
+  }
 
   // Resolve workspaceId — try cache first (populated by addReaction's getWorkspaceSlack call)
   // Falls back to DB lookup only if cache miss

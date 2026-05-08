@@ -45,7 +45,7 @@ export async function middleware(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       const cookiesList = request.cookies.getAll().map((c) => `${c.name}=${c.value ? c.value.slice(0, 10) + "..." : "empty"}`).join("; ");
       return NextResponse.json(
-        { 
+        {
           error: "Authentication required. Please install Klawhub first.",
           debug: {
             reason: "Cookie 'kh_auth_session' is missing",
@@ -82,22 +82,22 @@ export async function middleware(request: NextRequest) {
 
     const response = pathname.startsWith("/api/")
       ? NextResponse.json(
-          { 
-            error: "Session invalid. Please re-authenticate.",
-            debug: {
-              reason: "Cookie signature verification failed",
-              verifyError,
-              cookies: cookiesList || "none",
-              sessionCookieValue: sessionCookie.slice(0, 10) + "...",
-              host,
-              env: {
-                SESSION_SECRET: sessionSecretPresent,
-                INTEGRATION_ENCRYPTION_KEY: integrationKeyPresent,
-              }
+        {
+          error: "Session invalid. Please re-authenticate.",
+          debug: {
+            reason: "Cookie signature verification failed",
+            verifyError,
+            cookies: cookiesList || "none",
+            sessionCookieValue: sessionCookie.slice(0, 10) + "...",
+            host,
+            env: {
+              SESSION_SECRET: sessionSecretPresent,
+              INTEGRATION_ENCRYPTION_KEY: integrationKeyPresent,
             }
-          },
-          { status: 401 }
-        )
+          }
+        },
+        { status: 401 }
+      )
       : NextResponse.redirect(new URL("/install?error=session_invalid", request.url));
 
     response.cookies.set("kh_auth_session", "", {

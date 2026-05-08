@@ -198,6 +198,28 @@ export async function githubSearchCode(workspaceId: string, query: string) {
   }));
 }
 
+export async function githubListEvents(workspaceId: string, pageSize = 30) {
+  const token = await getAccessToken(workspaceId, "github");
+  if (!token) throw new Error("GitHub is not connected");
+
+  const resp = await fetch(`https://api.github.com/events?per_page=${pageSize}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+    },
+  });
+
+  if (!resp.ok) throw new Error(`GitHub list events failed: ${resp.status}`);
+  return (await resp.json()).map((e: Record<string, unknown>) => ({
+    id: e.id,
+    type: e.type,
+    actor: (e.actor as Record<string, unknown>)?.display_login,
+    repo: (e.repo as Record<string, unknown>)?.name,
+    createdAt: e.created_at,
+    payload: e.payload,
+  }));
+}
+
 // ═══════════════════════════════════════════════════════════
 // GMAIL
 // ═══════════════════════════════════════════════════════════
@@ -287,13 +309,16 @@ export async function gmailListMessages(workspaceId: string, maxResults = 10, qu
 // GOOGLE CALENDAR
 // ═══════════════════════════════════════════════════════════
 
-export async function googleCalendarListUpcomingEvents(workspaceId: string, maxResults = 10) {
+export async function googleCalendarListEvents(workspaceId: string, options: { timeMin?: string; timeMax?: string; maxResults?: number } = {}) {
   const token = await getAccessToken(workspaceId, "google_drive");
   if (!token) throw new Error("Google Workspace is not connected");
 
-  const now = new Date().toISOString();
+  const timeMin = options.timeMin || new Date().toISOString();
+  const timeMax = options.timeMax ? `&timeMax=${encodeURIComponent(options.timeMax)}` : "";
+  const maxResults = options.maxResults || 10;
+
   const resp = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(now)}&singleEvents=true&orderBy=startTime&maxResults=${maxResults}`,
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin)}${timeMax}&singleEvents=true&orderBy=startTime&maxResults=${maxResults}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
 

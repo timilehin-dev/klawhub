@@ -144,6 +144,62 @@ class AgentCoordinator {
     return null;
   }
 
+  /**
+   * Autonomous A2A Discussion Loop
+   * Allows multiple agents to collaborate on a complex request before presenting to the user.
+   */
+  async discussionLoop(initialRequest: string, agentsToInvolve: string[]): Promise<string> {
+    let discussionLog = `Discussion started for: "${initialRequest}"\n\n`;
+    let currentTurn = 0;
+    const maxTurns = 5;
+    let nextAgent = agentsToInvolve[0] || "pm";
+    
+    while (currentTurn < maxTurns) {
+      const agent = this.agents.get(nextAgent);
+      if (!agent) break;
+
+      const prompt = `You are participating in an internal multi-agent discussion.
+Context so far:
+${discussionLog}
+
+Your role: ${nextAgent.toUpperCase()}
+Goal: Contribute your expertise to solve the request.
+If you have enough information to conclude, start your message with [DONE].
+If you need another agent's input, end your message with [NEXT: agent_name].
+
+Your contribution:`;
+
+      const response = await agentChat(nextAgent, [
+        { role: "system", content: `You are the ${nextAgent.toUpperCase()} agent. Collaborate with your colleagues.` },
+        { role: "user", content: prompt }
+      ], { temperature: 0.7 }, { workspaceId: this.workspaceId });
+
+      discussionLog += `*${nextAgent.toUpperCase()}*: ${response}\n\n`;
+      
+      if (response.includes("[DONE]")) break;
+
+      const nextMatch = response.match(/\[NEXT: (\w+)\]/);
+      if (nextMatch && this.agents.has(nextMatch[1])) {
+        nextAgent = nextMatch[1];
+      } else {
+        // Round robin if not specified
+        const currentIndex = agentsToInvolve.indexOf(nextAgent);
+        nextAgent = agentsToInvolve[(currentIndex + 1) % agentsToInvolve.length];
+      }
+
+      currentTurn++;
+    }
+
+    // Final synthesis by General Agent (or PM)
+    const synthesisPrompt = `Synthesize the following multi-agent discussion into a final response for the user:
+${discussionLog}`;
+
+    return agentChat("general", [
+      { role: "system", content: "Synthesize the discussion into a clear, actionable summary for the team." },
+      { role: "user", content: synthesisPrompt }
+    ], { temperature: 0.5 }, { workspaceId: this.workspaceId });
+  }
+
   private selectAgent(task: any): any {
     const taskType = task.type || this.inferTaskType(task);
 

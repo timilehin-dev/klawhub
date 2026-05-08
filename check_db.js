@@ -27,22 +27,47 @@ async function run() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     console.error("DATABASE_URL is not set in env");
-    process.exit(1);
+    return;
   }
 
   const sql = postgres(connectionString);
+
   try {
-    const res = await sql`
-      SELECT column_name 
+    console.log("--- Checking/Fixing Database Schema ---");
+    
+    // 1. Check usage_logs columns
+    let columns = await sql`
+      SELECT column_name, data_type 
       FROM information_schema.columns 
-      WHERE table_name = 'workspaces' AND column_name IN ('agent_name', 'agent_personality', 'enabled_skills');
+      WHERE table_name = 'usage_logs'
     `;
-    const foundColumns = res.map(row => row.column_name);
-    console.log("--- COLUMN CHECK RESULT ---");
-    console.log("Found columns:", foundColumns);
-    console.log("----------------------------");
+    
+    let hasWorkspaceId = columns.some(c => c.column_name === 'workspace_id');
+    console.log("Initial workspace_id check:", hasWorkspaceId);
+
+    if (!hasWorkspaceId) {
+      console.log("Column 'workspace_id' is missing. Attempting to add it...");
+      try {
+        await sql`ALTER TABLE usage_logs ADD COLUMN workspace_id uuid REFERENCES workspaces(id) ON DELETE CASCADE`;
+        console.log("Successfully added 'workspace_id' column.");
+        hasWorkspaceId = true;
+      } catch (migrateErr) {
+        console.error("Migration failed:", migrateErr.message);
+      }
+    }
+
+    // 2. Final check
+    columns = await sql`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'usage_logs'
+    `;
+    console.log("Current Columns:", columns.map(c => c.column_name).join(", "));
+    console.log("Has workspace_id:", columns.some(c => c.column_name === 'workspace_id'));
+
+    console.log("\n--- Verification Complete ---");
   } catch (err) {
-    console.error("Column check failed:", err.message);
+    console.error("Error during DB check:", err);
   } finally {
     await sql.end();
   }

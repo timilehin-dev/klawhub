@@ -3,13 +3,14 @@ import { getDb } from "./connection";
 import { agentStates } from "./schema";
 import type { AgentMessage } from "@/core/a2a/message-bus";
 
-const db = getDb();
+
 
 export async function saveAgentState(
   workspaceId: string | undefined,
   agentName: string,
   state: Record<string, any>
 ): Promise<void> {
+  const db = getDb();
   const whereClause = workspaceId
     ? and(
         eq(agentStates.workspaceId, workspaceId),
@@ -50,6 +51,7 @@ export async function getAgentState(
   workspaceId: string | undefined,
   agentName: string
 ): Promise<Record<string, any> | null> {
+  const db = getDb();
   const whereClause = workspaceId
     ? and(
       eq(agentStates.workspaceId, workspaceId as string),
@@ -77,6 +79,7 @@ export async function updateAgentState(
 }
 
 export async function getActiveAgents(workspaceId?: string): Promise<string[]> {
+  const db = getDb();
   const result = await db
     .select({ agentName: agentStates.agentName })
     .from(agentStates);
