@@ -653,8 +653,8 @@ const googleCalendarListEventsTool: ToolDefinition = {
   async execute(params, ctx) {
     try {
       const wsId = requireWorkspace(ctx);
-      const { googleCalendarListUpcomingEvents } = await import("@/integrations/clients");
-      const events = await googleCalendarListUpcomingEvents(wsId, params.max_results || 5);
+      const { googleCalendarListEvents } = await import("@/integrations/clients");
+      const events = await googleCalendarListEvents(wsId, { maxResults: params.max_results || 5 });
       
       if (events.length === 0) {
         return "No upcoming Google Calendar events found.";

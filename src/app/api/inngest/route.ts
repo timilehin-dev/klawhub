@@ -1,5 +1,7 @@
 import { serve } from "inngest/next";
 import { inngest } from "@/workflows/client";
+import { messageHandlerWorkflow } from "@/workflows/message-handler";
+import { commandChatWorkflow } from "@/workflows/command-chat";
 import { buildSquadWorkflow } from "@/workflows/build-squad";
 import { researchWorkflow } from "@/workflows/research-task";
 import { documentWorkflow } from "@/workflows/document-task";
