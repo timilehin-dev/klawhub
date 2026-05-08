@@ -1,6 +1,7 @@
 import { inngest } from "./client";
 import { getStaleRuns, getStaleTasks, updateRun, updateTask } from "@/db";
 import { postToThread } from "@/integrations/slack/client";
+import { agentChat } from "@/core/llm";
 
 /**
  * Task Monitor — The "Proactive Coworker" watchdog.
@@ -107,7 +108,7 @@ export const taskMonitorWorkflow = inngest.createFunction(
         const threadTs = task.slackThreadTs || undefined;
 
         // Use PM agent to suggest an improvement
-        const prompt = `The following task has been running for over an hour: "${task.title}" (Type: ${task.type}).
+        const prompt = `The following task has been running for over an hour: "${task.request}" (Type: ${task.type}).
         Proactively suggest ONE specific way to speed this up or break it down for the user.
         Example: "I noticed this is taking a while. Should I break this into 3 smaller sub-tasks to process in parallel?"
         Keep it short (1 sentence).`;
@@ -115,7 +116,7 @@ export const taskMonitorWorkflow = inngest.createFunction(
         const suggestion = await agentChat("pm", [
           { role: "system", content: "You are a workflow optimization expert." },
           { role: "user", content: prompt }
-        ], { temperature: 0.3, maxTokens: 200 }, { workspaceId: task.workspaceId });
+        ], { temperature: 0.3, maxTokens: 200 }, { workspaceId: task.workspaceId || undefined });
 
         if (suggestion) {
           await postToThread(channelId, threadTs || channelId, `:zap: *Optimization Suggestion:* ${suggestion}`);
