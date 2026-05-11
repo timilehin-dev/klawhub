@@ -97,11 +97,11 @@ Classification rules:
 - BUILD: code, scripts, apps, tools, automations, APIs
 - DOCUMENT: reports, proposals, invoices, contracts, any file generation (PDF/DOCX)
 - RESEARCH: web research, finding information, "what is/are", "latest trends"
-- ANALYTICS: data analysis, charts, visualizations, statistics
-- CHAT: greetings, self-introduction, questions about Klawhub, conversation, anything that doesn't fit above
+- ANALYTICS: data analysis, charts, visualizations, statistics (Use this ONLY for processing existing data or complex math)
+- CHAT: greetings, self-introduction, conversation, and ALL requests that require accessing external tools (GitHub, Gmail, Google Drive, Slack), even if they involve simple sorting or analysis.
 - UNCLEAR: genuinely ambiguous requests
 
-Be fast and decisive. Never explain. Never combine categories.`;
+Be fast and decisive. Never explain. Never combine categories. If it feels like it needs a tool, pick CHAT.`;
 
 async function buildClassifierPrompt(): Promise<string> {
   let skillSection = "";

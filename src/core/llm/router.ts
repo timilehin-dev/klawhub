@@ -82,9 +82,9 @@ class LLMRouter {
             model: provider.model,
             messages,
             temperature: options.temperature ?? 0.7,
-            max_tokens: Math.min(options.maxTokens ?? 4096, 65536),
+            max_tokens: Math.min(options.maxTokens ?? 8192, 131072),
           }),
-          signal: AbortSignal.timeout(120_000), // 2-minute hard timeout per API call
+          signal: AbortSignal.timeout(300_000), // 5-minute hard timeout per API call
         });
 
         if (!response.ok) {

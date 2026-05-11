@@ -461,7 +461,9 @@ async function handleThreadReply(ctx: {
     return;
   }
 
-  if (["document", "research", "analytics"].includes(classification.type)) {
+    const isToolHeavy = /\b(github|repo|repository|gmail|email|google\s+drive|file|slack|message|channel)\b/i.test(text);
+
+    if (["document", "research", "analytics"].includes(classification.type) && !isToolHeavy) {
     const taskType = classification.type as "document" | "research" | "analytics";
     const taskEmojis: Record<string, string> = { document: "page_facing_up", research: "mag", analytics: "chart_with_upwards_trend" };
     const taskLabels: Record<string, string> = { document: "Generating document", research: "Researching", analytics: "Analyzing data" };

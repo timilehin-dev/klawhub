@@ -1165,6 +1165,10 @@ export const pmAgentTools: ToolDefinition[] = [
   githubIssuesTool,
   memorySearchTool,
   knowledgeSearchTool,
+  scheduleCreateTool,
+  scheduleListTool,
+  scheduleToggleTool,
+  slackListChannelsTool,
   sequentialThinkingTool,
 ];
 
@@ -1180,6 +1184,10 @@ export const researchAgentTools: ToolDefinition[] = [
   memorySearchTool,
   knowledgeSearchTool,
   googleDriveSearchTool,
+  scheduleCreateTool,
+  scheduleListTool,
+  scheduleToggleTool,
+  slackListChannelsTool,
   sequentialThinkingTool,
 ];
 
