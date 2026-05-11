@@ -9,7 +9,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 export function verifySlackRequest(req: NextRequest, body: string): boolean {
   const timestamp = req.headers.get("x-slack-request-timestamp");
   const signature = req.headers.get("x-slack-signature");
-  const secret = process.env.SLACK_SIGNING_SECRET;
+  const secret = process.env.SLACK_SIGNING_SECRET || process.env.NEXT_PUBLIC_SLACK_SIGNING_SECRET;
 
   if (!timestamp || !signature || !secret) return false;
 

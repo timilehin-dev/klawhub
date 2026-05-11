@@ -12,7 +12,7 @@ const workspaceIdCache = new Map<string, string>();
 let _prewarmedDefault: WebClient | null = null;
 function getPrewarmedDefault(): WebClient {
   if (!_prewarmedDefault) {
-    const token = process.env.SLACK_BOT_TOKEN;
+    const token = process.env.SLACK_BOT_TOKEN || process.env.NEXT_PUBLIC_SLACK_BOT_TOKEN;
     if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
     _prewarmedDefault = new WebClient(token);
   }
@@ -83,7 +83,7 @@ let _defaultSlack: WebClient | null = null;
 
 function getDefaultSlack(): WebClient {
   if (!_defaultSlack) {
-    const token = process.env.SLACK_BOT_TOKEN;
+    const token = process.env.SLACK_BOT_TOKEN || process.env.NEXT_PUBLIC_SLACK_BOT_TOKEN;
     if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
     _defaultSlack = new WebClient(token);
   }
@@ -227,7 +227,7 @@ export async function getChannelName(channelId: string, teamId?: string): Promis
 /** Get the decrypted bot token for direct HTTP fetches or outside tool use. */
 export async function getWorkspaceToken(teamId?: string): Promise<string> {
   if (!teamId) {
-    const token = process.env.SLACK_BOT_TOKEN;
+    const token = process.env.SLACK_BOT_TOKEN || process.env.NEXT_PUBLIC_SLACK_BOT_TOKEN;
     if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
     return token;
   }
@@ -241,7 +241,7 @@ export async function getWorkspaceToken(teamId?: string): Promise<string> {
     }
   }
 
-  const token = process.env.SLACK_BOT_TOKEN;
+  const token = process.env.SLACK_BOT_TOKEN || process.env.NEXT_PUBLIC_SLACK_BOT_TOKEN;
   if (!token) throw new Error("SLACK_BOT_TOKEN is not set");
   return token;
 }

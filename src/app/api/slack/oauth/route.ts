@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const SLACK_CLIENT_ID = process.env.SLACK_CLIENT_ID;
+const SLACK_CLIENT_ID = process.env.SLACK_CLIENT_ID || process.env.NEXT_PUBLIC_SLACK_CLIENT_ID;
 const SLACK_SCOPES = [
   "commands",
   "chat:write",

@@ -61,9 +61,9 @@ export function getProvider(providerId: string): OAuthProviderConfig | undefined
 }
 
 export function getProviderCredentials(provider: OAuthProviderConfig): { clientId: string; clientSecret: string } {
-  const clientId = process.env[provider.clientIdEnv];
-  const clientSecret = process.env[provider.clientSecretEnv];
-  if (!clientId) throw new Error(`${provider.clientIdEnv} is not set`);
-  if (!clientSecret) throw new Error(`${provider.clientSecretEnv} is not set`);
+  const clientId = process.env[provider.clientIdEnv] || process.env[`NEXT_PUBLIC_${provider.clientIdEnv}`];
+  const clientSecret = process.env[provider.clientSecretEnv] || process.env[`NEXT_PUBLIC_${provider.clientSecretEnv}`];
+  if (!clientId) throw new Error(`${provider.clientIdEnv} is not set (checked both standard and NEXT_PUBLIC_ versions)`);
+  if (!clientSecret) throw new Error(`${provider.clientSecretEnv} is not set (checked both standard and NEXT_PUBLIC_ versions)`);
   return { clientId, clientSecret };
 }
