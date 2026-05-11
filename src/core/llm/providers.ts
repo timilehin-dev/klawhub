@@ -50,7 +50,7 @@ export function getProviders(): ProviderConfig[] {
     "ollama_engineer",
     process.env.OLLAMA_BASE_URL || "https://api.ollama.com/v1",
     ["OLLAMA_API_KEY_1", "OLLAMA_API_KEY_2", "OLLAMA_API_KEY_3"],
-    process.env.OLLAMA_ENGINEER_MODEL || "deepseek-v4-flash:cloud",
+    process.env.OLLAMA_ENGINEER_MODEL || "minimax-m2.7:cloud",
     "ollama"
   );
   if (ollamaEngineer) providers.push(ollamaEngineer);
@@ -65,7 +65,7 @@ export function getProviders(): ProviderConfig[] {
  * Override per-agent here. Agents not listed use the "default" provider.
  */
 export const AGENT_PROVIDER_MAP: Record<string, string> = {
-  engineer: "ollama_engineer",     // Engineer uses Ollama with kimi-k2.6:cloud
+  engineer: "ollama_engineer",     // Engineer uses Ollama with minimax-m2.7:cloud
 };
 
 export const DEFAULT_PROVIDER_ID = "default";
