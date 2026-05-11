@@ -135,21 +135,21 @@ def execute_code(code: str, language: str = "python", dependencies: list[str] = 
             def set_resource_limits():
                 if resource is None:
                     return
-                # Limit memory to 512MB
+                # Limit memory to 2GB (for ML and data processing)
                 try:
-                    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+                    resource.setrlimit(resource.RLIMIT_AS, (2048 * 1024 * 1024, 2048 * 1024 * 1024))
                 except ValueError:
                     pass
-                # Limit CPU to 30 seconds
+                # Limit CPU to 60 seconds
                 try:
-                    resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
+                    resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
                 except ValueError:
                     pass
 
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=60,
+                timeout=120,
                 cwd=env_dir,
                 env=env,
                 preexec_fn=set_resource_limits
@@ -451,7 +451,7 @@ def generate_embedding(text: str) -> dict:
 # Browser Automation Service (Lightpanda)
 # ─────────────────────────────────────────────
 
-@app.function(image=image, concurrency_limit=1, timeout=3600)
+@app.function(image=image, max_containers=1, timeout=3600)
 def browser_server():
     """
     Exposes a Lightpanda CDP server via a Modal tunnel.
