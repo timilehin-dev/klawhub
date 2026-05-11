@@ -23,7 +23,7 @@ import {
 // ── Error Helpers ──
 
 function browserUnavailable(): string {
-  return "Browser automation is not available. Set BROWSER_WS_URL env var to connect to a Lightpanda or CDP-compatible browser instance.";
+  return "Browser automation is unconfigured (no BROWSER_WS_URL). If you only need to read text or extract info from a URL, use the 'web_read' tool instead—it works via the Modal sandbox. Full browser automation (clicking, screenshots, interaction) requires setting BROWSER_WS_URL.";
 }
 
 // ── Public Actions ──

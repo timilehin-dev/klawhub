@@ -448,6 +448,60 @@ def generate_embedding(text: str) -> dict:
 
 
 # ─────────────────────────────────────────────
+# Browser Automation Service (Lightpanda)
+# ─────────────────────────────────────────────
+
+@app.function(image=image, concurrency_limit=1, timeout=3600)
+def browser_server():
+    """
+    Exposes a Lightpanda CDP server via a Modal tunnel.
+    Run this command to get your BROWSER_WS_URL:
+    modal run modal_app.py::browser_server
+    """
+    import subprocess
+    import time
+    
+    print("[BROWSER] Starting Lightpanda CDP server on port 9222...")
+    try:
+        # Start lightpanda with CDP enabled on all interfaces
+        process = subprocess.Popen([
+            "lightpanda", 
+            "--remote-debugging-port=9222",
+            "--host=0.0.0.0"
+        ])
+        
+        # Wait for the server to initialize
+        time.sleep(3)
+        
+        # Expose the local port 9222 to a public Modal URL
+        with modal.forward(9222) as tunnel:
+            print(f"\n" + "═"*60)
+            print(f" 🚀 BROWSER SERVICE IS NOW LIVE!")
+            print(f" 🔗 WS URL: {tunnel.url}")
+            print(f" ═" + "═"*58 + "\n")
+            print("1. Copy the 'WS URL' above.")
+            print("2. Set it as BROWSER_WS_URL in your Vercel environment variables.")
+            print("3. Redeploy or restart your Vercel project.\n")
+            
+            # Keep the tunnel open and monitor the process
+            while True:
+                if process.poll() is not None:
+                    print("[BROWSER] Process died. Restarting...")
+                    process = subprocess.Popen([
+                        "lightpanda", 
+                        "--remote-debugging-port=9222",
+                        "--host=0.0.0.0"
+                    ])
+                time.sleep(10)
+    except KeyboardInterrupt:
+        print("\n[BROWSER] Shutting down...")
+    except Exception as e:
+        print(f"[BROWSER] Critical Error: {e}")
+    finally:
+        if 'process' in locals():
+            process.terminate()
+
+# ─────────────────────────────────────────────
 # Unified Entry Point
 # ─────────────────────────────────────────────
 
