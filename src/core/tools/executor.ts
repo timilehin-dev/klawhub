@@ -8,7 +8,9 @@ import {
 
 type Message = { role: "system" | "user" | "assistant"; content: string };
 
-const TOOL_CALL_PATTERN = /\[TOOL:(\w+)\]([\s\S]*?)\[\/TOOL\]/g;
+const TOOL_CALL_PATTERN = /\[TOOL:(\w+)\]([\s\S]*?)(?:\[\/TOOL\]|$)/gi;
+const METADATA_PATTERN = /<(?:tool_call|thought|internal|call)\|?.*?>/gi;
+const JSON_BLOCK_PATTERN = /^\s*\{\s*"thought":[\s\S]*?\}\s*$/gm;
 
 /**
  * Parse tool calls from an LLM response.
@@ -39,8 +41,13 @@ function parseToolCalls(response: string): ToolCall[] | null {
 /**
  * Remove [TOOL:...][\/TOOL] blocks from a response, keeping surrounding text.
  */
-function stripToolCalls(response: string): string {
-  return response.replace(TOOL_CALL_PATTERN, "").trim();
+export function stripToolCalls(response: string): string {
+  return response
+    .replace(TOOL_CALL_PATTERN, "")
+    .replace(METADATA_PATTERN, "")
+    .replace(JSON_BLOCK_PATTERN, "")
+    .replace(/```json\s*\{\s*"thought":[\s\S]*?\}\s*```/gi, "")
+    .trim();
 }
 
 export interface ToolUseOptions {

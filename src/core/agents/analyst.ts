@@ -1,5 +1,6 @@
 import { agentChat } from "@/core/llm";
 import { sandbox } from "@/core/tools/sandbox";
+import { stripToolCalls } from "@/core/tools/executor";
 import type { SandboxResponse } from "@/types";
 
 import { PERFORMANCE_LOGIC_MODULE } from "./performance-logic";
@@ -58,7 +59,8 @@ export async function analyzeData(request: string, data?: string, meta?: { taskI
       content: `Request: ${request}\n\nOutput:\n${execution.stdout || ""}\n${execution.stderr ? `Errors: ${execution.stderr}` : ""}`,
     },
   ];
-  const insights = await agentChat("analyst", interpMessages, { temperature: 0.4, maxTokens: 800 }, meta);
+  const insightsRaw = await agentChat("analyst", interpMessages, { temperature: 0.4, maxTokens: 800 }, meta);
+  const insights = stripToolCalls(insightsRaw);
 
   return { code, execution, insights };
 }
