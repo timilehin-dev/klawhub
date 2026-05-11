@@ -92,7 +92,7 @@ export async function conductResearch(topic: string, meta?: { taskId?: string; s
     systemPrompt: RESEARCH_PROMPT,
     tools: researchAgentTools,
     maxIterations: 20,
-    maxTokens: 131072,
+    maxTokens: 32768,
     temperature: 0.4,
     context: {
       slackUserId: meta?.slackUserId,

@@ -124,7 +124,7 @@ export async function createSpec(request: string, userContext: string) {
       tools: pmAgentTools,
       maxIterations: 12,
       temperature: 0.3,
-      maxTokens: 131072,
+      maxTokens: 32768,
       agentName: "pm",
     }
   );

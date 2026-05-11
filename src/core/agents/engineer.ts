@@ -153,7 +153,7 @@ export async function writeCode(
       tools: engineerAgentTools,
       maxIterations: 10,
       temperature: 0.2,
-      maxTokens: 131072,
+      maxTokens: 32768,
       agentName: "engineer",
       context: {
         slackUserId: meta?.slackUserId,
@@ -218,7 +218,7 @@ export async function fixCode(
       tools: engineerAgentTools,
       maxIterations: 4,
       temperature: 0.2,
-      maxTokens: 131072,
+      maxTokens: 32768,
       agentName: "engineer",
       context: {
         slackUserId: meta?.slackUserId,
