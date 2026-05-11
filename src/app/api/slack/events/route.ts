@@ -40,10 +40,13 @@ export async function POST(req: NextRequest) {
   const event = payload.event;
 
   // 4. Quick filters — skip bot messages, subtypes, empty text (~0ms)
-  if (event.bot_id || event.subtype) return NextResponse.json({ ok: true });
+  // But allow reaction_added events through!
+  if (event.type !== "reaction_added" && (event.bot_id || event.subtype)) return NextResponse.json({ ok: true });
 
-  const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
-  if (!text) return NextResponse.json({ ok: true });
+  if (event.type === "message") {
+    const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
+    if (!text) return NextResponse.json({ ok: true });
+  }
 
   // 5. Allow messages through for proactive analysis and passive listening.
   //    (filtering is handled downstream in process.ts to minimize Inngest costs)
@@ -60,7 +63,7 @@ export async function POST(req: NextRequest) {
   //    with up to 15-minute timeout and built-in retries.
   try {
     await inngest.send({
-      name: "slack/message.received",
+      name: "slack/event.received",
       data: {
         event,
         eventId,

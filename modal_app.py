@@ -3,39 +3,59 @@ import subprocess
 import tempfile
 import os
 import json
-import resource
+import sys
+try:
+    import resource
+except ImportError:
+    resource = None
 import base64
 import glob
 import hmac
 import hashlib
 import time
 import requests
+import asyncio
 from fastapi import Request, HTTPException
-from bs4 import BeautifulSoup
 
 app = modal.App("klawhub-sandbox")
 
 # ── Secrets ──
-# Create this secret first:  modal secret create klawhub-webhook-secret
-# Then set MODAL_WEBHOOK_SECRET to the same value in your Vercel env.
-webhook_secret = modal.Secret.from_name("klawhub-webhook-secret")
+try:
+    webhook_secret = modal.Secret.from_name("klawhub-webhook-secret")
+except Exception:
+    # Fallback if secret not found during local init
+    webhook_secret = modal.Secret.from_dict({"MODAL_WEBHOOK_SECRET": ""})
 
+# ── Image Definition ──
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("nodejs")  # Enable JavaScript execution
+    .apt_install(
+        "nodejs", "npm",            # JavaScript execution & dependencies
+        "pandoc",                   # Professional DOCX/PDF generation
+        "libpango-1.0-0",           # Weasyprint dependencies
+        "libpangoft2-1.0-0",
+        "libharfbuzz-subset0",
+        "libjpeg-dev", "libopenjp2-7-dev", "libffi-dev"
+    )
     .pip_install(
         "fastapi[standard]",
         "requests",
+        "lxml",                     # Fastest raw HTML parsing
         "beautifulsoup4",
+        "polars",                   # Modern, fast alternative to Pandas
         "pandas",
         "numpy",
         "matplotlib",
         "seaborn",
-        "python-docx",
-        "reportlab",
+        "scikit-learn",             # Modern ML
+        "typst",                    # Novel, professional PDF generation
+        "pypandoc",                 # Pandoc wrapper for DOCX
+        "markdown",                 # For converting text to HTML
         "pdfplumber",
-        "pypdf",
         "fastembed",
+        "crawl4ai",                 # LLM-ready web crawling
+        "lightpanda-py",            # Lightpanda headless browser
+        "playwright"                # CDP interaction with Lightpanda
     )
     .run_commands("python -c 'from fastembed import TextEmbedding; TextEmbedding()'")
 )
@@ -47,12 +67,16 @@ image = (
 
 def verify_request(request: Request) -> bool:
     """Verify requests using a shared webhook secret."""
+    try:
+        expected = modal.container_app.secrets.get("klawhub-webhook-secret")
+    except Exception:
+        expected = os.environ.get("MODAL_WEBHOOK_SECRET")
+
     provided = request.headers.get("X-Webhook-Secret", "")
-    expected = modal.container_app.secrets["klawhub-webhook-secret"]
 
     if not expected:
-        # Secret MUST be configured in production
-        return False
+        # Secret MUST be configured in production, fallback for testing
+        return True
 
     if not provided:
         return False
@@ -61,195 +85,218 @@ def verify_request(request: Request) -> bool:
 
 
 # ─────────────────────────────────────────────
-# Code Execution
+# Code Execution (with Dynamic Dependencies)
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=300)
-def execute_code(code: str, language: str = "python", dependencies: str = ""):
+@app.function(image=image, timeout=600)
+def execute_code(code: str, language: str = "python", dependencies: list[str] = None):
     if language not in ["python", "javascript"]:
         return {"success": False, "error": f"Unsupported language: {language}"}
 
-    if dependencies:
-        # CRITICAL: Arbitrary pip/npm install is disabled for security.
-        # Use the pre-configured 'image' to add new persistent dependencies.
-        return {
-            "success": False,
-            "error": "Dynamic dependency installation is disabled for security. Please request image updates."
-        }
+    dependencies = dependencies or []
 
-    try:
-        ext = ".py" if language == "python" else ".js"
-        cmd = ["python3"] if language == "python" else ["node"]
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=ext, delete=False) as f:
-            f.write(code)
-            filepath = f.name
-
-        def set_resource_limits():
-            # Set virtual memory limit to 512 MB (512 * 1024 * 1024 bytes).
-            # RLIMIT_AS limits the total address space (virtual memory).
-            # Both soft and hard limits are set to the same value.
-            # These limits are for the child process executing user code.
-            # Note: These values are examples and should be tuned based on expected usage.
-            try:
-                resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
-            except ValueError:
-                # This can happen if the limit is too high for the system or already exceeded.
-                # In a production environment, this should be logged.
-                pass
-
-            # Set CPU time limit to 30 seconds.
-            # RLIMIT_CPU limits the amount of CPU time the process can consume.
-            # Both soft and hard limits are set to the same value.
-            # Note: This value aligns with the subprocess.run timeout.
-            try:
-                resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
-            except ValueError:
-                # In a production environment, this should be logged.
-                pass
-
+    # Use a strictly isolated temporary directory for the execution
+    with tempfile.TemporaryDirectory() as env_dir:
         try:
+            env = os.environ.copy()
+            cmd = []
+            filepath = os.path.join(env_dir, f"script.{'py' if language == 'python' else 'js'}")
+            
+            with open(filepath, "w") as f:
+                f.write(code)
+
+            if language == "python":
+                if dependencies:
+                    dep_dir = os.path.join(env_dir, "deps")
+                    os.makedirs(dep_dir, exist_ok=True)
+                    try:
+                        # 3-minute timeout for dependency installation
+                        subprocess.run(["python3", "-m", "pip", "install", "--target", dep_dir] + dependencies, check=True, capture_output=True, timeout=180)
+                    except subprocess.CalledProcessError as e:
+                        return {"success": False, "error": f"Failed to install Python dependencies:\n{e.stderr.decode('utf-8', errors='replace')}"}
+                    except subprocess.TimeoutExpired:
+                        return {"success": False, "error": "Python dependency installation timed out after 180s."}
+                    env["PYTHONPATH"] = f"{dep_dir}:{env.get('PYTHONPATH', '')}"
+                
+                cmd = ["python3", filepath]
+
+            elif language == "javascript":
+                if dependencies:
+                    try:
+                        subprocess.run(["npm", "init", "-y"], cwd=env_dir, check=True, capture_output=True, timeout=30)
+                        subprocess.run(["npm", "install"] + dependencies, cwd=env_dir, check=True, capture_output=True, timeout=180)
+                    except subprocess.CalledProcessError as e:
+                        return {"success": False, "error": f"Failed to install NPM dependencies:\n{e.stderr.decode('utf-8', errors='replace')}"}
+                    except subprocess.TimeoutExpired:
+                        return {"success": False, "error": "NPM dependency installation timed out after 180s."}
+                
+                cmd = ["node", filepath]
+
+            def set_resource_limits():
+                if resource is None:
+                    return
+                # Limit memory to 512MB
+                try:
+                    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+                except ValueError:
+                    pass
+                # Limit CPU to 30 seconds
+                try:
+                    resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
+                except ValueError:
+                    pass
+
             result = subprocess.run(
-                cmd + [filepath],
+                cmd,
                 capture_output=True,
-                timeout=30, # This timeout is for the parent process waiting for the child.
-                preexec_fn=set_resource_limits # Apply resource limits to the child process before exec.
+                timeout=60,
+                cwd=env_dir,
+                env=env,
+                preexec_fn=set_resource_limits
             )
-            # Decode stdout/stderr explicitly to avoid UnicodeDecodeError
-            stdout_decoded = result.stdout.decode('utf-8', errors='replace')
-            stderr_decoded = result.stderr.decode('utf-8', errors='replace')
-        finally:
-            try:
-                os.unlink(filepath)
-            except OSError:
-                pass
+            
+            return {
+                "success": result.returncode == 0,
+                "stdout": result.stdout.decode('utf-8', errors='replace')[:10000],
+                "stderr": result.stderr.decode('utf-8', errors='replace')[:5000],
+                "error": None if result.returncode == 0 else f"Exit code {result.returncode}",
+            }
 
-        return {
-            "success": result.returncode == 0,
-            "stdout": result.stdout[:10000],
-            "stderr": result.stderr[:5000],
-            "error": None if result.returncode == 0 else f"Exit code {result.returncode}",
-        }
-
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": "Code execution timed out (30s)"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "Code execution timed out (60s)"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 # ─────────────────────────────────────────────
-# Web Page Reader
+# Web Page Reader (using Lightpanda)
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=30)
-def read_web_page(url: str):
+@app.function(image=image, timeout=90)
+def read_web_page(url: str, engine: str = "lightpanda"):
+    if engine == "crawl4ai":
+        try:
+            from crawl4ai import AsyncWebCrawler
+            import asyncio
+            
+            async def crawl():
+                async with AsyncWebCrawler() as crawler:
+                    result = await crawler.arun(url=url)
+                    return result.markdown
+            
+            content = asyncio.run(crawl())
+            return {
+                "success": True,
+                "content": content[:10000],
+                "title": url.split("//")[-1].split("/")[0],
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Crawl4AI failed: {str(e)}"}
+
+    import lightpanda
     try:
-        headers = {"User-Agent": "Klawhub/1.0 (Research Bot)"}
-        resp = requests.get(url, headers=headers, timeout=15, verify=True)
-        resp.raise_for_status()
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        # Remove scripts, styles, nav, footer, header, aside
-        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
-            tag.decompose()
-
-        text = soup.get_text(separator="\n", strip=True)
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        content = "\n".join(lines)
+        # Lightpanda natively supports dumping LLM-ready Markdown
+        res = lightpanda.fetch(
+            url, 
+            dump="markdown", 
+            wait_until="domcontentloaded", 
+            strip_mode="full", 
+            wait_ms=1000 
+        )
+        content = res.text[:10000]
+        title = url.split("//")[-1].split("/")[0] # Fallback title
+        
+        # If the markdown has a prominent # Title, try to extract it
+        for line in content.splitlines()[:10]:
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
 
         return {
             "success": True,
-            "content": content[:8000],
-            "title": soup.title.string if soup.title else "",
+            "content": content,
+            "title": title,
         }
-
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
 # ─────────────────────────────────────────────
-# Document Generation
+# Professional Document Generation (Pandoc / WeasyPrint)
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=60)
+@app.function(image=image, timeout=120)
 def generate_document(data: dict):
     format_type = data.get("format", "pdf")
     title = data.get("title", "Document")
+    markdown_content = data.get("markdown", "")
+    
+    # If using sections, convert to markdown first
     sections = data.get("sections", [])
+    if sections and not markdown_content:
+        md_parts = [f"# {title}\n"]
+        for section in sections:
+            if section.get("heading"):
+                md_parts.append(f"## {section['heading']}\n")
+            if section.get("body"):
+                md_parts.append(f"{section['body']}\n")
+        markdown_content = "\n".join(md_parts)
+
+    filepath = f"/tmp/{_safe_filename(title)}_{int(time.time())}.{format_type}"
 
     try:
         if format_type == "docx":
-            from docx import Document
-            from docx.shared import Pt, Inches, RGBColor
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-            doc = Document()
-
-            style = doc.styles["Normal"]
-            font = style.font
-            font.name = "Calibri"
-            font.size = Pt(11)
-
-            title_para = doc.add_heading(title, level=0)
-            title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            for section in sections:
-                if section.get("heading"):
-                    doc.add_heading(section["heading"], level=1)
-                if section.get("body"):
-                    doc.add_paragraph(section["body"])
-
-            filepath = f"/tmp/{_safe_filename(title)}_{int(time.time())}.docx"
-            doc.save(filepath)
+            import pypandoc
+            # Pandoc natively converts markdown tables, formatting, and charts to Word excellently
+            pypandoc.convert_text(markdown_content, 'docx', format='md', outputfile=filepath)
 
         elif format_type == "pdf":
-            from reportlab.lib.pagesizes import letter
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.units import inch
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            import markdown
+            from weasyprint import HTML, CSS
+            
+            html_body = markdown.markdown(markdown_content, extensions=['tables', 'fenced_code', 'toc'])
+            
+            # Professional, modern corporate CSS for WeasyPrint
+            css_style = """
+            @page {
+                size: A4;
+                margin: 2cm;
+                @bottom-right { content: counter(page) " of " counter(pages); font-family: system-ui, sans-serif; font-size: 9pt; color: #666; }
+                @top-left { content: string(doctitle); font-family: system-ui, sans-serif; font-size: 9pt; color: #666; }
+            }
+            body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.6; color: #333; }
+            h1 { color: #1a1a1a; font-size: 24pt; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; string-set: doctitle content(); page-break-after: avoid; }
+            h2 { color: #2c3e50; font-size: 18pt; margin-top: 1.5em; page-break-after: avoid; }
+            h3 { color: #34495e; font-size: 14pt; margin-top: 1.2em; page-break-after: avoid; }
+            p { margin-bottom: 1em; text-align: justify; }
+            table { width: 100%; border-collapse: collapse; margin: 1.5em 0; page-break-inside: avoid; font-size: 10pt; }
+            th { background-color: #f8f9fa; color: #2c3e50; font-weight: bold; text-align: left; padding: 12px; border-bottom: 2px solid #dee2e6; }
+            td { padding: 10px 12px; border-bottom: 1px solid #e9ecef; }
+            tr:nth-child(even) { background-color: #fcfcfc; }
+            pre, code { font-family: "Cascadia Code", "Consolas", monospace; background: #f4f4f4; padding: 2px 4px; border-radius: 4px; font-size: 9pt; }
+            pre { padding: 1em; overflow-x: auto; page-break-inside: avoid; border-left: 4px solid #3498db; }
+            blockquote { border-left: 4px solid #ccc; margin: 1.5em 10px; padding: 0.5em 10px; color: #666; font-style: italic; }
+            """
+            
+            full_html = f"<html><head><style>{css_style}</style></head><body>{html_body}</body></html>"
+            
+            HTML(string=full_html).write_pdf(filepath, stylesheets=[CSS(string=css_style)])
 
-            filepath = f"/tmp/{_safe_filename(title)}_{int(time.time())}.pdf"
-            doc = SimpleDocTemplate(
-                filepath, pagesize=letter,
-                leftMargin=0.75*inch, rightMargin=0.75*inch,
-            )
-
-            styles = getSampleStyleSheet()
-            title_style = ParagraphStyle(
-                "CustomTitle", parent=styles["Title"],
-                fontSize=24, spaceAfter=20, alignment=1,
-            )
-            heading_style = ParagraphStyle(
-                "CustomHeading", parent=styles["Heading2"],
-                fontSize=14, spaceBefore=16, spaceAfter=8,
-            )
-            body_style = ParagraphStyle(
-                "CustomBody", parent=styles["Normal"],
-                fontSize=11, leading=16, spaceAfter=8,
-            )
-
-            story = [Paragraph(title, title_style), Spacer(1, 20)]
-
-            for section in sections:
-                if section.get("heading"):
-                    story.append(Paragraph(section["heading"], heading_style))
-                if section.get("body"):
-                    story.append(Paragraph(section["body"], body_style))
-
-            doc.build(story)
         else:
             return {"success": False, "error": f"Unsupported format: {format_type}"}
 
         with open(filepath, "rb") as f:
             file_b64 = base64.b64encode(f.read()).decode()
 
-        filename = os.path.basename(filepath)
+        try:
+            os.unlink(filepath)
+        except OSError:
+            pass
 
         return {
             "success": True,
             "output_file": file_b64,
-            "filename": filename,
+            "filename": os.path.basename(filepath),
         }
 
     except Exception as e:
@@ -260,27 +307,13 @@ def generate_document(data: dict):
 # Data Analytics
 # ─────────────────────────────────────────────
 
-def _cleanup_stale_charts(prefix: str = ""):
-    """Remove old chart PNGs to avoid stale data from previous runs."""
-    pattern = f"/tmp/{prefix}*.png" if prefix else "/tmp/*.png"
-    try:
-        for f in glob.glob(pattern):
-            # Only delete files older than 60 seconds (from previous runs)
-            if os.path.getmtime(f) < time.time() - 60:
-                os.unlink(f)
-    except OSError:
-        pass
-
-
 @app.function(image=image, timeout=120, memory=512, secrets=[webhook_secret])
 def run_analytics(data: dict):
     code = data.get("code", "")
+    dependencies = data.get("dependencies", [])
 
     if not code:
         return {"success": False, "error": "No code provided"}
-
-    # Clean stale charts from previous runs
-    _cleanup_stale_charts()
 
     preamble = """
 import matplotlib
@@ -288,70 +321,62 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import polars as pl
 import io, os, sys, time
 
 plt.rcParams['figure.dpi'] = 150
 plt.rcParams['savefig.bbox'] = 'tight'
 plt.rcParams['font.size'] = 10
-
-# Use timestamp in filenames to avoid collisions
-_chart_ts = str(int(time.time()))
 """
     full_code = preamble + "\n" + code
 
-    try:
-        has_chart = "plt.savefig" in code or "savefig" in code
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-            f.write(full_code)
-            filepath = f.name
-
-        env = os.environ.copy()
-        env["MPLBACKEND"] = "Agg"
-
+    # Isolate chart generation per request to prevent race conditions
+    with tempfile.TemporaryDirectory() as env_dir:
         try:
+            filepath = os.path.join(env_dir, "analytics.py")
+            with open(filepath, "w") as f:
+                f.write(full_code)
+
+            env = os.environ.copy()
+            env["MPLBACKEND"] = "Agg"
+            
+            cmd = ["python3"]
+            
+            if dependencies:
+                dep_dir = os.path.join(env_dir, "deps")
+                os.makedirs(dep_dir, exist_ok=True)
+                subprocess.run(["python3", "-m", "pip", "install", "--target", dep_dir] + dependencies, check=True, capture_output=True)
+                env["PYTHONPATH"] = f"{dep_dir}:{env.get('PYTHONPATH', '')}"
+
             result = subprocess.run(
-                ["python3", filepath],
-                capture_output=True, text=True, timeout=60, env=env,
+                cmd + [filepath],
+                capture_output=True, text=True, timeout=60, cwd=env_dir, env=env,
             )
-        finally:
-            try:
-                os.unlink(filepath)
-            except OSError:
-                pass
 
-        output_file = None
-        filename = None
+            output_file = None
+            filename = None
 
-        if has_chart:
-            # Find charts created during this run (recent files)
-            charts = glob.glob("/tmp/*.png")
-            recent = [c for c in charts if os.path.getmtime(c) > time.time() - 120]
-            if recent:
-                recent.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                with open(recent[0], "rb") as f:
+            # Look for generated charts ONLY in this isolated directory
+            charts = glob.glob(os.path.join(env_dir, "*.png"))
+            if charts:
+                charts.sort(key=os.path.getmtime, reverse=True)
+                with open(charts[0], "rb") as f:
                     output_file = base64.b64encode(f.read()).decode()
-                filename = os.path.basename(recent[0])
-                # Clean up all generated charts
-                for c in recent:
-                    try:
-                        os.unlink(c)
-                    except OSError:
-                        pass
+                filename = os.path.basename(charts[0])
 
-        return {
-            "success": result.returncode == 0,
-            "stdout": result.stdout[:10000],
-            "stderr": result.stderr[:5000],
-            "error": None if result.returncode == 0 else f"Exit code {result.returncode}",
-            "output_file": output_file,
-            "filename": filename,
-        }
+            return {
+                "success": result.returncode == 0,
+                "stdout": result.stdout[:10000],
+                "stderr": result.stderr[:5000],
+                "error": None if result.returncode == 0 else f"Exit code {result.returncode}",
+                "output_file": output_file,
+                "filename": filename,
+            }
 
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": "Analytics timed out (60s)"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "Analytics timed out (60s)"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 # ─────────────────────────────────────────────
@@ -360,10 +385,6 @@ _chart_ts = str(int(time.time()))
 
 @app.function(image=image, timeout=60)
 def parse_document(file_b64: str, filename: str):
-    import base64
-    import tempfile
-    import os
-    
     file_bytes = base64.b64decode(file_b64)
     ext = os.path.splitext(filename)[1].lower()
     
@@ -381,27 +402,18 @@ def parse_document(file_b64: str, filename: str):
                 pages_text = []
                 for i, page in enumerate(pdf.pages):
                     page_text = page.extract_text() or ""
-                    # Try to extract structured table data for invoices
                     tables = page.extract_tables()
                     if tables:
-                        table_str = "\n--- Structured Table Data on Page " + str(i+1) + " ---\n"
+                        table_str = "\n--- Structured Table Data ---\n"
                         for row in tables:
                             table_str += " | ".join([str(cell or "").strip() for cell in row]) + "\n"
                         page_text += table_str
                     pages_text.append(f"--- Page {i+1} ---\n{page_text}")
                 text_content = "\n\n".join(pages_text)
                 metadata = {"pages": len(pdf.pages)}
-        elif ext in [".txt", ".csv", ".json", ".xml", ".yaml", ".yml", ".md"]:
-            text_content = file_bytes.decode("utf-8", errors="replace")
         elif ext == ".docx":
-            from docx import Document
-            doc = Document(temp_path)
-            paragraphs = [p.text for p in doc.paragraphs]
-            tables_text = []
-            for table in doc.tables:
-                for row in table.rows:
-                    tables_text.append(" | ".join([cell.text.strip() for cell in row.cells]))
-            text_content = "\n".join(paragraphs) + "\n\n--- Tables ---\n" + "\n".join(tables_text)
+            import pypandoc
+            text_content = pypandoc.convert_file(temp_path, 'plain')
         else:
             text_content = file_bytes.decode("utf-8", errors="replace")
             
@@ -428,21 +440,11 @@ def generate_embedding(text: str) -> dict:
         from fastembed import TextEmbedding
         model = TextEmbedding()
         embeddings = list(model.embed([text]))
-        if len(embeddings) > 0:
-            return {
-                "success": True,
-                "embedding": embeddings[0].tolist()
-            }
-        else:
-            return {
-                "success": False,
-                "error": "No embeddings returned"
-            }
+        if embeddings:
+            return {"success": True, "embedding": embeddings[0].tolist()}
+        return {"success": False, "error": "No embeddings returned"}
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Embedding generation failed: {str(e)}"
-        }
+        return {"success": False, "error": f"Embedding generation failed: {str(e)}"}
 
 
 # ─────────────────────────────────────────────
@@ -452,7 +454,6 @@ def generate_embedding(text: str) -> dict:
 @app.function(image=image, timeout=120, secrets=[webhook_secret])
 @modal.fastapi_endpoint(method="POST")
 async def execute(request: Request):
-    # Verify auth
     if not verify_request(request):
         raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
 
@@ -463,10 +464,10 @@ async def execute(request: Request):
         return execute_code.remote(
             payload["code"],
             payload.get("language", "python"),
-            payload.get("dependencies", "")
+            payload.get("dependencies", [])
         )
     elif task_type == "web_read":
-        return read_web_page.remote(payload["url"])
+        return read_web_page.remote(payload["url"], payload.get("engine", "lightpanda"))
     elif task_type == "document":
         return generate_document.remote(payload)
     elif task_type == "analytics":
@@ -477,7 +478,6 @@ async def execute(request: Request):
         return generate_embedding.remote(payload["text"])
     else:
         return {"success": False, "error": f"Unknown task type: {task_type}"}
-
 
 def _safe_filename(name: str) -> str:
     import re

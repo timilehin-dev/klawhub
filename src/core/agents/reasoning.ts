@@ -10,6 +10,8 @@ type Message = { role: "system" | "user" | "assistant"; content: string };
 
 const TOOL_CALL_PATTERN = /\[TOOL:(\w+)\]([\s\S]*?)\[\/TOOL\]/g;
 
+import { PERFORMANCE_LOGIC_MODULE } from "./performance-logic";
+
 interface ReasoningStep {
   stepNumber: number;
   action: string;
@@ -45,9 +47,11 @@ interface ChainResult {
 
 const PLANNER_SYSTEM_PROMPT = `You are a strategic planning agent. Given a user's request, create a detailed step-by-step plan to accomplish it.
 
+${PERFORMANCE_LOGIC_MODULE}
+
 Your plan must:
-1. Break the request into concrete, ordered steps
-2. For each step, specify which tool to use (if any) and what parameters
+1. Break the request into concrete, ordered steps. For complex tasks, STEP 1 should often be calling **sequential_thinking** to finalize the technical strategy.
+2. For each step, specify which tool to use (if any) and what parameters. PRIORITIZE FAST TOOLS (Polars, lxml, Crawl4AI).
 3. Think about dependencies between steps
 4. Consider potential failure points
 
@@ -56,13 +60,14 @@ Respond with your plan in this EXACT format:
 GOAL: <one sentence describing the goal>
 OUTCOME: <what the final result should look like>
 STEP 1: <action description> | tool: <tool_name or "none"> | params: <JSON or "none">
-REASONING: <why this step and why this order>
+REASONING: <why this step and why this order. Mention performance benefits of chosen tools.>
 STEP 2: <action description> | tool: <tool_name or "none"> | params: <JSON or "none">
 REASONING: <why>
 STEP 3: ...
 [/PLAN]
 
-Keep plans focused — maximum 6 steps. Each step should be concrete and verifiable.`;
+Keep plans focused — maximum 6 steps. Each step should be concrete and verifiable.
+`;
 
 const EXECUTOR_SYSTEM_PROMPT = `You are executing step {step_number} of a plan: "{goal}"
 

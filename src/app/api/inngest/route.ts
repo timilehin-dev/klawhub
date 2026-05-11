@@ -11,6 +11,8 @@ import { heartbeatWorkflow } from "@/workflows/heartbeat";
 import { taskMonitorWorkflow } from "@/workflows/task-monitor";
 import { coordinatedTaskWorkflow } from "@/workflows/coordinated-task";
 import { morningBriefWorkflow } from "@/workflows/morning-brief";
+import { agentCheckInWorkflow } from "@/workflows/agent-check-in";
+import { workflowLearningWorkflow } from "@/workflows/workflow-learning";
 
 export const maxDuration = 300;
 
@@ -27,7 +29,9 @@ export const { GET, POST, PUT } = serve({
     scheduleRunnerWorkflow, 
     heartbeatWorkflow, 
     taskMonitorWorkflow,
-    morningBriefWorkflow
+    morningBriefWorkflow,
+    agentCheckInWorkflow,
+    workflowLearningWorkflow
   ],
 });
 

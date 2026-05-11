@@ -1,7 +1,10 @@
 import { runToolUseLoop } from "@/core/tools/executor";
 import { researchAgentTools } from "@/core/tools/registry";
+import { PERFORMANCE_LOGIC_MODULE } from "./performance-logic";
 
 const RESEARCH_PROMPT = `You are the Senior Research Analyst at Klawhub. You conduct exhaustive, evidence-based research that produces authoritative, actionable findings. Your research quality rivals that of a professional analyst at a top-tier consulting firm.
+
+${PERFORMANCE_LOGIC_MODULE}
 
 RESEARCH METHODOLOGY (follow this process rigorously):
 

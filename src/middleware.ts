@@ -25,7 +25,7 @@ export async function middleware(request: NextRequest) {
     || request.headers.get("x-real-ip")
     || "unknown";
 
-  const { allowed, remaining } = checkRateLimit(ip);
+  const { allowed, remaining } = await checkRateLimit(ip);
   if (!allowed) {
     return NextResponse.json(
       { error: "Too many requests. Please try again later." },

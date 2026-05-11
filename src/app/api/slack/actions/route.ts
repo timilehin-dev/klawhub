@@ -241,19 +241,65 @@ export async function POST(req: NextRequest) {
       // ── Retry build ──
       if (action.action_id === "retry_build" && action.value) {
         try {
-          const value = JSON.parse(action.value);
-          await inngest.send({
-            name: "slack/build.requested",
-            data: {
-              slackChannelId: value.channelId,
-              slackThreadTs: value.threadTs,
-              slackUserId: value.userId,
-              messageText: value.request,
-              runId: value.runId,
-              teamId,
-            },
-          });
-        } catch { /* invalid JSON */ }
+          const runId = action.value;
+          const getDb = (await import("@/db")).getDb;
+          const { eq } = await import("drizzle-orm");
+          const { runs } = await import("@/db/schema");
+          
+          const dbRuns = await getDb().select().from(runs).where(eq(runs.id, runId));
+          const run = dbRuns[0];
+
+          if (run) {
+            await inngest.send({
+              name: "slack/build.requested",
+              data: {
+                slackChannelId: run.slackChannelId,
+                slackThreadTs: run.slackThreadTs || undefined,
+                slackUserId: run.slackUserId,
+                messageText: run.request,
+                runId: run.id,
+                teamId,
+              },
+            });
+          }
+        } catch (err) {
+          console.error("[SLACK-ACTIONS] Retry build failed:", err);
+        }
+        continue;
+      }
+
+      // ── Tool approval ──
+      if (action.action_id === "tool_approve" && action.value) {
+        try {
+          const actionId = action.value;
+          const getDb = (await import("@/db")).getDb;
+          const { eq } = await import("drizzle-orm");
+          const { pendingActions } = await import("@/db/schema");
+          const db = getDb();
+          
+          await db.update(pendingActions)
+            .set({ status: "approved" })
+            .where(eq(pendingActions.id, actionId));
+        } catch (err) {
+          console.error("[SLACK-ACTIONS] Tool approve failed:", err);
+        }
+        continue;
+      }
+
+      if (action.action_id === "tool_reject" && action.value) {
+        try {
+          const actionId = action.value;
+          const getDb = (await import("@/db")).getDb;
+          const { eq } = await import("drizzle-orm");
+          const { pendingActions } = await import("@/db/schema");
+          const db = getDb();
+          
+          await db.update(pendingActions)
+            .set({ status: "rejected" })
+            .where(eq(pendingActions.id, actionId));
+        } catch (err) {
+          console.error("[SLACK-ACTIONS] Tool reject failed:", err);
+        }
         continue;
       }
     }

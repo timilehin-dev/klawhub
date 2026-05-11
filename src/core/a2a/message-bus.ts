@@ -1,10 +1,17 @@
 import { Redis } from "@upstash/redis";
 
-// Use existing Upstash Redis
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+// Defensive Redis initialization — prevents crash if env vars are missing
+let redis: Redis | null = null;
+try {
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+  }
+} catch {
+  console.warn("[A2A] Redis initialization failed — message bus will no-op.");
+}
 
 export interface AgentMessage {
   from: string;
@@ -16,44 +23,56 @@ export interface AgentMessage {
 }
 
 export class A2AMessageBus {
-  private subscribers: Map<string, (message: AgentMessage) => void> = new Map();
-  private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (reason?: any) => void; timeout: NodeJS.Timeout }> = new Map();
+  // We removed local Maps to ensure Serverless statelessness
+  // Subscribers pull from Upstash Redis or poll responses
 
   async publish(channel: string, message: AgentMessage): Promise<void> {
+    if (!redis) return;
+    
+    // If it's a direct response to a requestResponse correlationId, store it
+    // so the stateless polling can pick it up across serverless environments
+    if (message.correlationId && message.type === 'response') {
+      await redis.set(`response:${message.correlationId}`, JSON.stringify(message.payload), { ex: 60 });
+    }
+    
+    // Also publish via standard Pub/Sub for standard subscribers
     await redis.publish(channel, JSON.stringify(message));
   }
 
   private subscriberClient: Redis | null = null;
  
   async subscribe(agentName: string, handler: (message: AgentMessage) => void): Promise<void> {
-    this.subscribers.set(agentName, handler);
- 
-    if (!this.subscriberClient) {
-      this.subscriberClient = new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      });
+    if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+      console.warn(`[A2A] Redis env vars missing. Cannot subscribe ${agentName}.`);
+      return;
     }
  
-    // Note: Upstash Redis REST 'subscribe' is actually a long-polling or webhook-based 
-    // mechanism depending on the exact package version. Reusing the client is safer.
-    (this.subscriberClient as any).subscribe(`agent:${agentName}`, (rawMessage: any) => {
-      try {
-        const message: AgentMessage = typeof rawMessage === "string" ? JSON.parse(rawMessage) : rawMessage;
-        if (message.correlationId) {
-          const pending = this.pendingRequests.get(message.correlationId);
-          if (pending) {
-            clearTimeout(pending.timeout);
-            this.pendingRequests.delete(message.correlationId);
-            pending.resolve(message.payload);
-            return;
-          }
-        }
-        handler(message);
-      } catch (err) {
-        console.error(`[A2A] Failed to parse message for ${agentName}:`, err);
-      }
+    const client = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
     });
+ 
+    // Simulate long-lived subscription via polling list queue
+    console.log(`[A2A] Starting simulated REST subscription polling for agent:${agentName}`);
+    
+    // Background polling loop
+    (async () => {
+      while (true) {
+        try {
+          const rawMessage = await client.rpop(`queue:agent:${agentName}`);
+          if (rawMessage) {
+            const message: AgentMessage = typeof rawMessage === "string" ? JSON.parse(rawMessage) : (rawMessage as unknown as AgentMessage);
+            handler(message);
+          } else {
+            // No message, delay before polling again
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        } catch (err) {
+          console.error(`[A2A] Polling failed for ${agentName}:`, err);
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      }
+    })();
   }
 
   async sendMessage(to: string, message: Omit<AgentMessage, 'timestamp' | 'to'>): Promise<void> {
@@ -74,18 +93,11 @@ export class A2AMessageBus {
     await this.publish('agent:broadcast', fullMessage);
   }
 
-  // For direct coordination (simpler than pub/sub for initial implementation)
+  // Stateless coordination for serverless
   async requestResponse(from: string, to: string, payload: any, timeoutMs = 30000): Promise<any> {
-    const correlationId = `req_${Date.now()}_${Math.random()}`;
+    if (!redis) throw new Error("Redis not configured");
 
-    const promise = new Promise<any>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(correlationId);
-        reject(new Error('Request timeout'));
-      }, timeoutMs);
-
-      this.pendingRequests.set(correlationId, { resolve, reject, timeout });
-    });
+    const correlationId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
     await this.sendMessage(to, {
       from,
@@ -94,7 +106,23 @@ export class A2AMessageBus {
       correlationId,
     });
 
-    return promise;
+    // Stateless polling for the response key
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      const responseStr = await redis.get(`response:${correlationId}`);
+      if (responseStr) {
+        await redis.del(`response:${correlationId}`);
+        try {
+          return typeof responseStr === 'string' ? JSON.parse(responseStr) : responseStr;
+        } catch {
+          return responseStr;
+        }
+      }
+      // Delay before polling again - optimized for responsiveness
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    throw new Error(`Request timeout for ${correlationId}`);
   }
 }
 

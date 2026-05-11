@@ -50,7 +50,7 @@ export function getProviders(): ProviderConfig[] {
     "ollama_engineer",
     process.env.OLLAMA_BASE_URL || "https://api.ollama.com/v1",
     ["OLLAMA_API_KEY_1", "OLLAMA_API_KEY_2", "OLLAMA_API_KEY_3"],
-    process.env.OLLAMA_ENGINEER_MODEL || "kimi-k2.6:cloud",
+    process.env.OLLAMA_ENGINEER_MODEL || "deepseek-v4-flash:cloud",
     "ollama"
   );
   if (ollamaEngineer) providers.push(ollamaEngineer);

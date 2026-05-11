@@ -122,7 +122,7 @@ export function retryBlocks(
           type: "button" as const,
           action_id: "retry_build",
           text: { type: "plain_text" as const, text: "Retry Build" },
-          value: JSON.stringify({ runId, channelId, threadTs, userId, request }),
+          value: runId,
         },
       ],
     },

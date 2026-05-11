@@ -220,6 +220,65 @@ export async function githubListEvents(workspaceId: string, pageSize = 30) {
   }));
 }
 
+export async function githubUpdateFile(workspaceId: string, owner: string, repo: string, path: string, content: string, message: string, sha?: string) {
+  const token = await getAccessToken(workspaceId, "github");
+  if (!token) throw new Error("GitHub is not connected");
+
+  let currentSha = sha;
+  if (!currentSha) {
+    try {
+      const getResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
+      });
+      if (getResp.ok) {
+        const getData = await getResp.json();
+        currentSha = getData.sha;
+      }
+    } catch { /* ignore */ }
+  }
+
+  const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message,
+      content: Buffer.from(content).toString("base64"),
+      sha: currentSha,
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`GitHub update file failed: ${resp.status} - ${errText}`);
+  }
+  return await resp.json();
+}
+
+export async function githubCreatePullRequest(workspaceId: string, owner: string, repo: string, title: string, head: string, base: string, body?: string) {
+  const token = await getAccessToken(workspaceId, "github");
+  if (!token) throw new Error("GitHub is not connected");
+
+  const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title, head, base, body }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`GitHub create PR failed: ${resp.status} - ${errText}`);
+  }
+  return await resp.json();
+}
+
 // ═══════════════════════════════════════════════════════════
 // GMAIL
 // ═══════════════════════════════════════════════════════════

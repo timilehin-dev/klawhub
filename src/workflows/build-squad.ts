@@ -215,7 +215,7 @@ export const buildSquadWorkflow = inngest.createFunction(
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*QA Agent* -- Test 1: ${result.passed ? "PASS" : "FAIL"}\n${qaBrief}`,
+          `*QA Agent* -- Test 1: ${result.passed ? "PASS" : "FAIL"}\n${qaBrief}${result.passed ? "\n_Checking for deployment targets..._" : ""}`,
           undefined,
           teamId
         );

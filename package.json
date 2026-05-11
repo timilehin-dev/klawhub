@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:push": "dotenv -e .env.local -- drizzle-kit push",
+    "db:push": "dotenv -e .env.local -- drizzle-kit push && dotenv -e .env.local -- node scratch/apply_rls.js",
     "db:studio": "drizzle-kit studio",
     "lint": "next lint"
   },

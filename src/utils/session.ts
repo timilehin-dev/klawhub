@@ -157,39 +157,44 @@ export function verifyOAuthState(state: string): { provider: string; workspaceId
   return { provider, workspaceId };
 }
 
-// ── Rate Limiting (in-memory, per-IP) ──
+import { Redis } from "@upstash/redis";
 
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 60; // per window
-const RATE_LIMIT_CLEANUP_INTERVAL = 5 * 60_000; // clean up every 5 min
+const RATE_LIMIT_WINDOW_SECONDS = 60; 
+const RATE_LIMIT_MAX_REQUESTS = 60; 
 
-function cleanupRateLimits() {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitMap) {
-    if (now > entry.resetAt + RATE_LIMIT_WINDOW_MS) {
-      rateLimitMap.delete(key);
-    }
+let redis: Redis | null = null;
+try {
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
   }
+} catch {
+  // Fallback to allowed if Redis fails to avoid blocking users
 }
 
 /**
  * Check rate limit for an IP address.
- * Returns true if the request is allowed, false if rate limited.
+ * Uses Redis for persistence across serverless cold starts.
  */
-export function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
-  // Periodic cleanup
-  if (rateLimitMap.size > 1000) cleanupRateLimits();
-
-  const now = Date.now();
-  let entry = rateLimitMap.get(ip);
-
-  if (!entry || now > entry.resetAt) {
-    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
-    rateLimitMap.set(ip, entry);
+export async function checkRateLimit(ip: string): Promise<{ allowed: boolean; remaining: number }> {
+  if (!redis) {
+    return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS };
   }
 
-  entry.count++;
-  const remaining = Math.max(0, RATE_LIMIT_MAX_REQUESTS - entry.count);
-  return { allowed: entry.count <= RATE_LIMIT_MAX_REQUESTS, remaining };
+  const key = `rate_limit:${ip}`;
+  try {
+    const count = await redis.incr(key);
+    
+    if (count === 1) {
+      await redis.expire(key, RATE_LIMIT_WINDOW_SECONDS);
+    }
+
+    const remaining = Math.max(0, RATE_LIMIT_MAX_REQUESTS - count);
+    return { allowed: count <= RATE_LIMIT_MAX_REQUESTS, remaining };
+  } catch (err) {
+    console.error("[RATE-LIMIT] Redis error:", err);
+    return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS };
+  }
 }

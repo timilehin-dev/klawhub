@@ -34,9 +34,15 @@ export const messageHandlerWorkflow = inngest.createFunction(
       },
     ],
   },
-  { event: "slack/message.received" },
+  { event: "slack/event.received" },
   async ({ event, step }): Promise<void> => {
     const { event: slackEvent, eventId, teamId } = event.data as MessageEventData;
+
+    // Only process "message" or "app_mention" events here.
+    // "reaction_added" is handled by the workflow-learning loop.
+    if (slackEvent.type !== "message" && slackEvent.type !== "app_mention") {
+      return;
+    }
 
     const channelId = slackEvent.channel as string;
     const messageTs = slackEvent.ts as string;

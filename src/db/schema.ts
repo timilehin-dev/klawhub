@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, boolean, integer, customType, unique } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, jsonb, boolean, integer, customType, unique, index } from "drizzle-orm/pg-core";
 import type { Intent } from "@/types";
 
 // ── Custom pgvector Column Type ──
@@ -24,6 +24,27 @@ export const tsvector = customType<{ data: string }>({
   },
 });
 
+// ── Workspaces: one per Slack workspace that installs Klawhub ──
+
+export const workspaces = pgTable("workspaces", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slackTeamId: text("slack_team_id").notNull().unique(),
+  slackBotUserId: text("slack_bot_user_id").notNull(),
+  botToken: text("bot_token"),
+  name: text("name").notNull(),
+  domain: text("domain"),
+  plan: text("plan").$type<"free" | "pro" | "enterprise">().default("free").notNull(),
+  monthlyRunLimit: integer("monthly_run_limit").default(50).notNull(),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  isActive: boolean("is_active").default(true).notNull(),
+  agentName: text("agent_name").default("Klawhub").notNull(),
+  agentPersonality: text("agent_personality"),
+  enabledSkills: jsonb("enabled_skills").$type<string[]>().default(["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator"]).notNull(),
+  installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
 
 // ── Runs: tracks app/script build requests ──
 
@@ -44,7 +65,9 @@ export const runs = pgTable("runs", {
   finalOutput: text("final_output"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  index("idx_runs_workspace_status").on(t.workspaceId, t.status),
+]);
 
 // ── Tasks: tracks document, research, analytics requests ──
 
@@ -63,7 +86,9 @@ export const tasks = pgTable("tasks", {
   outputFilename: text("output_filename"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  index("idx_tasks_workspace_status").on(t.workspaceId, t.status),
+]);
 
 // ── Memory: per-user persistent context ──
 
@@ -76,7 +101,9 @@ export const memory = pgTable("memory", {
   embedding: vector("embedding"),
   searchVector: tsvector("search_vector"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  index("idx_memory_workspace_user").on(t.workspaceId, t.slackUserId),
+]);
 
 // ── Skills: registry of coworker capabilities ──
 
@@ -106,13 +133,13 @@ export const skillUsage = pgTable("skill_usage", {
 
 export const schedules = pgTable("schedules", {
   id: uuid("id").primaryKey().defaultRandom(),
-  slackUserId: text("slack_user_id").notNull(),       // "system" for system-level schedules
-  slackTeamId: text("slack_team_id"),                      // workspace/team ID for multi-tenant support
+  slackUserId: text("slack_user_id").notNull(),
+  slackTeamId: text("slack_team_id"),
   name: text("name").notNull(),
-  cronExpr: text("cron_expr").notNull(),              // standard 5-field cron: "0 9 * * 1-5"
+  cronExpr: text("cron_expr").notNull(),
   timezone: text("timezone").default("UTC"),
-  action: text("action").notNull(),                    // the prompt/task to execute
-  channelId: text("channel_id"),                      // where to post results
+  action: text("action").notNull(),
+  channelId: text("channel_id"),
   isActive: boolean("is_active").default(true),
   lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
   lastRunStatus: text("last_run_status").$type<"success" | "error" | "skipped">(),
@@ -120,7 +147,9 @@ export const schedules = pgTable("schedules", {
   failCount: integer("fail_count").default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  index("idx_schedules_team_active").on(t.slackTeamId, t.isActive),
+]);
 
 // ── Knowledge: structured entity memory (projects, people, events) ──
 
@@ -138,36 +167,14 @@ export const knowledge = pgTable("knowledge", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
-// ── Workspaces: one per Slack workspace that installs Klawhub ──
-
-export const workspaces = pgTable("workspaces", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  slackTeamId: text("slack_team_id").notNull().unique(),   // Slack workspace/team ID
-  slackBotUserId: text("slack_bot_user_id").notNull(),      // The bot's user ID in this workspace
-  botToken: text("bot_token"),                               // Workspace-specific bot token from OAuth
-  name: text("name").notNull(),                              // Workspace name from Slack
-  domain: text("domain"),                                    // workspace slug (e.g. "acme-corp")
-  plan: text("plan").$type<"free" | "pro" | "enterprise">().default("free").notNull(),
-  monthlyRunLimit: integer("monthly_run_limit").default(50).notNull(),
-  stripeCustomerId: text("stripe_customer_id"),
-  stripeSubscriptionId: text("stripe_subscription_id"),
-  isActive: boolean("is_active").default(true).notNull(),
-  agentName: text("agent_name").default("Klawhub").notNull(),
-  agentPersonality: text("agent_personality"),
-  enabledSkills: jsonb("enabled_skills").$type<string[]>().default(["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator"]).notNull(), // Remove 'email_dispatch' until Phase 6 is complete
-  installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
-
 // ── Workspace Members: Slack users who have used Klawhub in a workspace ──
 
 export const workspaceMembers = pgTable("workspace_members", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   slackUserId: text("slack_user_id").notNull(),
-  slackUserName: text("slack_user_name"),                   // display name
-  slackUserEmail: text("slack_user_email"),                 // email (if available)
+  slackUserName: text("slack_user_name"),
+  slackUserEmail: text("slack_user_email"),
   isWorkspaceAdmin: boolean("is_workspace_admin").default(false).notNull(),
   lastActiveAt: timestamp("last_active_at", { withTimezone: true }).defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -194,7 +201,9 @@ export const integrations = pgTable("integrations", {
   lastError: text("last_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  index("idx_integrations_workspace_provider").on(t.workspaceId, t.provider),
+]);
 
 // ── Webhooks: custom integration targets ──
 
@@ -226,15 +235,14 @@ export const engineerLearnings = pgTable("engineer_learnings", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-// ── Processed Events: DB-backed dedup — survives serverless cold starts ──
+// ── Processed Events: DB-backed dedup ──
 
 export const processedEvents = pgTable("processed_events", {
   eventId: text("event_id").primaryKey(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
-
-// ── Intent list for classifier ──
-export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];
+}, (t) => [
+  index("idx_processed_events_created").on(t.createdAt),
+]);
 
 // ── Agent States: persistent state for A2A coordination ──
 
@@ -268,20 +276,37 @@ export const usageLogs = pgTable("usage_logs", {
   runId: uuid("run_id"),
   taskId: uuid("task_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  index("idx_usage_logs_workspace_created").on(t.workspaceId, t.createdAt),
+]);
 
-
-// ── Workflow Learnings: Phase 7 feedback loop ──
+// ── Workflow Learnings ──
 
 export const workflowLearnings = pgTable("workflow_learnings", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
   slackUserId: text("slack_user_id").notNull(),
-  category: text("category").default("general").notNull(), // general, document, research, analytics
+  category: text("category").default("general").notNull(),
   triggerPrompt: text("trigger_prompt").notNull(),
-  feedback: text("feedback").notNull(), // what the user corrected
-  correction: text("correction").notNull(), // corrected instruction or state
-  rating: integer("rating").default(1).notNull(), // 1 for thumbs up, -1 for thumbs down
+  feedback: text("feedback").notNull(),
+  correction: text("correction").notNull(),
+  rating: integer("rating").default(1).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
+
+// ── Pending Actions: stores tool calls that require human approval (HITL) ──
+
+export const pendingActions = pgTable("pending_actions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  slackUserId: text("slack_user_id").notNull(),
+  slackChannelId: text("slack_channel_id").notNull(),
+  toolName: text("tool_name").notNull(),
+  params: jsonb("params").notNull(),
+  status: text("status").$type<"pending" | "approved" | "rejected">().default("pending").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];

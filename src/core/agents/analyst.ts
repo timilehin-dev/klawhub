@@ -2,10 +2,14 @@ import { agentChat } from "@/core/llm";
 import { sandbox } from "@/core/tools/sandbox";
 import type { SandboxResponse } from "@/types";
 
+import { PERFORMANCE_LOGIC_MODULE } from "./performance-logic";
+
 const ANALYST_PROMPT = `You are the Data Analyst Agent of Klawhub. You write Python analysis code and generate business-grade visualizations.
 
+${PERFORMANCE_LOGIC_MODULE}
+
 RULES:
-1. Write Python code using pandas, matplotlib, and seaborn as needed.
+1. Write Python code. PRIORITIZE using **Polars** (import polars as pl) over pandas for faster, more efficient data manipulation.
 2. Always set matplotlib.use('Agg') before importing pyplot.
 3. Save charts as PNG files to /tmp/ with descriptive filenames (use timestamp to avoid collisions).
 4. Include statistical insights: trends, outliers, correlations.

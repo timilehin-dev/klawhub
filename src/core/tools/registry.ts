@@ -11,14 +11,19 @@ import {
   createSchedule,
   deleteSchedule,
   schedules,
+  pendingActions,
+  getDb,
 } from "@/db";
 import {
   searchKnowledge,
 } from "@/db/knowledge";
+import { slack, postToThread } from "@/integrations/slack/client";
+import { githubUpdateFile, githubCreatePullRequest } from "@/integrations/clients";
 import { conductResearch } from "@/core/agents/researcher";
 import { createSpec } from "@/core/agents/pm";
 import { writeCodeFromLearnings, fixCode } from "@/core/agents/engineer";
 import { testCode } from "@/core/agents/qa";
+import { sequentialThinkingTool } from "./sequential-thinking";
 
 // ── Tool Types ──
 
@@ -36,13 +41,93 @@ export interface ToolDefinition {
 }
 
 export interface ToolContext {
+  workspaceId?: string;
   slackUserId?: string;
+  slackChannelId?: string;
+  slackThreadTs?: string;
   runId?: string;
   taskId?: string;
-  workspaceId?: string;  // needed for integration tools
-  slackChannelId?: string; // needed for dispatch tool
-  slackThreadTs?: string;  // needed for dispatch tool
-  slackTeamId?: string;    // needed for dispatch tool
+  slackTeamId?: string;
+  isApproved?: boolean; // Set to true when resuming an approved tool call
+  pendingActionId?: string;
+}
+
+// ── HITL Helper ──
+
+function hashParams(toolName: string, params: any): string {
+  const str = JSON.stringify({ toolName, params }, Object.keys({ toolName, params }).sort());
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString();
+}
+
+async function requestHumanApproval(toolName: string, params: any, ctx: ToolContext) {
+  const db = getDb();
+  const workspaceId = requireWorkspace(ctx);
+  const paramHash = hashParams(toolName, params);
+  
+  // Check if already approved
+  const existing = await db.select().from(pendingActions).where(
+    require("drizzle-orm").and(
+      require("drizzle-orm").eq(pendingActions.workspaceId, workspaceId),
+      require("drizzle-orm").eq(pendingActions.toolName, toolName),
+      require("drizzle-orm").eq(pendingActions.status, "approved")
+    )
+  );
+  
+  // Filter for same params (hash collision check)
+  const approved = existing.find(a => hashParams(a.toolName, a.params) === paramHash);
+  if (approved) return null; // Approved! Proceed.
+
+  if (!ctx.slackUserId || !ctx.slackChannelId) {
+    throw new Error(`Cannot request approval for "${toolName}": Missing user or channel context.`);
+  }
+
+  const [action] = await db.insert(pendingActions).values({
+    workspaceId: workspaceId,
+    slackUserId: ctx.slackUserId,
+    slackChannelId: ctx.slackChannelId,
+    toolName,
+    params,
+    status: "pending",
+  }).returning();
+
+  const blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `🛡️ *Action Approval Required*\nAn agent wants to perform a sensitive operation: \`${toolName}\`\n\n*Parameters:*\n\`\`\`${JSON.stringify(params, null, 2)}\`\`\``,
+      },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          action_id: "tool_approve",
+          text: { type: "plain_text", text: "Approve" },
+          style: "primary",
+          value: action.id,
+        },
+        {
+          type: "button",
+          action_id: "tool_reject",
+          text: { type: "plain_text", text: "Reject" },
+          style: "danger",
+          value: action.id,
+        },
+      ],
+    },
+  ];
+
+  await postToThread(ctx.slackChannelId || "", ctx.slackThreadTs || "", "I need your approval for a GitHub write operation.", { blocks });
+
+  return `[PENDING_APPROVAL] This action requires your approval in Slack. I have sent an approval request to the thread. Once you approve it, please tell me to "continue" or "retry".`;
 }
 
 export interface ToolCall {
@@ -380,7 +465,62 @@ const githubIssuesTool: ToolDefinition = {
   },
 };
 
+const githubUpdateFileTool: ToolDefinition = {
+  name: "github_update_file",
+  description: "Update the content of an existing file in a GitHub repository. REQUIRES HUMAN APPROVAL. You must provide the file path, new content, and a commit message.",
+  parameters: {
+    owner: { type: "string", description: "Repository owner", required: true },
+    repo: { type: "string", description: "Repository name", required: true },
+    path: { type: "string", description: "File path within the repo", required: true },
+    content: { type: "string", description: "The new file content", required: true },
+    message: { type: "string", description: "Commit message", required: true },
+    sha: { type: "string", description: "Optional current file SHA (recommended to prevent conflicts)" },
+  },
+  async execute(params, ctx) {
+    const approvalRequired = await requestHumanApproval("github_update_file", params, ctx);
+    if (approvalRequired) return approvalRequired;
 
+    const result = await githubUpdateFile(
+      requireWorkspace(ctx),
+      params.owner,
+      params.repo,
+      params.path,
+      params.content,
+      params.message,
+      params.sha
+    );
+    return `Successfully updated file: ${params.path}\nURL: ${result.content?.html_url || "N/A"}`;
+  },
+};
+
+const githubCreatePullRequestTool: ToolDefinition = {
+  name: "github_create_pull_request",
+  description: "Create a new pull request in a GitHub repository. REQUIRES HUMAN APPROVAL. You must provide the PR title, head branch, and base branch.",
+  parameters: {
+    owner: { type: "string", description: "Repository owner", required: true },
+    repo: { type: "string", description: "Repository name", required: true },
+    title: { type: "string", description: "PR title", required: true },
+    head: { type: "string", description: "The name of the branch where your changes are implemented", required: true },
+    base: { type: "string", description: "The name of the branch you want the changes pulled into (e.g., main)", required: true },
+    body: { type: "string", description: "PR description body" },
+  },
+  async execute(params, ctx) {
+    const { githubCreatePullRequest } = await import("@/integrations/clients");
+    const approvalRequired = await requestHumanApproval("github_create_pull_request", params, ctx);
+    if (approvalRequired) return approvalRequired;
+
+    const result = await githubCreatePullRequest(
+      requireWorkspace(ctx),
+      params.owner,
+      params.repo,
+      params.title,
+      params.head,
+      params.base,
+      params.body
+    );
+    return `Successfully created pull request: ${params.title}\nURL: ${result.html_url}`;
+  },
+};
 
 // ── Browser Automation Tools (require BROWSER_WS_URL env var) ──
 
@@ -926,6 +1066,8 @@ export const allTools: ToolDefinition[] = [
   githubSearchTool,
   githubReadFileTool,
   githubIssuesTool,
+  githubUpdateFileTool,
+  githubCreatePullRequestTool,
   // Browser automation tools
   browserBrowseTool,
   browserScrapeTool,
@@ -943,6 +1085,7 @@ export const allTools: ToolDefinition[] = [
   scheduleToggleTool,
   scheduleListPresetsTool,
   slackListChannelsTool,
+  sequentialThinkingTool,
 ];
 
 export function getToolsByName(names: string[]): ToolDefinition[] {
@@ -992,6 +1135,8 @@ export const generalAgentTools: ToolDefinition[] = [
   scheduleToggleTool,
   scheduleListPresetsTool,
   slackListChannelsTool,
+  sequentialThinkingTool,
+
 ];
 
 /** Tools available to the PM Agent (research for specs) */
@@ -1000,6 +1145,12 @@ export const pmAgentTools: ToolDefinition[] = [
   webReadTool,
   browserBrowseTool,
   browserScrapeTool,
+  googleDriveSearchTool,
+  googleDriveReadTool,
+  githubIssuesTool,
+  memorySearchTool,
+  knowledgeSearchTool,
+  sequentialThinkingTool,
 ];
 
 /** Tools available to the Research Agent (deep research) */
@@ -1010,12 +1161,22 @@ export const researchAgentTools: ToolDefinition[] = [
   browserScrapeTool,
   browserLinksTool,
   browserInteractTool,
+  parseDocumentTool,
+  memorySearchTool,
+  knowledgeSearchTool,
+  googleDriveSearchTool,
+  sequentialThinkingTool,
 ];
 
 /** Tools available to the Analyst Agent (code execution) */
 export const analystAgentTools: ToolDefinition[] = [
   codeExecuteTool,
   webSearchTool,
+  webReadTool,
+  browserBrowseTool,
+  parseDocumentTool,
+  memorySearchTool,
+  sequentialThinkingTool,
 ];
 
 /** Tools available to the Engineer Agent (research + code verification + docs browsing) */
@@ -1024,12 +1185,27 @@ export const engineerAgentTools: ToolDefinition[] = [
   webReadTool,
   codeExecuteTool,
   browserBrowseTool,
+  githubSearchTool,
+  githubReadFileTool,
+  githubIssuesTool,
+  parseDocumentTool,
+  memorySearchTool,
+  knowledgeSearchTool,
+  sequentialThinkingTool,
 ];
 
-/** Tools available to the QA Agent (code evaluation + library verification) */
+/** Tools available to the QA Agent (code evaluation + deployment) */
 export const qaAgentTools: ToolDefinition[] = [
   webSearchTool,
   webReadTool,
+  codeExecuteTool,
+  githubSearchTool,
+  githubReadFileTool,
+  githubIssuesTool,
+  githubUpdateFileTool,
+  githubCreatePullRequestTool,
+  memorySearchTool,
+  sequentialThinkingTool,
 ];
 
 // ── Tool Description Formatter ──

@@ -94,11 +94,12 @@ CODE STRUCTURE (follow this order):
 OUTPUT FORMAT (CRITICAL - FOLLOW EXACTLY):
 You MUST return ONLY a single markdown code block containing the complete, executable code.
 NO explanatory text before or after the code block.
-NO intermediate thoughts, planning, or research summaries.
+If you are responding to QA feedback, focus ONLY on the fix and return the full updated code.
+NO intermediate thoughts, planning, or research summaries in the final response.
 The code block MUST have the correct language tag (\`\`\`python or \`\`\`javascript).
 Include a brief docstring/JSDoc at the top explaining usage.
 If you need to research, do it internally and output ONLY the final code.
-Failure to provide the code block will cause a system execution error. Do not write friendly conversational intros or outros like "Sure! Here is your code:" or "I hope this helps!". Just output the code block.`;
+Failure to provide the code block will cause a system execution error.`;
 
 const FIX_PROMPT = `You are a Distinguished Engineer performing surgical bug fixes. Analyze the error with extreme precision and apply the minimum change that resolves it completely.
 

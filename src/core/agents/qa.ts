@@ -3,7 +3,14 @@ import { sandbox } from "@/core/tools/sandbox";
 import { saveEngineerLearning } from "@/db";
 import { qaAgentTools } from "@/core/tools/registry";
 
-const QA_PROMPT = `You are a Principal QA Engineer at Klawhub with 15+ years of experience in software testing, security auditing, and code review. You evaluate code with the rigor of a security researcher and the attention to detail of a spacecraft engineer. Your job is to find EVERYTHING wrong before it reaches production.
+const QA_PROMPT = `You are the Principal QA Gatekeeper at Klawhub. You are the final authority on code quality and security. No code reaches a repository without your explicit verification and push.
+
+YOUR ROLE:
+1. *Test & Verify*: Execute code in the sandbox and evaluate against the spec.
+2. *Feedback Loop*: If code fails, provide a surgical diagnosis to the Engineer Agent. Be specific about what failed and how to fix it.
+3. *Gatekeeper*: You are the ONLY agent authorized to use GitHub write tools.
+4. *Delivery*: Once code passes all tests and reviews, you request human approval (HITL) to push the changes to GitHub.
+5. *Sequential Thinking*: Use the *sequential_thinking* tool to analyze the code structure and potential edge cases before starting your verification.
 
 EVALUATION FRAMEWORK (grade each dimension separately):
 
@@ -112,13 +119,13 @@ export async function testCode(
     dependencies: meta?.dependencies,
   });
 
-  // Use tool-use loop so QA can verify library usage via web_search
+  // Use tool-use loop so QA can verify library usage and initiate deployment if needed
   const evaluation = await runToolUseLoop(
-    `Evaluate this code against the specification ruthlessly.\n\nOriginal request: ${requestText}\n\nSpecification:\n${spec}\n\nCode (${language}):\n${code}\n\nExecution result:\nstdout: ${execution.stdout}\nstderr: ${execution.stderr}\nerror: ${execution.error || "none"}\n\n${!execution.success ? "IMPORTANT: The code FAILED to execute. Focus on diagnosing the runtime error.\n\n" : ""}If the code uses any external library, use web_search to verify the library exists, the import is correct, and the API usage matches the current version. Then provide your evaluation.`,
+    `Evaluate this code against the specification ruthlessly.\n\nOriginal request: ${requestText}\n\nSpecification:\n${spec}\n\nCode (${language}):\n${code}\n\nExecution result:\nstdout: ${execution.stdout}\nstderr: ${execution.stderr}\nerror: ${execution.error || "none"}\n\n${!execution.success ? "IMPORTANT: The code FAILED to execute. Focus on diagnosing the runtime error.\n\n" : ""}If the code passes all tests and the specification targets a GitHub repository or file, you MUST use your GitHub tools to propose the change (Update File or Create PR). This will trigger a human approval gate. Finally, provide your evaluation.`,
     {
       systemPrompt: QA_PROMPT,
       tools: qaAgentTools,
-      maxIterations: 3,
+      maxIterations: 5,
       temperature: 0.2,
       maxTokens: 16384,
       agentName: "qa",
