@@ -8,6 +8,15 @@ export function createWorkspace(values: typeof workspaces.$inferInsert) {
   return getDb().insert(workspaces).values(values).returning();
 }
 
+export async function upsertWorkspace(values: typeof workspaces.$inferInsert) {
+  const existing = await getWorkspaceByTeamId(values.slackTeamId);
+  if (existing && existing.length > 0) {
+    return updateWorkspace(existing[0].id, values);
+  } else {
+    return createWorkspace(values);
+  }
+}
+
 export function getWorkspaceByTeamId(teamId: string) {
   return getDb().select().from(workspaces).where(eq(workspaces.slackTeamId, teamId)).limit(1);
 }

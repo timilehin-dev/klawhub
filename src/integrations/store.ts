@@ -191,8 +191,8 @@ export async function refreshAccessToken(
 }
 
 function getProviderCredentialsFromConfig(provider: OAuthProviderConfig) {
-  const clientId = process.env[provider.clientIdEnv];
-  const clientSecret = process.env[provider.clientSecretEnv];
+  const clientId = process.env[provider.clientIdEnv] || process.env[`NEXT_PUBLIC_${provider.clientIdEnv}`];
+  const clientSecret = process.env[provider.clientSecretEnv] || process.env[`NEXT_PUBLIC_${provider.clientSecretEnv}`];
   if (!clientId) throw new Error(`${provider.clientIdEnv} is not set`);
   if (!clientSecret) throw new Error(`${provider.clientSecretEnv} is not set`);
   return { clientId, clientSecret };
