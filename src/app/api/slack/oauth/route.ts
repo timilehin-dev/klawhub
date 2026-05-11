@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { upsertWorkspace } from '@/db/workspaces';
+import { signWorkspaceId } from '@/utils/session';
 
 const SLACK_CLIENT_ID = process.env.SLACK_CLIENT_ID || process.env.NEXT_PUBLIC_SLACK_CLIENT_ID;
 const SLACK_CLIENT_SECRET = process.env.SLACK_CLIENT_SECRET;
@@ -75,7 +76,7 @@ export async function GET(request: Request) {
     }
 
     // Success! Save/Update the workspace in our database
-    await upsertWorkspace({
+    const upserted = await upsertWorkspace({
       slackTeamId: data.team.id,
       slackBotUserId: data.bot_user_id,
       botToken: data.access_token,
@@ -83,8 +84,25 @@ export async function GET(request: Request) {
       isActive: true,
     });
 
-    // Redirect to the install page with a success message
-    return NextResponse.redirect(`${origin}/install?success=1&workspace=${encodeURIComponent(data.team.name)}`);
+    // Ensure we have the workspace ID (Drizzle returning() gives an array)
+    const workspace = Array.isArray(upserted) ? upserted[0] : upserted;
+    const workspaceId = workspace.id;
+
+    // Sign the workspace ID for the session cookie
+    const signedSession = await signWorkspaceId(workspaceId);
+
+    // Redirect to the install page with a success message and set the session cookie
+    const response = NextResponse.redirect(`${origin}/install?success=1&workspace=${encodeURIComponent(data.team.name)}`);
+    
+    response.cookies.set("kh_auth_session", signedSession, {
+      path: "/",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      sameSite: "lax",
+    });
+
+    return response;
   } catch (error) {
     console.error("[SLACK-OAUTH] Error during token exchange:", error);
     return NextResponse.redirect(`${origin}/install?error=exchange_error`);

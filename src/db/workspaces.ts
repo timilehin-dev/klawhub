@@ -26,7 +26,7 @@ export function getWorkspaceById(id: string) {
 }
 
 export function updateWorkspace(id: string, updates: Partial<typeof workspaces.$inferInsert>) {
-  return getDb().update(workspaces).set({ ...updates, updatedAt: new Date() }).where(eq(workspaces.id, id));
+  return getDb().update(workspaces).set({ ...updates, updatedAt: new Date() }).where(eq(workspaces.id, id)).returning();
 }
 
 export function getAllWorkspaces() {
