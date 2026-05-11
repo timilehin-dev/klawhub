@@ -107,17 +107,31 @@ function parsePlan(response: string): ReasoningPlan | null {
   const goal = goalMatch?.[1]?.trim() || "Unknown";
   const expectedOutcome = outcomeMatch?.[1]?.trim() || "Complete the request";
 
-  const stepMatches = [...planText.matchAll(/STEP (\d+):\s*(.+?)\s*\|\s*tool:\s*(\w+|none)\s*\|\s*params:\s*(.+?)(?=\n|$)/gi)];
-  const reasoningMatches = [...planText.matchAll(/REASONING:\s*(.+?)(?=\n\n|\nSTEP|\[\/PLAN\]|$)/gi)];
+  const stepMatches = [...planText.matchAll(/STEP (\d+):\s*(.+?)\s*\|\s*tool:\s*(\w+|none)\s*\|\s*params:\s*([\s\S]*?)(?=\nSTEP \d+:|\[\/PLAN\]|$)/gi)]; // Adjusted regex for params and next step boundary
+  const reasoningMatches = [...planText.matchAll(/REASONING:\s*([\s\S]*?)(?=\nSTEP \d+:|\[\/PLAN\]|$)/gi)]; // Adjusted regex for next step boundary
 
-  const steps: ReasoningStep[] = stepMatches.map((match, i) => ({
-    stepNumber: parseInt(match[1]),
-    action: match[2].trim(),
-    tool: match[3] === "none" ? undefined : match[3],
-    params: match[4].trim() === "none" ? undefined : (() => { try { return JSON.parse(match[4]); } catch { return undefined; } })(),
-    reasoning: reasoningMatches[i]?.[1]?.trim() || "",
-    status: "pending" as const,
-  }));
+  const steps: ReasoningStep[] = stepMatches.map((match, i) => {
+    let params: Record<string, unknown> | undefined;
+    const rawParams = match[4].trim();
+    if (rawParams !== "none") {
+      try {
+        params = JSON.parse(rawParams);
+      } catch (e) {
+        console.warn(`[Reasoning] Failed to parse params for step ${match[1]}: ${rawParams}. Error: ${e instanceof Error ? e.message : String(e)}`);
+        // Fallback to treating as a string if JSON parsing fails, or set to undefined
+        params = { raw: rawParams }; // Or just `undefined` if no fallback is desired
+      }
+    }
+
+    return {
+      stepNumber: parseInt(match[1]),
+      action: match[2].trim(),
+      tool: match[3] === "none" ? undefined : match[3],
+      params: params,
+      reasoning: reasoningMatches[i]?.[1]?.trim() || "",
+      status: "pending" as const,
+    };
+  });
 
   return { goal, expectedOutcome, steps };
 }
@@ -146,7 +160,9 @@ function parseToolCalls(response: string): ToolCall[] | null {
   while ((match = TOOL_CALL_PATTERN.exec(response)) !== null) {
     try {
       calls.push({ tool: match[1], params: JSON.parse(match[2].trim()) });
-    } catch {
+    } catch (e) {
+      console.warn(`[Reasoning] Failed to parse JSON params for tool '${match[1]}': ${match[2].trim()}. Error: ${e instanceof Error ? e.message : String(e)}`);
+      // Fallback to input, but log the error for debugging LLM output issues.
       calls.push({ tool: match[1], params: { input: match[2].trim() } });
     }
   }
@@ -178,6 +194,7 @@ export interface ReasoningChainOptions {
   maxRetriesPerStep?: number;
   temperature?: number;
   onStepComplete?: (step: ReasoningStep) => void;
+  systemPrompt?: string;
 }
 
 /**
@@ -218,8 +235,9 @@ export async function runReasoningChain(
   if (!plan || plan.steps.length === 0) {
     // Fallback: if planning fails, just use the standard tool-use loop
     const { runToolUseLoop } = await import("@/core/tools/executor");
+    console.warn("[Reasoning] Planner failed to generate a valid plan. Falling back to direct tool use loop.");
     return runToolUseLoop(userMessage, {
-      systemPrompt: `You are Klawhub, a multi-agent AI coworker in Slack. Respond helpfully using the available tools.`,
+      systemPrompt: options.systemPrompt || PLANNER_SYSTEM_PROMPT, // Use original system prompt if available, or a more specific fallback
       tools,
       context,
       maxIterations: 15,
@@ -274,15 +292,15 @@ export async function runReasoningChain(
 
       result = stripToolCalls(executionResponse) + (toolResultText ? `\n\n[TOOL RESULTS]\n${toolResultText}` : "");
       step.result = result;
-      step.status = "done";
-      onStepComplete?.(step);
-
-      // ── Phase 3: Verify (skip if output is substantial) ──
-      // Heuristic: skip verification LLM call if step produced meaningful output
+      
+      // ── Phase 3: Verify ──
       const isSubstantialOutput = result.length >= 100 && !result.includes("[ERROR]");
-      if (isSubstantialOutput) {
-        verified = true; // trust the executor — saves 1 LLM call per step
-      } else if (retries < maxRetriesPerStep) {
+      
+      // Skip verifier if we're on the last retry and output looks okay
+      if (retries > maxRetriesPerStep && isSubstantialOutput) {
+        verified = true;
+        step.status = "done";
+      } else {
         const verifyResponse = await agentChat("reasoning-verifier", [
           {
             role: "system",
@@ -296,34 +314,38 @@ export async function runReasoningChain(
 
         if (verification.verdict === "verified") {
           verified = true;
+          step.status = "done";
         } else if (verification.verdict === "retry") {
-          // Will retry in the next loop iteration
           step.status = "pending";
-          continue;
-        } else {
-          // Replan — skip remaining steps and go to synthesis
+          // continue while loop
+        } else { // replan
+          step.status = "done";
           stepResults.push(`${step.action}: ${result.slice(0, 500)} (Replanned: ${verification.reason})`);
-          break;
+          onStepComplete?.(step);
+          break; // break while loop
         }
       }
-    }
 
-    stepResults.push(`${step.action}: ${result.slice(0, 500)}`);
+      if (verified) {
+        stepResults.push(`${step.action}: ${result.slice(0, 500)}`);
+        onStepComplete?.(step);
+      }
+    }
   }
 
-  // ── Phase 4: Synthesize ──
-  const planSummary = steps.map((s) => `${s.stepNumber}. ${s.action}`).join("\n");
-  const stepResultsText = stepResults.map((r, i) => `Step ${i + 1}: ${r}`).join("\n\n");
+// ── Phase 4: Synthesize ──
+const planSummary = steps.map((s) => `${s.stepNumber}. ${s.action}`).join("\n");
+const stepResultsText = stepResults.map((r, i) => `Step ${i + 1}: ${r}`).join("\n\n");
 
-  const synthesizedResponse = await agentChat("reasoning-synthesizer", [
-    {
-      role: "system",
-      content: SYNTHESIZER_SYSTEM_PROMPT
-        .replace("{goal}", plan.goal)
-        .replace("{plan_summary}", planSummary)
-        .replace("{step_results}", stepResultsText),
-    },
-  ], { temperature: 0.5, maxTokens: 16384 }, meta);
+const synthesizedResponse = await agentChat("reasoning-synthesizer", [
+  {
+    role: "system",
+    content: SYNTHESIZER_SYSTEM_PROMPT
+      .replace("{goal}", plan.goal)
+      .replace("{plan_summary}", planSummary)
+      .replace("{step_results}", stepResultsText),
+  },
+], { temperature: 0.5, maxTokens: 16384 }, meta);
 
-  return synthesizedResponse;
+return synthesizedResponse;
 }

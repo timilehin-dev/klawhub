@@ -24,8 +24,9 @@ export async function POST(req: NextRequest) {
   try {
     const decoded = decodeURIComponent(body);
     payload = JSON.parse(decoded.replace(/^payload=/, ""));
-  } catch {
-    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[SLACK-ACTIONS] ERROR: Failed to parse Slack payload:", error);
+    return NextResponse.json({ error: "Failed to parse payload" }, { status: 400 });
   }
 
   const type = payload.type as string;
@@ -99,7 +100,7 @@ export async function POST(req: NextRequest) {
           ],
         },
       }),
-    }).catch(() => {});
+    }).catch(() => { });
 
     return NextResponse.json({ ok: true });
   }

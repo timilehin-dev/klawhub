@@ -7,7 +7,7 @@ const SLACK_BLOCK_TEXT_LIMIT = 2900; // Slack's limit is 3000; keep margin for s
  */
 function truncateText(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
-  const suffix = "\n\n... (truncated, see attached file for full spec)";
+  const suffix = "\n\n_... (truncated)_ "; // Use Slack mrkdwn for italics
   return text.slice(0, maxLen - suffix.length) + suffix;
 }
 

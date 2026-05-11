@@ -44,8 +44,9 @@ export async function getThreadHistory(
 
     for (const msg of messages) {
       const m = msg as Record<string, unknown>;
-      const text = (msg.text || "").replace(/<@[^>]+>/g, "").trim();
-      if (!text) continue;
+      const rawText = (msg.text || "").replace(/<@[^>]+>/g, "");
+      const text = rawText.trim();
+      if (!text && !msg.files) continue; // Only skip if no text AND no files
 
       const isBot = !!m.bot_id;
       const truncated = text.length > MAX_MESSAGE_LENGTH ? text.slice(0, MAX_MESSAGE_LENGTH) + "..." : text;

@@ -3,7 +3,7 @@ import { getProvider } from "./providers/registry";
 
 // ── Helper: get a valid access token for a workspace's integration ──
 
-type ProviderId = "google_drive" | "github" | "google";
+type ProviderId = "google" | "github";
 
 async function getAccessToken(workspaceId: string, providerId: ProviderId): Promise<string | null> {
   const provider = getProvider(providerId);
@@ -14,7 +14,7 @@ async function getAccessToken(workspaceId: string, providerId: ProviderId): Prom
 
   const token = await getValidAccessToken(integration, provider);
   if (token) {
-    touchLastUsed(integration.id).catch(() => {});
+    touchLastUsed(integration.id).catch(() => { });
   }
   return token;
 }
@@ -24,7 +24,7 @@ async function getAccessToken(workspaceId: string, providerId: ProviderId): Prom
 // ═══════════════════════════════════════════════════════════
 
 export async function googleDriveSearch(workspaceId: string, query: string) {
-  const token = await getAccessToken(workspaceId, "google_drive");
+  const token = await getAccessToken(workspaceId, "google");
   if (!token) throw new Error("Google Workspace is not connected");
 
   const resp = await fetch(
@@ -45,7 +45,7 @@ export async function googleDriveSearch(workspaceId: string, query: string) {
 }
 
 export async function googleDriveRead(workspaceId: string, fileId: string) {
-  const token = await getAccessToken(workspaceId, "google_drive");
+  const token = await getAccessToken(workspaceId, "google");
   if (!token) throw new Error("Google Workspace is not connected");
 
   const resp = await fetch(
@@ -58,7 +58,7 @@ export async function googleDriveRead(workspaceId: string, fileId: string) {
 }
 
 export async function googleDriveExportDoc(workspaceId: string, fileId: string) {
-  const token = await getAccessToken(workspaceId, "google_drive");
+  const token = await getAccessToken(workspaceId, "google");
   if (!token) throw new Error("Google Workspace is not connected");
 
   const resp = await fetch(
@@ -73,7 +73,7 @@ export async function googleDriveExportDoc(workspaceId: string, fileId: string) 
 }
 
 export async function googleDriveExportSheet(workspaceId: string, fileId: string) {
-  const token = await getAccessToken(workspaceId, "google_drive");
+  const token = await getAccessToken(workspaceId, "google");
   if (!token) throw new Error("Google Workspace is not connected");
 
   const resp = await fetch(
@@ -87,7 +87,7 @@ export async function googleDriveExportSheet(workspaceId: string, fileId: string
 }
 
 export async function googleDriveListFiles(workspaceId: string, pageSize = 20) {
-  const token = await getAccessToken(workspaceId, "google_drive");
+  const token = await getAccessToken(workspaceId, "google");
   if (!token) throw new Error("Google Workspace is not connected");
 
   const resp = await fetch(
@@ -225,7 +225,7 @@ export async function githubListEvents(workspaceId: string, pageSize = 30) {
 // ═══════════════════════════════════════════════════════════
 
 export async function gmailSendEmail(workspaceId: string, to: string, subject: string, body: string) {
-  const token = await getAccessToken(workspaceId, "google_drive");
+  const token = await getAccessToken(workspaceId, "google");
   if (!token) throw new Error("Google Workspace is not connected");
 
   // Construct raw mime format
@@ -265,7 +265,7 @@ export async function gmailSendEmail(workspaceId: string, to: string, subject: s
 }
 
 export async function gmailListMessages(workspaceId: string, maxResults = 10, query?: string) {
-  const token = await getAccessToken(workspaceId, "google_drive");
+  const token = await getAccessToken(workspaceId, "google");
   if (!token) throw new Error("Google Workspace is not connected");
 
   const qParam = query ? `&q=${encodeURIComponent(query)}` : "";
@@ -277,7 +277,7 @@ export async function gmailListMessages(workspaceId: string, maxResults = 10, qu
   if (!resp.ok) throw new Error(`Gmail list messages failed: ${resp.status}`);
   const data = await resp.json();
   const messages = data.messages || [];
-  
+
   // Fetch details for each message
   const details = await Promise.all(
     messages.map(async (msg: { id: string }) => {
@@ -288,20 +288,20 @@ export async function gmailListMessages(workspaceId: string, maxResults = 10, qu
         );
         if (!detailResp.ok) return null;
         const detailData = await detailResp.json();
-        
+
         const headers = detailData.payload?.headers || [];
         const subject = headers.find((h: any) => h.name?.toLowerCase() === "subject")?.value || "No Subject";
         const from = headers.find((h: any) => h.name?.toLowerCase() === "from")?.value || "Unknown Sender";
         const date = headers.find((h: any) => h.name?.toLowerCase() === "date")?.value || "";
         const snippet = detailData.snippet || "";
-        
+
         return { id: msg.id, subject, from, date, snippet };
       } catch {
         return null;
       }
     })
   );
-  
+
   return details.filter((m): m is Exclude<typeof m, null> => m !== null);
 }
 
@@ -310,7 +310,7 @@ export async function gmailListMessages(workspaceId: string, maxResults = 10, qu
 // ═══════════════════════════════════════════════════════════
 
 export async function googleCalendarListEvents(workspaceId: string, options: { timeMin?: string; timeMax?: string; maxResults?: number } = {}) {
-  const token = await getAccessToken(workspaceId, "google_drive");
+  const token = await getAccessToken(workspaceId, "google");
   if (!token) throw new Error("Google Workspace is not connected");
 
   const timeMin = options.timeMin || new Date().toISOString();

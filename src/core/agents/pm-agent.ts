@@ -68,7 +68,7 @@ export class PMAgent extends BaseAgent {
 
       // Notify relevant agents
       await this.broadcast("broadcast", {
-        eventType: "spec_available",
+        type: "spec_available",
         spec,
         requester,
       });

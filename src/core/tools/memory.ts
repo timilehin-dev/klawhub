@@ -22,8 +22,9 @@ export async function buildUserContext(slackUserId: string, query?: string, work
       .map((m) => `[${m.category}] ${m.content}`)
       .join("\n");
     return formatted.slice(0, 2000); // cap to avoid bloating prompts
-  } catch {
-    return ""; // non-critical
+  } catch (err) {
+    console.error("[MEMORY] Failed to build user context:", err);
+    return "";
   }
 }
 
@@ -35,7 +36,7 @@ export async function memoryWrite(
 ): Promise<string> {
   await saveMemory(slackUserId, content.slice(0, 1000), category, workspaceId);
   // Auto-prune in background (non-blocking)
-  autoPruneMemory(slackUserId, category).catch(() => {});
+  autoPruneMemory(slackUserId, category);
   return "Memory saved.";
 }
 

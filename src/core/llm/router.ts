@@ -30,12 +30,15 @@ class LLMRouter {
   /** Get provider config for a given agent. Falls back to first provider. */
   private resolveProvider(agentName: string) {
     const assignedId = AGENT_PROVIDER_MAP[agentName] || DEFAULT_PROVIDER_ID;
-    const provider =
-      assignedId === DEFAULT_PROVIDER_ID
-        ? this.providers[0]
-        : this.providers.find((p) => p.id === assignedId) || this.providers[0];
+    let provider = this.providers.find((p) => p.id === assignedId);
+    if (!provider) {
+      // Fallback to the first available provider if a specific one isn't found or assigned
+      provider = this.providers[0];
+    }
 
-    if (!provider) throw new Error("No LLM provider configured");
+    if (!provider) {
+      throw new Error("No LLM provider configured. Please check your environment variables.");
+    }
     return provider;
   }
 
@@ -120,7 +123,7 @@ class LLMRouter {
           success: true,
           runId: meta?.runId,
           taskId: meta?.taskId,
-        }).catch(() => {});
+        }).catch(() => { });
 
         return { content, usage };
       } catch (error) {
@@ -147,7 +150,7 @@ class LLMRouter {
       errorMessage: lastError?.message?.slice(0, 500),
       runId: meta?.runId,
       taskId: meta?.taskId,
-    }).catch(() => {});
+    }).catch(() => { });
 
     throw lastError || new Error(`All ${provider.id} API keys exhausted`);
   }

@@ -124,6 +124,9 @@ export async function getLearningStats(): Promise<{
  * Extract meaningful domain keywords from a request string.
  */
 function extractDomainKeywords(text: string): string[] {
+  // Consider using a more advanced keyword extraction method (e.g., TF-IDF, LLM-based extraction)
+  // or a dedicated NLP library for better performance and relevance.
+  // For now, keep the existing logic but acknowledge its limitations.
   const domainPatterns = [
     /api|rest|graphql|webhook|endpoint/i, /scraper|scrape|parsing|crawl|extract/i,
     /database|db|sql|postgres|mysql|mongo|sqlite|redis/i, /auth|login|oauth|jwt|session|token/i,

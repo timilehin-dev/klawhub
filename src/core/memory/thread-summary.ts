@@ -25,18 +25,18 @@ export async function updateSessionSummary(
   const key = `session_summary:${slackUserId}`;
   try {
     const existing = await redis.get(key);
-    
+
     let logs: any[] = [];
     if (existing) {
       logs = Array.isArray(existing) ? existing : (typeof existing === "string" ? JSON.parse(existing) : [existing]);
     }
-    
+
     logs.push({ user: userMessage, agent: agentResponse.slice(0, 200) });
     if (logs.length > 5) logs = logs.slice(-5);
-    
+
     await redis.set(key, logs, { ex: SESSION_EXPIRY_SECONDS });
   } catch (error) {
-    console.error(`Failed to update session summary for ${slackUserId}:`, error);
+    console.error("[REDIS] Failed to initialize Upstash Redis client:", error);
   }
 }
 
@@ -46,12 +46,12 @@ export async function getSessionSummary(slackUserId: string): Promise<string> {
   try {
     const data = await redis.get(`session_summary:${slackUserId}`);
     if (!data) return "";
-    
+
     let logs: any[] = [];
     if (data) {
       logs = Array.isArray(data) ? data : (typeof data === "string" ? JSON.parse(data) : [data]);
     }
-    
+
     return logs.map((l: any) => `User: ${l.user}\nAgent: ${l.agent}`).join("\n---\n");
   } catch (error) {
     console.error(`Failed to fetch session summary for ${slackUserId}:`, error);

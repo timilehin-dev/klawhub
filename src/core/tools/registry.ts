@@ -1,17 +1,20 @@
 import { llm } from "@/core/llm";
 import { tavily } from "@/core/tools/web-search";
 import { sandbox } from "@/core/tools/sandbox";
+import { dispatchTaskTool } from "@/core/tools/implementations/dispatch";
 import {
   saveMemory,
   readMemory,
   getRecentMemories,
   getWebhookByName,
   decryptWebhookHeaders,
+  createSchedule,
+  deleteSchedule,
+  schedules,
 } from "@/db";
 import {
   searchKnowledge,
 } from "@/db/knowledge";
-import { dispatchTaskTool } from "./implementations/dispatch";
 import { conductResearch } from "@/core/agents/researcher";
 import { createSpec } from "@/core/agents/pm";
 import { writeCodeFromLearnings, fixCode } from "@/core/agents/engineer";
@@ -83,14 +86,19 @@ const webReadTool: ToolDefinition = {
       const result = await sandbox({ type: "web_read", url: params.url });
       if (result.success && result.content) {
         return `Title: ${result.content ? "" : "N/A"}\n\n${result.content}`;
+      } else if (!result.success) {
+        console.warn(`[WEB_READ] Sandbox failed: ${result.error || "Unknown error"}. Attempting browser fallback.`);
       }
     }
-    // Fallback: use browser to extract text
+
     try {
-      const { browseUrl } = await import("@/integrations/browser/actions");
+      const { browseUrl, isBrowserConfigured } = await import("@/integrations/browser/actions");
+      if (!isBrowserConfigured()) {
+        return `Failed to read page: ${params.url}. Neither sandbox nor browser automation is configured. Please set MODAL_FUNCTION_URL or BROWSER_WS_URL.`;
+      }
       return await browseUrl(params.url);
-    } catch {
-      return `Failed to read page: ${params.url}. The sandbox and browser are both unavailable.`;
+    } catch (err) {
+      return `Failed to read page: ${params.url}. Browser fallback failed: ${(err as Error).message.slice(0, 300)}.`;
     }
   },
 };
@@ -173,7 +181,7 @@ const memorySaveTool: ToolDefinition = {
       params.category || "general",
       ctx.workspaceId
     );
-    return `Saved to memory [${params.category || "general"}]: ${params.content.slice(0, 100)}`;
+    return `Saved to memory [${params.category || "general"}]: ${params.content.slice(0, 100)}... (truncated for display)`;
   },
 };
 
@@ -270,9 +278,18 @@ const googleDriveReadTool: ToolDefinition = {
       try {
         const doc = await googleDriveExportDoc(wsId, params.file_id);
         return `Document content:\n${doc.content}`;
-      } catch {
-        const sheet = await googleDriveExportSheet(wsId, params.file_id);
-        return `Spreadsheet content (CSV):\n${sheet.content}`;
+      } catch (docErr) {
+        // If doc export fails, try sheet export. Log doc error for debugging.
+        const docErrMsg = docErr instanceof Error ? docErr.message : String(docErr);
+        console.warn(`[GoogleDrive] Failed to export as document: ${docErrMsg}. Trying as spreadsheet.`);
+        try {
+          const sheet = await googleDriveExportSheet(wsId, params.file_id);
+          return `Spreadsheet content (CSV):\n${sheet.content}`;
+        } catch (sheetErr) {
+          // If both fail, report both errors or the most relevant one.
+          const sheetErrMsg = sheetErr instanceof Error ? sheetErr.message : String(sheetErr);
+          throw new Error(`Failed to read Google Drive file as document or spreadsheet. Document error: ${docErrMsg}. Spreadsheet error: ${sheetErrMsg}`);
+        }
       }
     } catch (err) { return integrationError("Google Drive", err); }
   },
@@ -557,8 +574,13 @@ const coordinateAgentsTool: ToolDefinition = {
   async execute(params, ctx) {
     if (!ctx.slackUserId) return "Error: No user context.";
     try {
-      // For now, delegate to dispatch_task with coordinated type
-      return `Coordinated task dispatched. Type: ${params.type}, Task: ${params.task.slice(0, 100)}...`;
+      return await dispatchTaskTool.execute(
+        {
+          task_type: params.type,
+          instructions: params.task,
+        },
+        ctx
+      );
     } catch (err) {
       return `Agent coordination failed: ${(err as Error).message}`;
     }
@@ -616,7 +638,13 @@ const webhookCustomRequestTool: ToolDefinition = {
       }
 
       const response = await fetch(targetUrl, fetchOptions);
-      const responseText = await response.text();
+      let responseText: string;
+      try {
+        responseText = await response.text();
+      } catch (e) {
+        console.warn(`[WEBHOOK] Failed to read response text from ${targetUrl}:`, e);
+        responseText = `(Failed to read response body: ${(e as Error).message})`;
+      }
 
       return `Custom HTTP request complete.\nStatus: ${response.status} ${response.statusText}\nTarget URL: ${targetUrl}\nMethod: ${targetMethod}\n\nResponse Content (truncated to 1000 chars):\n${responseText.slice(0, 1000)}`;
     } catch (err) {
@@ -655,7 +683,7 @@ const googleCalendarListEventsTool: ToolDefinition = {
       const wsId = requireWorkspace(ctx);
       const { googleCalendarListEvents } = await import("@/integrations/clients");
       const events = await googleCalendarListEvents(wsId, { maxResults: params.max_results || 5 });
-      
+
       if (events.length === 0) {
         return "No upcoming Google Calendar events found.";
       }
@@ -674,6 +702,210 @@ const googleCalendarListEventsTool: ToolDefinition = {
       return integrationError("Google Calendar", err);
     }
   },
+};
+
+const scheduleCreateTool: ToolDefinition = {
+  name: "schedule_create",
+  description: "Create a new recurring scheduled task (cron). This allows you to schedule any conversational or automated task (e.g. daily standups, channel alerts, periodic check-ins) to execute automatically at specific intervals.",
+  parameters: {
+    name: { type: "string", description: "Descriptive name for this scheduled task (e.g., 'Daily Standup Call')", required: true },
+    cron_expr: { type: "string", description: "Standard 5-field cron expression (e.g., '0 9 * * 1-5' for 9 AM Mon-Fri, '0 9 * * 1' for 9 AM Monday)", required: true },
+    action: { type: "string", description: "The exact action or prompt instructions for the agent to execute when triggered (e.g. 'Generate and post a morning huddle check-in')", required: true },
+    channel_id: { type: "string", description: "The Slack channel ID where the results/message should be posted", required: true },
+    timezone: { type: "string", description: "Timezone for the schedule (e.g., 'America/New_York', 'UTC', 'Europe/London'). Default is 'UTC'." },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackTeamId) {
+      return "Error: Slack Team ID context is missing. Unable to create schedule.";
+    }
+
+    try {
+      const [schedule] = await createSchedule({
+        slackUserId: ctx.slackUserId || "system",
+        slackTeamId: ctx.slackTeamId,
+        name: params.name,
+        cronExpr: params.cron_expr,
+        action: params.action,
+        channelId: params.channel_id,
+        timezone: params.timezone || "UTC",
+        isActive: true,
+      });
+
+      return `Successfully created schedule:
+ID: ${schedule.id}
+Name: ${schedule.name}
+Cron: ${schedule.cronExpr} (Timezone: ${schedule.timezone})
+Action: ${schedule.action}
+Channel ID: ${schedule.channelId}`;
+    } catch (err) {
+      return `Failed to create schedule: ${(err as Error).message}`;
+    }
+  }
+};
+
+const scheduleListTool: ToolDefinition = {
+  name: "schedule_list",
+  description: "List all active schedules configured for this workspace. Use this to audit existing automated tasks or find the ID of a schedule you want to manage or delete.",
+  parameters: {
+    channel_id: { type: "string", description: "Optional Slack channel ID to filter the schedule list to a specific channel" },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackTeamId) {
+      return "Error: Slack Team ID context is missing.";
+    }
+
+    try {
+      const getDb = (await import("@/db")).getDb;
+      const { eq, and } = await import("drizzle-orm");
+      
+      const conditions = [eq(schedules.slackTeamId, ctx.slackTeamId)];
+      if (params.channel_id) {
+        conditions.push(eq(schedules.channelId, params.channel_id));
+      }
+
+      const list = await getDb()
+        .select()
+        .from(schedules)
+        .where(and(...conditions));
+
+      if (list.length === 0) {
+        return "No schedules found in this workspace.";
+      }
+
+      const lines = list.map(s => {
+        return `• *${s.name}* (ID: \`${s.id}\`)
+  Cron: \`${s.cronExpr}\` (${s.timezone || "UTC"}) | Active: ${s.isActive}
+  Channel: <#${s.channelId}>
+  Action: "${s.action}"`;
+      });
+
+      return `Active schedules in this workspace:\n\n${lines.join("\n\n")}`;
+    } catch (err) {
+      return `Failed to list schedules: ${(err as Error).message}`;
+    }
+  }
+};
+
+const scheduleDeleteTool: ToolDefinition = {
+  name: "schedule_delete",
+  description: "Delete/cancel an existing scheduled task using its unique schedule ID.",
+  parameters: {
+    schedule_id: { type: "string", description: "The UUID of the schedule to delete", required: true },
+  },
+  async execute(params, ctx) {
+    try {
+      const getDb = (await import("@/db")).getDb;
+      const { eq } = await import("drizzle-orm");
+
+      // Verify ownership / same team to prevent cross-tenant deletes
+      const existing = await getDb()
+        .select()
+        .from(schedules)
+        .where(eq(schedules.id, params.schedule_id))
+        .limit(1);
+
+      if (existing.length === 0) {
+        return `Schedule with ID ${params.schedule_id} not found.`;
+      }
+
+      if (ctx.slackTeamId && existing[0].slackTeamId !== ctx.slackTeamId) {
+        return "Error: You do not have permission to delete this schedule.";
+      }
+
+      await deleteSchedule(params.schedule_id);
+      return `Successfully deleted schedule: "${existing[0].name}" (ID: ${params.schedule_id}).`;
+    } catch (err) {
+      return `Failed to delete schedule: ${(err as Error).message}`;
+    }
+  }
+};
+
+const slackListChannelsTool: ToolDefinition = {
+  name: "slack_list_channels",
+  description: "List all public channels available in the Slack workspace, including their names and IDs. Use this to find the correct channel ID when a user mentions a channel by name (e.g., '#huddles' or '#marketing').",
+  parameters: {},
+  async execute(params, ctx) {
+    if (!ctx.slackTeamId) {
+      return "Error: Slack Team ID context is missing.";
+    }
+
+    try {
+      const { getWorkspaceSlack } = await import("@/integrations/slack/client");
+      const wsSlack = await getWorkspaceSlack(ctx.slackTeamId);
+
+      const response = await wsSlack.conversations.list({
+        types: "public_channel",
+        exclude_archived: true,
+        limit: 200,
+      });
+
+      const channels = ((response as any).channels || []);
+      if (channels.length === 0) {
+        return "No public channels found in this workspace.";
+      }
+
+      const lines = channels.map((ch: any) => `• *#${ch.name}* (ID: \`${ch.id}\`) ${ch.is_member ? "[Joined]" : ""}`);
+      return `Slack channels in this workspace:\n\n${lines.join("\n")}`;
+    } catch (err) {
+      return `Failed to list Slack channels: ${(err as Error).message}`;
+    }
+  }
+};
+
+const scheduleToggleTool: ToolDefinition = {
+  name: "schedule_toggle",
+  description: "Pause (deactivate) or resume (activate) an existing scheduled task using its unique schedule ID.",
+  parameters: {
+    schedule_id: { type: "string", description: "The UUID of the schedule to toggle", required: true },
+    active: { type: "boolean", description: "Set to true to activate/resume, or false to deactivate/pause", required: true },
+  },
+  async execute(params, ctx) {
+    try {
+      const getDb = (await import("@/db")).getDb;
+      const { eq } = await import("drizzle-orm");
+      const { updateSchedule } = await import("@/db/schedules");
+
+      // Verify ownership / same team to prevent cross-tenant changes
+      const existing = await getDb()
+        .select()
+        .from(schedules)
+        .where(eq(schedules.id, params.schedule_id))
+        .limit(1);
+
+      if (existing.length === 0) {
+        return `Schedule with ID ${params.schedule_id} not found.`;
+      }
+
+      if (ctx.slackTeamId && existing[0].slackTeamId !== ctx.slackTeamId) {
+        return "Error: You do not have permission to manage this schedule.";
+      }
+
+      await updateSchedule(params.schedule_id, { isActive: params.active });
+      const status = params.active ? "activated/resumed" : "deactivated/paused";
+      return `Successfully ${status} schedule: "${existing[0].name}" (ID: ${params.schedule_id}).`;
+    } catch (err) {
+      return `Failed to toggle schedule: ${(err as Error).message}`;
+    }
+  }
+};
+
+const scheduleListPresetsTool: ToolDefinition = {
+  name: "schedule_list_presets",
+  description: "List all high-value schedule 'recipes' or templates available in Klawhub. Use this to suggest useful automations to the user or to quickly find the configuration for a common task.",
+  parameters: {},
+  async execute() {
+    try {
+      const { SCHEDULE_PRESETS } = await import("./schedule-presets");
+      const lines = SCHEDULE_PRESETS.map(p => {
+        return `• *${p.name}* (ID: \`${p.id}\`)
+  "${p.description}"
+  Recommended: \`${p.cronExpr}\` | Channel: #${p.recommendedChannelName || "general"}`;
+      });
+      return `Klawhub Automation Recipes:\n\n${lines.join("\n\n")}`;
+    } catch (err) {
+      return `Failed to list presets: ${(err as Error).message}`;
+    }
+  }
 };
 
 // ── Tool Registry ──
@@ -704,6 +936,13 @@ export const allTools: ToolDefinition[] = [
   webhookCustomRequestTool,
   resendSendEmailTool,
   googleCalendarListEventsTool,
+  // Scheduling tools
+  scheduleCreateTool,
+  scheduleListTool,
+  scheduleDeleteTool,
+  scheduleToggleTool,
+  scheduleListPresetsTool,
+  slackListChannelsTool,
 ];
 
 export function getToolsByName(names: string[]): ToolDefinition[] {
@@ -746,6 +985,13 @@ export const generalAgentTools: ToolDefinition[] = [
   coordinateAgentsTool,
   // Agent dispatch (fallback for complex workflows)
   dispatchTaskTool,
+  // Scheduling tools
+  scheduleCreateTool,
+  scheduleListTool,
+  scheduleDeleteTool,
+  scheduleToggleTool,
+  scheduleListPresetsTool,
+  slackListChannelsTool,
 ];
 
 /** Tools available to the PM Agent (research for specs) */

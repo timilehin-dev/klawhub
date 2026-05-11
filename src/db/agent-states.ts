@@ -7,16 +7,16 @@ import type { AgentMessage } from "@/core/a2a/message-bus";
 
 export async function saveAgentState(
   workspaceId: string | undefined,
-  agentName: string,
+  agentName: typeof agentStates.$inferSelect.agentName,
   state: Record<string, any>
 ): Promise<void> {
   const db = getDb();
   const whereClause = workspaceId
     ? and(
-        eq(agentStates.workspaceId, workspaceId),
-        eq(agentStates.agentName, agentName as any)
-      )
-    : eq(agentStates.agentName, agentName as any);
+      eq(agentStates.workspaceId, workspaceId),
+      eq(agentStates.agentName, agentName)
+    )
+    : eq(agentStates.agentName, agentName);
 
   const existing = await db
     .select()
@@ -38,7 +38,7 @@ export async function saveAgentState(
       .insert(agentStates)
       .values({
         workspaceId,
-        agentName: agentName as any,
+        agentName,
         state,
         lastActiveAt: new Date(),
         createdAt: new Date(),
@@ -49,15 +49,15 @@ export async function saveAgentState(
 
 export async function getAgentState(
   workspaceId: string | undefined,
-  agentName: string
+  agentName: typeof agentStates.$inferSelect.agentName
 ): Promise<Record<string, any> | null> {
   const db = getDb();
   const whereClause = workspaceId
     ? and(
       eq(agentStates.workspaceId, workspaceId as string),
-      eq(agentStates.agentName, agentName as any)
+      eq(agentStates.agentName, agentName)
     )
-    : eq(agentStates.agentName, agentName as any);
+    : eq(agentStates.agentName, agentName);
 
   const result = await db
     .select()
@@ -70,7 +70,7 @@ export async function getAgentState(
 
 export async function updateAgentState(
   workspaceId: string | undefined,
-  agentName: string,
+  agentName: typeof agentStates.$inferSelect.agentName,
   updates: Record<string, any>
 ): Promise<void> {
   const currentState = await getAgentState(workspaceId, agentName) || {};

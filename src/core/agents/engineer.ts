@@ -166,9 +166,9 @@ export async function writeCode(
     return { code: codeMatch[1].trim() };
   }
 
-  // If no code block found, check for conversational leaks
+  // If no markdown block, check for conversational markers. If present, it\'s likely not code.
   const hasConversationalMarkers = /\b(sure|here is|hope this|hi|hello|you can|let me|explain|created|built)\b/i.test(codeText);
-  if (hasConversationalMarkers || codeText.length > 2000) {
+  if (hasConversationalMarkers) {
     if (language === "python") {
       return { code: `raise RuntimeError("AI Agent conversational fallback triggered. No code block was generated. Raw text:\\n${codeText.replace(/"/g, '\\"').slice(0, 500)}")` };
     } else {
@@ -176,6 +176,9 @@ export async function writeCode(
     }
   }
 
+  // If no markdown block and no conversational markers, assume the entire response is code.
+  // This is a less strict fallback, but prevents false positives for conversational text.
+  console.warn("[Engineer Agent] LLM did not return code in markdown block. Assuming full response is code.");
   return { code: codeText.trim() };
 }
 

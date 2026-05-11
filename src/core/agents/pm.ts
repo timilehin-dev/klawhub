@@ -124,11 +124,19 @@ export async function createSpec(request: string, userContext: string) {
   );
 
   const langMatch = specText.match(/LANGUAGE:\s*(\w+)/i);
-  const depMatch = specText.match(/DEPENDENCIES:\s*([\s\S]*?)(?=SPEC:)/i);
+  const depMatch = specText.match(/DEPENDENCIES:\s*([\s\S]*?)(?=SPEC:|$)/i); // Ensure regex matches till end if SPEC is missing
   const specMatch = specText.match(/SPEC:\s*([\s\S]*)/i);
 
-  const rawSpec = specMatch?.[1]?.trim() || specText.trim();
+  const rawSpec = specMatch?.[1]?.trim() || "";
   const rawDeps = depMatch?.[1]?.trim() || "";
+
+  if (!langMatch || !specMatch) {
+    // If core parts are missing, it's a critical parsing failure.
+    // Log the full LLM response for debugging.
+    console.error("[PM Agent] Failed to parse spec from LLM response. Full response:\n", specText);
+    throw new Error("LLM did not return a valid specification format. Please try again.");
+  }
+
   const cleanSpec = toSlackMrkdwn(rawSpec);
 
   return {

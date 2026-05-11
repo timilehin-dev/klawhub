@@ -1,5 +1,5 @@
 import { inngest } from "./client";
-import { getDueSchedules, markTriggered, incrementFailCount, updateSchedule } from "@/db";
+import { getDueSchedules, markTriggered, incrementFailCount, updateSchedule, getWorkspaceByTeamId } from "@/db";
 import { cronMatchesNow } from "@/core/tools/cron-match";
 import { getWorkspaceSlack, postToThread } from "@/integrations/slack/client";
 import { classify } from "@/core/agents/classifier";
@@ -19,7 +19,7 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
     if (dueSchedules.length === 0) return;
 
     for (const schedule of dueSchedules) {
-      const shouldFire = step.run(`check-${schedule.id.slice(0, 8)}`, async () => {
+      const shouldFire = await step.run(`check-${schedule.id.slice(0, 8)}`, async () => {
         return cronMatchesNow(
           schedule.cronExpr,
           now,
@@ -38,22 +38,76 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
         }
 
         try {
-          // Post "running" message to get a thread_ts using per-workspace client
           const wsClient = await getWorkspaceSlack(targetTeamId);
-          const runMsg = await wsClient.chat.postMessage({
-            channel: targetChannel,
-            text: `:clock1: *${schedule.name}*\n_Executing scheduled task..._`,
-          });
-          const threadTs = (runMsg as any).ts;
+          
+          // Check if this is a huddle/standup
+          const isHuddle = /huddle|standup|retro/i.test(schedule.name) || /huddle|standup|retro/i.test(schedule.action);
+          
+          let threadTs: string | undefined;
+
+          if (isHuddle) {
+            const huddleMsg = await wsClient.chat.postMessage({
+              channel: targetChannel,
+              text: `:wave: *${schedule.name}* is starting!`,
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: `:wave: *${schedule.name}* has started!\n_Please check in and share your updates for the team._`
+                  }
+                },
+                {
+                  type: "actions",
+                  elements: [
+                    {
+                      type: "button",
+                      text: { type: "plain_text", text: "Join Huddle" },
+                      style: "primary",
+                      action_id: "huddle_join",
+                      url: "https://slack.com/features/huddles" // Fallback link
+                    },
+                    {
+                      type: "button",
+                      text: { type: "plain_text", text: "Post Update" },
+                      action_id: "huddle_post_update"
+                    },
+                    {
+                      type: "button",
+                      text: { type: "plain_text", text: "Excuse Me" },
+                      style: "danger",
+                      action_id: "huddle_excuse"
+                    }
+                  ]
+                }
+              ]
+            });
+            threadTs = (huddleMsg as any).ts;
+          } else {
+            // Default "running" message
+            const runMsg = await wsClient.chat.postMessage({
+              channel: targetChannel,
+              text: `:clock1: *${schedule.name}*\n_Executing scheduled task..._`,
+            });
+            threadTs = (runMsg as any).ts;
+          }
 
           // Classify the action
           const classification = await classify(schedule.action);
           const requestText = classification.extractedRequest || schedule.action;
           const userId = schedule.slackUserId;
 
+          let workspaceId: string | undefined = undefined;
+          if (targetTeamId) {
+            const ws = await getWorkspaceByTeamId(targetTeamId);
+            if (ws && ws.length > 0) {
+              workspaceId = ws[0].id;
+            }
+          }
+
           if (classification.type === "chat" || classification.type === "unclear") {
             // Run through the general agent (with full tool-use)
-            const response = await chatAsAgent(userId, schedule.action);
+            const response = await chatAsAgent(userId, schedule.action, { workspaceId });
             await postToThread(targetChannel, threadTs!, response, undefined, targetTeamId);
             await updateSchedule(schedule.id, {
               lastRunStatus: "success",

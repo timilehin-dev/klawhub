@@ -39,21 +39,21 @@ export function getProviders(): ProviderConfig[] {
   const ollama = fromEnv(
     "ollama",
     process.env.OLLAMA_BASE_URL || "https://api.ollama.com/v1",
-    ["OLLAMA_API_KEY_1", "OLLAMA_API_KEY_2"],
+    ["OLLAMA_API_KEY_1", "OLLAMA_API_KEY_2", "OLLAMA_API_KEY_3"],
     process.env.OLLAMA_MODEL || "gemma4:31b-cloud",
     "ollama"
   );
   if (ollama) providers.push(ollama);
 
-  // 2. AIHubMix (used by engineer agent for coding tasks)
-  const aihubmix = fromEnv(
-    "aihubmix",
-    "https://aihubmix.com/v1",
-    ["AIHUBMIX_API_KEY_1", "AIHUBMIX_API_KEY_2", "AIHUBMIX_API_KEY_3"],
-    process.env.AIHUBMIX_MODEL || "xiaomi-mimo-v2.5-pro-free",
-    "aihubmix"
+  // 2. Ollama Engineer (used by engineer agent for coding tasks)
+  const ollamaEngineer = fromEnv(
+    "ollama_engineer",
+    process.env.OLLAMA_BASE_URL || "https://api.ollama.com/v1",
+    ["OLLAMA_API_KEY_1", "OLLAMA_API_KEY_2", "OLLAMA_API_KEY_3"],
+    process.env.OLLAMA_ENGINEER_MODEL || "kimi-k2.6:cloud",
+    "ollama"
   );
-  if (aihubmix) providers.push(aihubmix);
+  if (ollamaEngineer) providers.push(ollamaEngineer);
 
   return providers;
 }
@@ -65,7 +65,7 @@ export function getProviders(): ProviderConfig[] {
  * Override per-agent here. Agents not listed use the "default" provider.
  */
 export const AGENT_PROVIDER_MAP: Record<string, string> = {
-  engineer: "aihubmix",     // Engineer uses AIHubMix for code generation
+  engineer: "ollama_engineer",     // Engineer uses Ollama with kimi-k2.6:cloud
 };
 
 export const DEFAULT_PROVIDER_ID = "default";

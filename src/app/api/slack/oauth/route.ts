@@ -1,191 +1,44 @@
-import { NextRequest, NextResponse } from "next/server";
-import { WebClient } from "@slack/web-api";
-import { signWorkspaceId } from "@/utils/session";
-import { encrypt } from "@/integrations/crypto";
+import { NextResponse } from 'next/server';
 
-// Slack OAuth callback — exchanges code for token, creates workspace record
-export async function GET(request: NextRequest) {
+const SLACK_CLIENT_ID = process.env.SLACK_CLIENT_ID;
+const SLACK_SCOPES = [
+  "commands",
+  "chat:write",
+  "chat:write.public",
+  "chat:write.customize",
+  "app_mentions:read",
+  "users:read",
+  "channels:read",
+  "groups:read",
+  "im:read",
+  "im:history",
+  "channels:history",
+  "groups:history",
+  "reactions:read",
+  "files:read",
+  "files:write",
+];
+const SLACK_USER_SCOPES = ["search:read"];
+
+export async function GET(request: Request) {
+  if (!SLACK_CLIENT_ID) {
+    return NextResponse.json({ error: 'Slack Client ID is not configured.' }, { status: 500 });
+  }
+
   const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
-  const error = searchParams.get("error");
+  const redirectUri = searchParams.get('redirect_uri'); // Allow client to pass redirect_uri if needed
 
-  if (error) {
-    return NextResponse.redirect(
-      new URL(`/install?error=${encodeURIComponent(error)}`, request.url)
-    );
+  const params = new URLSearchParams({
+    client_id: SLACK_CLIENT_ID,
+    scope: SLACK_SCOPES.join(","),
+    user_scope: SLACK_USER_SCOPES.join(","),
+  });
+
+  if (redirectUri) {
+    params.set("redirect_uri", redirectUri);
   }
 
-  if (!code) {
-    return NextResponse.redirect(
-      new URL("/install?error=no_code", request.url)
-    );
-  }
+  const slackOAuthUrl = `https://slack.com/oauth/v2/authorize?${params.toString()}`;
 
-  const clientId = process.env.NEXT_PUBLIC_SLACK_CLIENT_ID;
-  const clientSecret = process.env.SLACK_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    return NextResponse.redirect(
-      new URL("/install?error=not_configured", request.url)
-    );
-  }
-
-  // Exchange code for access token via Slack OAuth v2
-  try {
-    const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/slack/oauth`;
-
-    const resp = await fetch("https://slack.com/api/oauth.v2.access", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        redirect_uri: redirectUri,
-      }),
-    });
-
-    const data = await resp.json();
-
-    if (!data.ok || !data.team) {
-      return NextResponse.redirect(
-        new URL(
-          `/install?error=oauth_failed&detail=${encodeURIComponent(data.error || "unknown")}`,
-          request.url
-        )
-      );
-    }
-
-    // Create or update workspace record
-    const { createWorkspace, upsertWorkspaceMember } = await import("@/db");
-
-    // Encrypt bot token before storing
-    const encryptedBotToken = data.bot_token ? encrypt(data.bot_token) : undefined;
-
-    // The installer becomes workspace admin
-    const installerUserId = data.authed_user?.id;
-    const installerUserToken = data.authed_user?.access_token;
-
-    // Get workspace name from bot token
-    let workspaceName = data.team?.name || "Unknown Workspace";
-    let workspaceDomain = data.team?.domain;
-    let botUserId = "";
-
-    if (data.bot_token) {
-      try {
-        const tempClient = new WebClient(data.bot_token);
-        const botInfo = await tempClient.auth.test();
-        botUserId = botInfo.user_id || "";
-      } catch {
-        // Bot info fetch failed — not critical
-      }
-    }
-
-    // Get installer's real name
-    let installerName: string | undefined;
-    let installerEmail: string | undefined;
-    if (installerUserToken) {
-      try {
-        const userClient = new WebClient(installerUserToken);
-        const userInfo = await userClient.users.profile.get({ user: installerUserId! });
-        installerName = userInfo.profile?.display_name || userInfo.profile?.real_name;
-        installerEmail = userInfo.profile?.email;
-      } catch {
-        // User info fetch failed — not critical
-      }
-    }
-
-    // Create workspace (upsert via unique slack_team_id)
-    let workspaceId: string | null = null;
-
-    try {
-      const { getWorkspaceByTeamId } = await import("@/db");
-      const existing = await getWorkspaceByTeamId(data.team.id);
-      if (existing && existing.length > 0) {
-        // Workspace exists — update it
-        const { updateWorkspace } = await import("@/db");
-        await updateWorkspace(existing[0].id, {
-          slackBotUserId: botUserId,
-          botToken: encryptedBotToken,
-          name: workspaceName,
-          domain: workspaceDomain,
-          isActive: true,
-        });
-        workspaceId = existing[0].id;
-      } else {
-        // New workspace
-        const [created] = await createWorkspace({
-          slackTeamId: data.team.id,
-          slackBotUserId: botUserId,
-          botToken: encryptedBotToken,
-          name: workspaceName,
-          domain: workspaceDomain,
-          plan: "free",
-          monthlyRunLimit: 50,
-          isActive: true,
-        });
-        workspaceId = created.id;
-      }
-    } catch {
-      // Fallback: try to fetch existing workspace
-      try {
-        const { getWorkspaceByTeamId } = await import("@/db");
-        const ws = await getWorkspaceByTeamId(data.team.id);
-        if (ws && ws.length > 0) workspaceId = ws[0].id;
-      } catch { /* give up */ }
-    }
-
-    // Add installer as workspace admin
-    if (workspaceId && installerUserId) {
-      await upsertWorkspaceMember(workspaceId, installerUserId, {
-        slackUserName: installerName,
-        slackUserEmail: installerEmail,
-        isWorkspaceAdmin: true,
-      });
-    }
-
-    // Redirect to success page — set workspace cookie so dashboard can identify the workspace
-    const workspaceSlug = workspaceDomain || data.team.id;
-    const redirectUrl = new URL(`/install?success=1&workspace=${encodeURIComponent(workspaceSlug)}`, request.url);
-    const response = NextResponse.redirect(redirectUrl);
-
-    // Store signed workspace ID in an httpOnly cookie
-    if (workspaceId) {
-      const host = request.headers.get("host") || "";
-      const domain = host.split(":")[0];
-      const cookieDomain = domain.endsWith("klawhub.xyz") ? ".klawhub.xyz" : undefined;
-
-      // Delete any potential old colliding cookies
-      response.cookies.set("klawhub_workspace_id", "", { path: "/", maxAge: 0 });
-      response.cookies.set("klawhub_session", "", { path: "/", maxAge: 0 });
-
-      response.cookies.set("kh_auth_session", await signWorkspaceId(workspaceId), {
-        httpOnly: true,
-        secure: request.url.startsWith("https://"),
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 30, // 30 days (renews on next install)
-        path: "/",
-        domain: cookieDomain,
-      });
-      // Also store workspace name for display (not httpOnly — readable by client)
-      response.cookies.set("klawhub_workspace_name", workspaceName, {
-        secure: request.url.startsWith("https://"),
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 30,
-        path: "/",
-        domain: cookieDomain,
-      });
-    }
-
-    return response;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("[OAUTH] Installation failed:", message);
-    return NextResponse.redirect(
-      new URL(
-        `/install?error=server_error&detail=${encodeURIComponent(message)}`,
-        request.url
-      )
-    );
-  }
+  return NextResponse.redirect(slackOAuthUrl);
 }

@@ -154,7 +154,7 @@ export const workspaces = pgTable("workspaces", {
   isActive: boolean("is_active").default(true).notNull(),
   agentName: text("agent_name").default("Klawhub").notNull(),
   agentPersonality: text("agent_personality"),
-  enabledSkills: jsonb("enabled_skills").$type<string[]>().default(["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator", "email_dispatch"]).notNull(),
+  enabledSkills: jsonb("enabled_skills").$type<string[]>().default(["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator"]).notNull(), // Remove 'email_dispatch' until Phase 6 is complete
   installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

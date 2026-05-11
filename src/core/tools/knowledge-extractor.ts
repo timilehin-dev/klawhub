@@ -51,6 +51,9 @@ export async function extractAndStoreKnowledge(
     if (message.length < 10) return 0;
 
     // Skip pure greetings
+    // This heuristic might prevent legitimate short knowledge statements from being processed.
+    // Consider if this check is truly necessary or if the LLM can handle short greetings gracefully.
+    // For now, keeping as is, but noting as a potential area for false negatives.
     if (/^(hi|hello|hey|sup|yo|morning|evening|afternoon)\b/i.test(message.trim()) && message.length < 50) {
       return 0;
     }
@@ -60,10 +63,25 @@ export async function extractAndStoreKnowledge(
       { role: "user", content: message },
     ], { temperature: 0.1, maxTokens: 500 });
 
-    const jsonMatch = response.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return 0;
-
-    const entities: ExtractedEntity[] = JSON.parse(jsonMatch[0]);
+    let entities: ExtractedEntity[] = [];
+    try {
+      // Attempt to parse the entire response directly first
+      entities = JSON.parse(response);
+    } catch (e) {
+      // If direct parsing fails, try to extract a JSON array from the response
+      // Use a non-greedy regex to find the first JSON array
+      const jsonMatch = response.match(/\[[\s\S]*?\]/);
+      if (!jsonMatch) {
+        console.warn("[KNOWLEDGE] No JSON array found in LLM response after direct parse failure. Response:", response);
+        return 0;
+      }
+      try {
+        entities = JSON.parse(jsonMatch[0]);
+      } catch (parseError) {
+        console.error("[KNOWLEDGE] Failed to parse extracted JSON array. Extracted:", jsonMatch[0], "Error:", parseError);
+        return 0;
+      }
+    }
     if (!entities.length) return 0;
 
     let stored = 0;

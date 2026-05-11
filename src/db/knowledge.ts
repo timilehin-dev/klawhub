@@ -85,9 +85,9 @@ export async function searchKnowledge(slackUserId: string, query: string, worksp
         .where(
           and(
             eq(knowledge.slackUserId, slackUserId),
-            workspaceId ? eq(knowledge.workspaceId, workspaceId) : sql`true`
+            workspaceId ? eq(knowledge.workspaceId, workspaceId) : undefined
           )
-         )
+        )
         .orderBy(sql`embedding <=> ${JSON.stringify(embedding)}::vector`)
         .limit(20);
 

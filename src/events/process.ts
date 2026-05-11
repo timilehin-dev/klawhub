@@ -92,19 +92,20 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
 
   // NOTE: The addReaction is now also done in the Inngest message-handler step,
   // but we keep this as a best-effort fallback for when processSlackEvent is called directly.
-  addReaction(channelId, messageTs, "eyes", teamId).catch(() => {});
+  addReaction(channelId, messageTs, "eyes", teamId).catch(() => { });
 
   // Periodic cleanup (~1% chance per event — amortized, non-blocking)
   if (Math.random() < 0.01) {
-    cleanupOldEvents().catch(() => {});
+    cleanupOldEvents().catch(() => { });
   }
 
   // Track workspace member + ensure workspace exists (fire-and-forget, non-critical)
-  ensureMember(userId, teamId).catch(() => {});
-  ensureWorkspaceExists(teamId).catch(() => {});
+  ensureMember(userId, teamId).catch((err) => console.error("[EVENTS] Failed to ensure member/workspace:", err));
+  ensureWorkspaceExists(teamId).catch((err) => console.error("[EVENTS] Failed to ensure member/workspace:", err));
 
   const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
   const hasFiles = !!(event.files && event.files.length > 0);
+  let fileTextContext = "";
   if (!text && !hasFiles) return;
   console.log(`[PERF] processSlackEvent setup: ${Date.now() - _t0}ms`);
 
@@ -112,27 +113,42 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
   const isDM = event.type === "message" && event.channel_type === "im";
   const isThreadReply = !!(threadTs && threadTs !== messageTs);
 
+  // ── Ignore messages from bots (including self) to prevent loops ──
+  if (event.subtype === "bot_message" || event.bot_id) {
+    return;
+  }
+
+  const matchedSkill = matchSkill(text);
+  if (matchedSkill) {
+    console.log(`[EVENTS] Skill matched: ${matchedSkill.name} for text: "${text.slice(0, 50)}..."`);
+  }
+
   let isPassiveListen = false;
   if (!isMention && !isDM && !isThreadReply && channelId) {
+    // Optimization: Only lookup channel name if we have a reason to (e.g. skill matched or proactive check)
+    // For now, we always check if a skill matched. If NOT, we skip the lookup unless we want to support keyword-based proactive channels.
+    if (!matchedSkill) {
+       // In the future, check a local cache of proactive channel IDs here.
+       return; 
+    }
+
     const channelName = await getChannelName(channelId, teamId);
     if (channelName) {
-      const isProactiveChannel = /invoice|finance|billing|receipts|legal/i.test(channelName);
+      const isProactiveChannel = /klawhub-invoice|klawhub-finance|klawhub-legal/i.test(channelName);
       if (isProactiveChannel && event.subtype !== "bot_message") {
         isPassiveListen = true;
       }
     }
   }
 
-  const matchedSkill = matchSkill(text);
-
+  // ── Passive Listening: Suggest help if a skill matches in a regular channel ──
   if (!isMention && !isDM && !isThreadReply && !isPassiveListen) {
-    // Proactive "Listening Coworker" mode:
-    // If a skill matches with high confidence in a regular channel, offer help.
     if (matchedSkill && event.subtype !== "bot_message") {
       try {
+        console.log(`[EVENTS] Posting proactive suggestion for skill: ${matchedSkill.name}`);
         await addReaction(channelId, messageTs, "bulb", teamId);
         const suggestion = `I noticed you're discussing *${matchedSkill.name}*. Would you like me to help with that? 
-_I can start a task for you right now._`;
+_I can start this task for you right now._`;
         await postToThread(channelId, messageTs, suggestion, undefined, teamId);
       } catch (e) {
         console.warn("[LISTENING] Failed to post suggestion:", e);
@@ -154,8 +170,8 @@ _I can start a task for you right now._`;
   console.log(`[PERF] workspaceId resolve (cache=${!!workspaceId || !teamId}): ${Date.now() - _t1}ms`);
 
   // Handle file downloading and parsing proactively if we are passive listening and files exist
-  let fileTextContext = "";
-  if (hasFiles && isPassiveListen && event.files) {
+
+  if (hasFiles && event.files) {
     const file = event.files[0];
     const allowedExtensions = [".pdf", ".docx", ".txt", ".csv", ".json", ".xml", ".yaml", ".yml", ".md"];
     const ext = "." + (file.name || "").split(".").pop()?.toLowerCase();
@@ -164,7 +180,7 @@ _I can start a task for you right now._`;
       try {
         await addReaction(channelId, messageTs, "hourglass", teamId);
         await postToThread(channelId, messageTs,
-          `:mag: *Klawhub Passive Monitoring:* I detected an uploaded document (\`${file.name}\`) in this finance channel. Running secure ephemeral parsing inside the isolated sandbox...`,
+          `:mag: *Klawhub:* I detected an uploaded document (\`${file.name}\`). Running secure ephemeral parsing inside the isolated sandbox...`,
           undefined, teamId
         );
 
@@ -180,12 +196,13 @@ _I can start a task for you right now._`;
         if (result.success && result.text) {
           fileTextContext = `[Uploaded File: ${file.name}]\nExtracted Content:\n${result.text}`;
           await postToThread(channelId, messageTs,
-            `:white_check_mark: Secure parsing complete! Document context loaded. Formulating proactive recommendations...`,
+            `:white_check_mark: Secure parsing complete! Document context loaded.`,
             undefined, teamId
           );
         }
       } catch (err) {
-        console.error("[PASSIVE] Error downloading or parsing file:", err);
+        console.error("[FILE_PROCESSING] Error downloading or parsing file:", err);
+
       }
     }
   }
@@ -316,9 +333,9 @@ async function handleThreadReply(ctx: {
   if (classification.type === "chat" && !isControlSignal) {
     try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
     const responseText = await chatAsAgent(userId, text, { workspaceId, threadHistory, slackChannelId: channelId, slackThreadTs: threadTs, slackTeamId: teamId });
-    memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => {});
-    extractAndStoreKnowledge(userId, text).catch(() => {});
-    updateSessionSummary(userId, text, responseText).catch(() => {});
+    memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => { });
+    extractAndStoreKnowledge(userId, text).catch(() => { });
+    updateSessionSummary(userId, text, responseText).catch(() => { });
     await postToThread(channelId, messageTs, responseText, undefined, teamId);
     return;
   }
@@ -355,7 +372,7 @@ async function handleThreadReply(ctx: {
         data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, runId: newRun.id, teamId },
       });
 
-      memoryWrite(userId, `Build follow-up: ${text.slice(0, 100)}`, "preference", workspaceId).catch(() => {});
+      memoryWrite(userId, `Build follow-up: ${text.slice(0, 100)}`, "preference", workspaceId).catch(() => { });
       return;
     }
   }
@@ -382,7 +399,7 @@ async function handleThreadReply(ctx: {
         data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, taskId: newTask.id, teamId },
       });
 
-      memoryWrite(userId, `${task.type} follow-up: ${text.slice(0, 100)}`, "preference", workspaceId).catch(() => {});
+      memoryWrite(userId, `${task.type} follow-up: ${text.slice(0, 100)}`, "preference", workspaceId).catch(() => { });
       return;
     }
   }
@@ -392,19 +409,19 @@ async function handleThreadReply(ctx: {
   if (matchedSkill) {
     try { await addReaction(channelId, messageTs, "zap", teamId); } catch { /* ok */ }
     await postToThread(channelId, messageTs, `*Executing Skill: ${matchedSkill.name}...*`, undefined, teamId);
-    
+
     const skillCtx = {
       slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs,
       workspaceId, teamId
     };
-    
+
     try {
       const result = await matchedSkill.execute(text, skillCtx);
       await postToThread(channelId, messageTs, result, undefined, teamId);
-      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "success").catch(() => {});
+      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "success").catch(() => { });
     } catch (err) {
       await postToThread(channelId, messageTs, `Skill failed: ${(err as Error).message}`, undefined, teamId);
-      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "error").catch(() => {});
+      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "error").catch(() => { });
     }
     return;
   }
@@ -415,9 +432,9 @@ async function handleThreadReply(ctx: {
     const _t5 = Date.now();
     const responseText = await chatAsAgent(userId, text, { workspaceId, threadHistory, slackChannelId: channelId, slackThreadTs: threadTs || messageTs, slackTeamId: teamId });
     console.log(`[PERF] chatAsAgent (thread reply): ${Date.now() - _t5}ms`);
-    memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => {});
-    extractAndStoreKnowledge(userId, text).catch(() => {});
-    updateSessionSummary(userId, text, responseText).catch(() => {});
+    memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => { });
+    extractAndStoreKnowledge(userId, text).catch(() => { });
+    updateSessionSummary(userId, text, responseText).catch(() => { });
     await postToThread(channelId, messageTs, responseText, undefined, teamId);
     return;
   }
@@ -528,19 +545,19 @@ Please analyze this document/message proactively as a human coworker would.
   if (matchedSkill) {
     try { await addReaction(channelId, messageTs, "zap", teamId); } catch { /* ok */ }
     await postToThread(channelId, messageTs, `*Executing Skill: ${matchedSkill.name}...*`, undefined, teamId);
-    
+
     const skillCtx = {
       slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs,
       workspaceId, teamId
     };
-    
+
     try {
       const result = await matchedSkill.execute(text, skillCtx);
       await postToThread(channelId, messageTs, result, undefined, teamId);
-      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "success").catch(() => {});
+      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "success").catch(() => { });
     } catch (err) {
       await postToThread(channelId, messageTs, `Skill failed: ${(err as Error).message}`, undefined, teamId);
-      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "error").catch(() => {});
+      await trackSkillUsage(matchedSkill.name, userId, channelId, text, "error").catch(() => { });
     }
     return;
   }
@@ -557,9 +574,9 @@ Please analyze this document/message proactively as a human coworker would.
     const responseText = await chatAsAgent(userId, text, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
     const elapsed = Date.now() - t0;
     console.log(`[PERF] chatAsAgent completed in ${elapsed}ms`);
-    memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => {});
-    extractAndStoreKnowledge(userId, text).catch(() => {});
-    updateSessionSummary(userId, text, responseText).catch(() => {});
+    memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => { });
+    extractAndStoreKnowledge(userId, text).catch(() => { });
+    updateSessionSummary(userId, text, responseText).catch(() => { });
     await postToThread(channelId, messageTs, responseText, undefined, teamId);
     return;
   }
@@ -584,7 +601,7 @@ Please analyze this document/message proactively as a human coworker would.
 
   extractAndStoreKnowledge(userId, text).then((stored) => {
     if (stored > 0) console.log(`[EVENTS] Knowledge: stored ${stored} entities for ${userId}`);
-  }).catch(() => {});
+  }).catch(() => { });
 
   try {
     if (classification.type === "build") {
@@ -594,6 +611,20 @@ Please analyze this document/message proactively as a human coworker would.
     }
   } catch (err: unknown) {
     console.error("[EVENTS] trackSkillUsage failed:", err instanceof Error ? err.message : err);
+  }
+
+  // ── Smart Dispatch: Multi-intent requests go to Agent Coordination ──
+  const isMultiIntent = (text.match(/(build|create|write|generate|make|code|develop|implement|script)/i) &&
+    text.match(/(research|investigate|find|look\s+into|explore|study|analyze)/i)) ||
+    text.length > 300;
+
+  if (isMultiIntent) {
+    try { await addReaction(channelId, messageTs, "robot_face", teamId); } catch { /* ok */ }
+    await postToThread(channelId, messageTs, `*Multi-Agent Coordination activated!*\n_Synthesizing a complete solution for your request..._`, undefined, teamId);
+
+    const responseText = await chatAsAgent(userId, text, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
+    await postToThread(channelId, messageTs, responseText, undefined, teamId);
+    return;
   }
 
   if (classification.type === "build") {

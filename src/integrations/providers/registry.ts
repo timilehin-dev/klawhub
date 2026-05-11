@@ -16,8 +16,8 @@ export interface OAuthProviderConfig {
 }
 
 export const providers: Record<string, OAuthProviderConfig> = {
-  google_drive: {
-    id: "google_drive",
+  google: {
+    id: "google",
     name: "Google Workspace",
     logo: "google",
     authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -27,12 +27,10 @@ export const providers: Record<string, OAuthProviderConfig> = {
     clientSecretEnv: "GOOGLE_CLIENT_SECRET",
     scopes: [
       "https://www.googleapis.com/auth/drive.readonly",
-      "https://www.googleapis.com/auth/drive.file",
-      "https://www.googleapis.com/auth/documents",
-      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/documents.readonly",
+      "https://www.googleapis.com/auth/spreadsheets.readonly",
       "https://www.googleapis.com/auth/gmail.send",
       "https://www.googleapis.com/auth/gmail.readonly",
-      "https://www.googleapis.com/auth/gmail.modify",
       "https://www.googleapis.com/auth/calendar.readonly",
     ],
     scopeSeparator: " ",

@@ -36,8 +36,10 @@ export async function connectBrowser(): Promise<Browser | null> {
     });
     return browser;
   } catch (err) {
-    console.error("[BROWSER] Failed to connect:", (err as Error).message);
-    return null;
+    const errorMessage = (err as Error).message;
+    console.error("[BROWSER] Failed to connect:", errorMessage);
+    // Re-throw a more specific error or return an error object for better handling upstream
+    throw new Error(`Browser connection failed: ${errorMessage.slice(0, 200)}`);
   }
 }
 
@@ -75,7 +77,7 @@ export async function withBrowser<T>(
     try {
       return await fn(page);
     } finally {
-      await page.close().catch(() => {});
+      await page.close().catch(() => { });
     }
   } finally {
     await closeBrowser(browser);
@@ -94,14 +96,16 @@ export async function createPage(): Promise<{ page: Page; cleanup: () => Promise
     return {
       page,
       cleanup: async () => {
-        await page.close().catch(() => {});
+        await page.close().catch(() => { });
         await closeBrowser(browser);
       },
     };
   } catch (err) {
-    console.error("[BROWSER] Failed to create page:", (err as Error).message);
+    const errorMessage = (err as Error).message;
+    console.error("[BROWSER] Failed to create page:", errorMessage);
     await closeBrowser(browser);
-    return null;
+    // Re-throw a more specific error or return an error object for better handling upstream
+    throw new Error(`Browser page creation failed: ${errorMessage.slice(0, 200)}`);
   }
 }
 

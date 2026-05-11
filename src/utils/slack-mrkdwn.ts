@@ -29,6 +29,13 @@ export function toSlackMrkdwn(text: string): string {
 
   // 2. Convert GitHub bold (**text**) to Slack bold (*text*)
   //    Must be done BEFORE italic conversion to avoid conflicts
+  // 1. Handle leftover triple/quad asterisks that LLMs sometimes generate (artifacts)
+  //    e.g., "***", "++++", "___" — strip them entirely
+  result = result.replace(/\*{3,}/g, "");
+  result = result.replace(/\+{2,}/g, " ");
+  result = result.replace(/_{3,}/g, "");
+
+  // 2. Convert GitHub bold (**text**) to Slack bold (*text*)
   result = result.replace(/\*\*([^*]+)\*\*/g, "*$1*");
 
   // 3. Convert GitHub strikethrough (~~text~~) to Slack (~text~)

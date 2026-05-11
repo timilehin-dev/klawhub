@@ -13,7 +13,7 @@ function getKey(): Buffer {
   const key = process.env.INTEGRATION_ENCRYPTION_KEY;
   if (!key) throw new Error("INTEGRATION_ENCRYPTION_KEY is not set");
   const buf = Buffer.from(key, "hex");
-  if (buf.length !== 32) throw new Error("INTEGRATION_ENCRYPTION_KEY must be 32 bytes (64 hex chars)");
+  if (buf.length !== 32) throw new Error("INTEGRATION_ENCRYPTION_KEY must be 32 bytes (64 hex chars) after hex decoding.");
   return buf;
 }
 

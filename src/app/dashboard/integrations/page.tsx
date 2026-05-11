@@ -43,16 +43,16 @@ interface ProviderDisplay {
 
 const AVAILABLE_PROVIDERS: ProviderDisplay[] = [
   {
-    id: "google_drive",
+    id: "google",
     name: "Google Workspace",
-    description: "Access Google Drive, Docs, and Sheets. Klawhub can search, read, and export files from your workspace.",
+    description: "Access Google Drive, Docs, Sheets, Gmail, and Calendar. Klawhub can search files, send emails, and manage your schedule.",
     icon: FolderOpen,
     color: "text-blue-600",
     bg: "bg-blue-50",
     borderColor: "border-blue-200",
     required: false,
-    scopes: ["Drive (read)", "Docs (read/write)", "Sheets (read/write)"],
-    setupGuide: "Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID. Enable Google Drive API, Docs API, Sheets API.",
+    scopes: ["Drive", "Docs", "Sheets", "Gmail (Send/Read)", "Calendar"],
+    setupGuide: "Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID. Enable Drive, Docs, Sheets, Gmail, and Calendar APIs.",
   },
   {
     id: "github",
@@ -380,8 +380,8 @@ export default function IntegrationsPage() {
             <ol className="mt-1 space-y-1 text-sm text-surface-700 list-decimal list-inside">
               <li>Go to <span className="font-mono text-xs bg-surface-200 px-1 rounded">Google Cloud Console</span> → APIs & Services → Credentials</li>
               <li>Create an OAuth 2.0 Client ID (Web application)</li>
-              <li>Add redirect URI: <code className="text-xs bg-surface-200 px-1 rounded">{typeof window !== "undefined" ? `${window.location.origin}/api/integrations/callback/google_drive` : "/api/integrations/callback/google_drive"}</code></li>
-              <li>Enable Google Drive API, Docs API, and Sheets API</li>
+              <li>Add redirect URI: <code className="text-xs bg-surface-200 px-1 rounded">{typeof window !== "undefined" ? `${window.location.origin}/api/integrations/callback/google` : "/api/integrations/callback/google"}</code></li>
+              <li>Enable Drive, Docs, Sheets, Gmail, and Calendar APIs</li>
               <li>Set <code className="text-xs bg-surface-200 px-1 rounded">GOOGLE_CLIENT_ID</code> and <code className="text-xs bg-surface-200 px-1 rounded">GOOGLE_CLIENT_SECRET</code> in Vercel env</li>
             </ol>
           </div>

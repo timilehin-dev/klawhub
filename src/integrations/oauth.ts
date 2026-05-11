@@ -48,16 +48,26 @@ export async function exchangeCodeForTokens(
     headers["Accept"] = "application/json";
   }
 
-  const resp = await fetch(provider.tokenUrl, {
-    method: "POST",
-    headers,
-    body: body.toString(),
-  });
-
-  if (!resp.ok) {
-    const errorText = await resp.text();
-    throw new Error(`Token exchange failed (${resp.status}): ${errorText}`);
+  let resp: Response | null = null;
+  for (let i = 0; i <= 2; i++) {
+    try {
+      resp = await fetch(provider.tokenUrl, {
+        method: "POST",
+        headers,
+        body: body.toString(),
+      });
+      if (resp.ok) break;
+      if (i === 2) {
+        const errorText = await resp.text();
+        throw new Error(`Token exchange failed (${resp.status}): ${errorText}`);
+      }
+    } catch (err) {
+      if (i === 2) throw err;
+    }
+    await new Promise(r => setTimeout(r, 1000 * (i + 1)));
   }
+
+  if (!resp || !resp.ok) throw new Error("Token exchange failed after retries");
 
   let data: Record<string, unknown>;
   if (provider.acceptsJson) {
@@ -92,9 +102,9 @@ export async function completeOAuthFlow(
 
   const accountInfo = await fetchAccountInfo(provider, tokens.accessToken);
 
-  const integration = await createIntegration({
+    const integration = await createIntegration({
     workspaceId,
-    provider: provider.id as "google_drive" | "github",
+    provider: provider.id as "google" | "github",
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt,
@@ -103,10 +113,10 @@ export async function completeOAuthFlow(
     externalAccountName: accountInfo.name,
     externalAccountEmail: accountInfo.email,
   });
-
+ 
   return integration;
 }
-
+ 
 /**
  * Fetch account info (id, name, email) from provider API using the access token.
  */
@@ -116,7 +126,7 @@ async function fetchAccountInfo(
 ): Promise<{ id: string; name?: string; email?: string }> {
   try {
     switch (provider.id) {
-      case "google_drive": {
+      case "google": {
         const resp = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
           headers: { Authorization: `Bearer ${accessToken}` },
         });

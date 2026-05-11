@@ -127,7 +127,14 @@ export async function refreshAccessToken(
   const refreshToken = decryptRefreshToken(integration);
   if (!refreshToken) return null;
 
-  const { clientId, clientSecret } = getProviderCredentialsFromConfig(providerConfig);
+  let clientId: string, clientSecret: string;
+  try {
+    ({ clientId, clientSecret } = getProviderCredentialsFromConfig(providerConfig));
+  } catch (err) {
+    console.error(`[INTEGRATION] Missing credentials for provider ${providerConfig.id}:`, err);
+    await markIntegrationError(integration.id, `Missing client credentials: ${(err as Error).message}`);
+    return null;
+  }
   const tokenUrl = providerConfig.refreshUrl || providerConfig.tokenUrl;
   const grantType = providerConfig.refreshTokenGrantType || "refresh_token";
 

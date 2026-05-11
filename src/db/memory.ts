@@ -1,6 +1,6 @@
 import { getDb } from "./connection";
 import { memory } from "./schema";
-import { eq, and, desc, sql, count, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, count, inArray, ilike } from "drizzle-orm";
 import { generateEmbedding } from "@/core/embeddings";
 
 /** Maximum memories per user per category to keep things lean. */
@@ -34,7 +34,7 @@ export async function readMemory(slackUserId: string, query: string, workspaceId
         .where(
           and(
             eq(memory.slackUserId, slackUserId),
-            workspaceId ? eq(memory.workspaceId, workspaceId) : sql`true`
+            workspaceId ? eq(memory.workspaceId, workspaceId) : undefined
           )
         )
         .orderBy(sql`embedding <=> ${JSON.stringify(embedding)}::vector`)
@@ -73,7 +73,7 @@ export async function readMemory(slackUserId: string, query: string, workspaceId
   return getDb()
     .select()
     .from(memory)
-    .where(and(eq(memory.slackUserId, slackUserId), sql`${memory.content} ILIKE ${`%${safeQuery}%`}`))
+    .where(and(eq(memory.slackUserId, slackUserId), ilike(memory.content, `%${safeQuery}%`)))
     .limit(5);
 }
 

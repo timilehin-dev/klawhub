@@ -84,7 +84,7 @@ const DashboardContext = createContext<DashboardContextValue>({
   data: null,
   loading: true,
   error: null,
-  refresh: () => {},
+  refresh: () => { },
 });
 
 export function useDashboard() {
@@ -110,10 +110,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           if (errJson.error) {
             errMsg = errJson.error;
             if (errJson.debug) {
-              setData({ workspace: null, stats: null, usage: null, members: [], integrations: [], debug: errJson.debug } as any);
+              setData({ workspace: null, stats: null, usage: null, members: [], integrations: [] });
             }
           }
-        } catch {}
+        } catch { }
         throw new Error(errMsg);
       }
       const json = await res.json();
@@ -150,7 +150,9 @@ function Sidebar({ workspaceName }: { workspaceName: string }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Invalidate session on the server first
+    await fetch('/api/auth/logout', { method: 'POST' });
     document.cookie = "kh_auth_session=; path=/; max-age=0";
     document.cookie = "klawhub_session=; path=/; max-age=0";
     document.cookie = "klawhub_workspace_name=; path=/; max-age=0";
@@ -181,11 +183,10 @@ function Sidebar({ workspaceName }: { workspaceName: string }) {
               <li key={item.href}>
                 <Link
                   href={item.href}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                    isActive
-                      ? "bg-brand-50 text-brand-700"
-                      : "text-surface-700 hover:bg-surface-100 hover:text-surface-900"
-                  }`}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${isActive
+                    ? "bg-brand-50 text-brand-700"
+                    : "text-surface-700 hover:bg-surface-100 hover:text-surface-900"
+                    }`}
                 >
                   <item.icon size={18} />
                   {item.label}

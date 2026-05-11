@@ -105,12 +105,27 @@ export async function conductResearch(topic: string, meta?: { taskId?: string; s
   });
 
   // Extract sources from the findings text
-  const urlPattern = /https?:\/\/[^\s)]+/g;
-  const urls = [...new Set(findings.match(urlPattern) || [])];
-  const sources = urls.slice(0, 15).map((url) => ({
-    title: url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0],
-    url,
-  }));
+  // Improved URL extraction to also capture titles if present in the findings
+  const sourceRegex = /\*\*(.+?)\*\*\s*\((https?:\/\/[^\s)]+)\)/g; // Matches **Title** (url)
+  const extractedSources: { title: string; url: string }[] = [];
+  let match;
+  while ((match = sourceRegex.exec(findings)) !== null) {
+    extractedSources.push({ title: match[1], url: match[2] });
+  }
+
+  // Fallback for bare URLs if not in structured format
+  const bareUrlPattern = /https?:\/\/[^\s)]+/g;
+  const bareUrls = [...new Set(findings.match(bareUrlPattern) || [])];
+  for (const url of bareUrls) {
+    if (!extractedSources.some(s => s.url === url)) {
+      extractedSources.push({
+        title: url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0], // Derive title from URL
+        url,
+      });
+    }
+  }
+
+  const sources = extractedSources.slice(0, 15);
 
   return { findings, sources };
 }

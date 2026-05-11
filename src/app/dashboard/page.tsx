@@ -80,7 +80,8 @@ export default function DashboardPage() {
   const [agentBreakdown, setAgentBreakdown] = useState<AgentBreakdown[]>([]);
 
   useEffect(() => {
-    if (!data?.members?.length || !data?.workspace?.id) return;
+    // Ensure data.members[0] exists and has an id, and workspace.id exists
+    if (!data?.members?.[0]?.id || !data?.workspace?.id) return;
 
     const memberId = data.members[0].id;
 
@@ -92,8 +93,8 @@ export default function DashboardPage() {
         if (activityData.activities) setActivities(activityData.activities);
         if (usageData.agentBreakdown) setAgentBreakdown(usageData.agentBreakdown);
       })
-      .catch(() => {});
-  }, [data?.members, data?.workspace?.id]);
+      .catch(() => { });
+  }, [data?.members?.[0]?.id, data?.workspace?.id]);
 
   if (loading) return null;
 
@@ -221,7 +222,7 @@ export default function DashboardPage() {
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        
+
         {/* Left Column - LLM Usage Circular Metrics */}
         <div className="silk-raised bg-[#f1f3f9] p-6 flex flex-col justify-between">
           <div>
@@ -259,7 +260,7 @@ export default function DashboardPage() {
                 {/* Simulated Compute Engine Split */}
                 <div className="mt-6 space-y-4">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Estimated Model Allocations</h3>
-                  
+
                   {/* GPT-4 Circular SVG Progress Row */}
                   <div className="flex items-center justify-between p-3 silk-inset-thin">
                     <div className="flex items-center gap-3">
@@ -408,7 +409,7 @@ export default function DashboardPage() {
 
       {/* Team Members & Active Squads Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        
+
         {/* Active Multi-Agent Squad */}
         <div className="silk-raised bg-[#f1f3f9] p-6">
           <div className="flex items-center justify-between pb-4 border-b border-slate-200/50">
@@ -429,7 +430,7 @@ export default function DashboardPage() {
               <div key={i} className="flex items-center justify-between p-3.5 silk-inset-thin">
                 <div className="flex items-center gap-3">
                   <div className="h-8 w-8 rounded-full flex items-center justify-center silk-pill">
-                    <span className="text-xs font-bold text-indigo-600">{agent.name.split(" ")[0].slice(0, 1)}{agent.name.split(" ")[1].slice(0,1)}</span>
+                    <span className="text-xs font-bold text-indigo-600">{agent.name.split(" ")[0].slice(0, 1)}{agent.name.split(" ")[1].slice(0, 1)}</span>
                   </div>
                   <div>
                     <p className="text-xs font-bold text-slate-800">{agent.name}</p>

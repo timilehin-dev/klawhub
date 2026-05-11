@@ -44,7 +44,7 @@ export function getStaleTasks(staleMinutes = 15) {
     .where(
       and(
         inArray(tasks.status, ["pending", "pending_approval", "processing"]),
-        sql`${tasks.updatedAt} < NOW() - INTERVAL '${sql.raw(String(staleMinutes))} minutes'`
+        sql`${tasks.updatedAt} < NOW() - (${staleMinutes} || ' minutes')::interval`
       )
     )
     .orderBy(desc(tasks.updatedAt));

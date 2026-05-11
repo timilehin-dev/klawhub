@@ -16,43 +16,15 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyWorkspaceId } from "@/utils/session";
 
+const SLACK_CLIENT_ID_FOR_UI = process.env.NEXT_PUBLIC_SLACK_CLIENT_ID;
+
 export const metadata: Metadata = {
   title: "Install Klawhub — Add to Your Slack Workspace",
   description:
     "Install Klawhub in your Slack workspace in under 60 seconds. No credit card required.",
 };
 
-const SLACK_CLIENT_ID = process.env.NEXT_PUBLIC_SLACK_CLIENT_ID;
-const SLACK_SCOPES = [
-  "commands",
-  "chat:write",
-  "chat:write.public",
-  "chat:write.customize",
-  "app_mentions:read",
-  "users:read",
-  "channels:read",
-  "groups:read",
-  "im:read",
-  "im:history",
-  "channels:history",
-  "groups:history",
-  "reactions:read",
-  "files:read",
-  "files:write",
-];
-const SLACK_USER_SCOPES = ["search:read"];
 
-function getSlackOAuthUrl(redirectUri?: string) {
-  const params = new URLSearchParams({
-    client_id: SLACK_CLIENT_ID!,
-    scope: SLACK_SCOPES.join(","),
-    user_scope: SLACK_USER_SCOPES.join(","),
-  });
-  if (redirectUri) {
-    params.set("redirect_uri", redirectUri);
-  }
-  return `https://slack.com/oauth/v2/authorize?${params.toString()}`;
-}
 
 const setupSteps = [
   {
@@ -119,8 +91,8 @@ export default async function InstallPage({
   const error = typeof params.error === "string" ? params.error : null;
   const detail = typeof params.detail === "string" ? params.detail : null;
 
-  const isConfigured = Boolean(SLACK_CLIENT_ID);
-  const oauthUrl = isConfigured ? getSlackOAuthUrl() : null;
+  const isConfigured = Boolean(SLACK_CLIENT_ID_FOR_UI);
+  const oauthUrl = "/api/slack/oauth";
 
   return (
     <>

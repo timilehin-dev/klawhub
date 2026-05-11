@@ -109,9 +109,10 @@ export async function POST(req: NextRequest) {
       classification = await classify(text);
     } catch (err) {
       console.error("[COMMANDS] Classification failed:", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
       return NextResponse.json({
         response_type: "ephemeral",
-        text: "Sorry, I couldn't process that request. Please try again.",
+        text: `Sorry, I couldn't process that request. Please try again. Error: ${errorMessage.slice(0, 100)}`,
       });
     }
 
@@ -283,9 +284,9 @@ async function handleStatus(userId: string): Promise<NextResponse> {
     const [runList, taskList, skillStats, memStats, scheduleList] = await Promise.all([
       getRecentRuns(userId, 3),
       getRecentTasks(userId, 3),
-      getUserSkillStats(userId).catch(() => []),
-      getMemoryStats(userId).catch(() => []),
-      getUserSchedules(userId).catch(() => []),
+      getUserSkillStats(userId).catch((error) => { console.error("[COMMANDS] getUserSkillStats failed:", error); return []; }),
+      getMemoryStats(userId).catch((error) => { console.error("[COMMANDS] getMemoryStats failed:", error); return []; }),
+      getUserSchedules(userId).catch((error) => { console.error("[COMMANDS] getUserSchedules failed:", error); return []; }),
     ]);
 
     const lines: string[] = [];

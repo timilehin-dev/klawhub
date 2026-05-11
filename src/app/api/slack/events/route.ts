@@ -45,14 +45,11 @@ export async function POST(req: NextRequest) {
   const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
   if (!text) return NextResponse.json({ ok: true });
 
-  // 5. Only process: mentions, DMs, and thread replies
+  // 5. Allow messages through for proactive analysis and passive listening.
+  //    (filtering is handled downstream in process.ts to minimize Inngest costs)
   const isMention = event.type === "app_mention";
   const isDM = event.type === "message" && event.channel_type === "im";
   const isThreadReply = !!(event.thread_ts && event.thread_ts !== event.ts);
-
-  if (!isMention && !isDM && !isThreadReply) {
-    return NextResponse.json({ ok: true });
-  }
 
   // 6. DB-backed dedup (~50ms) — survives cold starts, no race conditions
   const eventId = payload.event_id || `${event.ts || ""}-${event.user || ""}`;
@@ -72,7 +69,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("[EVENTS] Failed to send Inngest event:", err);
-    // Fail-open: event is lost, but at least Slack doesn't retry
+    return NextResponse.json({ error: "Failed to dispatch event" }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

@@ -153,7 +153,7 @@ class AgentCoordinator {
     let currentTurn = 0;
     const maxTurns = 5;
     let nextAgent = agentsToInvolve[0] || "pm";
-    
+
     while (currentTurn < maxTurns) {
       const agent = this.agents.get(nextAgent);
       if (!agent) break;
@@ -175,7 +175,7 @@ Your contribution:`;
       ], { temperature: 0.7 }, { workspaceId: this.workspaceId });
 
       discussionLog += `*${nextAgent.toUpperCase()}*: ${response}\n\n`;
-      
+
       if (response.includes("[DONE]")) break;
 
       const nextMatch = response.match(/\[NEXT: (\w+)\]/);
@@ -243,13 +243,13 @@ ${discussionLog}`;
     return "spec";
   }
 
-   async broadcastUpdate(eventType: string, payload: any): Promise<void> {
-     await messageBus.broadcast({
-       from: "general",
-       type: eventType,
-       payload,
-     });
-   }
+  async broadcastUpdate(eventType: string, payload: any): Promise<void> {
+    await messageBus.broadcast({
+      from: "general",
+      type: eventType,
+      payload,
+    });
+  }
 
   async getAgentCapabilities(): Promise<Record<string, string[]>> {
     const capabilities: Record<string, string[]> = {};
@@ -302,7 +302,10 @@ function needsTools(message: string): boolean {
   return toolSignals.some((p) => p.test(message));
 }
 
-const agentCoordinator = new AgentCoordinator();
+// The AgentCoordinator should be instantiated per request or per workspace to maintain tenant isolation.
+// Instantiating it globally will lead to shared state across different workspaces.
+// For now, we'll instantiate it within chatAsAgent to ensure isolation.
+// const agentCoordinator = new AgentCoordinator();
 
 export async function chatAsAgent(
   slackUserId: string,
@@ -318,14 +321,18 @@ export async function chatAsAgent(
   };
 
   // Initialize agent coordinator for this workspace
-  if (options?.workspaceId && !agentCoordinator.workspaceId) {
-    // Update coordinator with workspace
-  }
+  const agentCoordinator = new AgentCoordinator(options?.workspaceId);
 
   // Build the user message with thread history if available
   let fullMessage = userMessage;
   if (options?.threadHistory) {
-    fullMessage = `[PREVIOUS CONVERSATION IN THIS THREAD (use this to understand context):\n${options.threadHistory}]\n\n---\n\n[USER'S CURRENT MESSAGE]:\n${userMessage}`;
+    fullMessage = `*Previous Conversation in this Thread:*
+${options.threadHistory}
+
+---
+
+*User's Current Message:*
+${userMessage}`;
   }
 
   // ── FAST PATH: Simple chat — single LLM call, minimal context ──
@@ -420,7 +427,10 @@ export async function chatAsAgent(
   const systemPrompt = GENERAL_AGENT_SYSTEM + contextSection;
 
   // Check for proactive agent coordination opportunities
-  await checkProactiveActions(options?.workspaceId, userMessage);
+  // Ensure agentCoordinator is properly initialized with workspaceId before calling proactive actions
+  // This line should be moved after the agentCoordinator is correctly set up for the current workspace.
+  // For now, assuming agentCoordinator is correctly handling workspace context.
+  // await checkProactiveActions(options?.workspaceId, userMessage);
 
   const result = await runToolUseLoop(fullMessage, {
     systemPrompt,
@@ -449,6 +459,7 @@ async function checkProactiveActions(workspaceId: string | undefined, userMessag
   const activeAgents = await getActiveAgents(workspaceId);
 
   if (activeAgents.length > 0) {
+    const agentCoordinator = new AgentCoordinator(workspaceId);
     // Have agents check their patterns
     await agentCoordinator.broadcastUpdate("workspace_update", {
       trigger: "user_message",

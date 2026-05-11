@@ -130,7 +130,10 @@ export async function testCode(
   );
 
   const verdictMatch = evaluation.match(/VERDICT:\s*(PASS|FAIL)/i);
-  const passed = verdictMatch?.[1]?.toUpperCase() === "PASS" && execution.success;
+  // Determine 'passed' based on LLM's verdict and execution success.
+  // If execution failed, the LLM's 'PASS' might be misleading, but we should still capture its evaluation.
+  const llmVerdictPassed = verdictMatch?.[1]?.toUpperCase() === "PASS";
+  const passed = llmVerdictPassed && execution.success;
 
   // Extract structured learning from QA evaluation
   let learning: TestResult["learning"] = undefined;

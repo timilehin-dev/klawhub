@@ -11,7 +11,7 @@ function getSecret(): Buffer {
   // Prioritize INTEGRATION_ENCRYPTION_KEY to ensure absolute consistency across Serverless and Edge runtimes
   const secret = process.env.INTEGRATION_ENCRYPTION_KEY || process.env.SESSION_SECRET;
   if (!secret) throw new Error("INTEGRATION_ENCRYPTION_KEY or SESSION_SECRET is required");
-  
+
   // Force treating as utf8 under both standard Node and Next.js Edge runtimes.
   // This bypasses Next.js Edge hex-decoding polyfill bugs and aligns keys perfectly.
   return Buffer.from(secret, "utf8");
@@ -24,16 +24,13 @@ function getSecret(): Buffer {
  * Format: "workspaceId.hmacHex"
  */
 export async function signWorkspaceId(workspaceId: string): Promise<string> {
-  const secret = process.env.INTEGRATION_ENCRYPTION_KEY || process.env.SESSION_SECRET;
-  if (!secret) throw new Error("INTEGRATION_ENCRYPTION_KEY or SESSION_SECRET is required");
-
   // Use global, standard Web Crypto API available natively in both standard Node.js and Edge Runtime.
   // This bypasses any buggy node-crypto polyfills.
   const subtle = typeof crypto !== "undefined" && crypto.subtle ? crypto.subtle : (globalThis as any).crypto?.subtle;
   if (!subtle) throw new Error("Web Crypto API (subtle) is not available in this runtime environment");
 
+  const keyData = getSecret();
   const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
   const data = encoder.encode(workspaceId);
 
   const key = await subtle.importKey(
@@ -49,7 +46,7 @@ export async function signWorkspaceId(workspaceId: string): Promise<string> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
-  return `${workspaceId}.${sigHex.slice(0, 32)}`;
+  return `${workspaceId}.${sigHex}`;
 }
 
 /**
@@ -67,14 +64,11 @@ export async function verifyWorkspaceId(cookieValue: string): Promise<string | n
     const workspaceId = cookieValue.slice(0, dotIndex);
     const sig = cookieValue.slice(dotIndex + 1);
 
-    const secret = process.env.INTEGRATION_ENCRYPTION_KEY || process.env.SESSION_SECRET;
-    if (!secret) return null;
-
     const subtle = typeof crypto !== "undefined" && crypto.subtle ? crypto.subtle : (globalThis as any).crypto?.subtle;
     if (!subtle) throw new Error("Web Crypto API (subtle) is not available in this runtime environment");
 
     const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
+    const keyData = getSecret();
     const data = encoder.encode(workspaceId);
 
     const key = await subtle.importKey(
@@ -88,13 +82,20 @@ export async function verifyWorkspaceId(cookieValue: string): Promise<string | n
     const signature = await subtle.sign("HMAC", key, data);
     const expectedSigHex = Array.from(new Uint8Array(signature))
       .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-      .slice(0, 32);
+      .join("");
 
-    if (expectedSigHex === sig) {
-      return workspaceId;
+    // Use timingSafeEqual to prevent timing attacks
+    try {
+      const expectedBuf = Buffer.from(expectedSigHex, "utf8");
+      const actualBuf = Buffer.from(sig, "utf8");
+      if (expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf)) {
+        return workspaceId;
+      }
+    } catch {
+      // Fallback to standard comparison if Buffers fail, but log it
+      if (expectedSigHex === sig) return workspaceId;
     }
-    
+
     console.warn("[SESSION] Cookie signature mismatch verification failed. WorkspaceId:", workspaceId);
     return null;
   } catch (err) {
@@ -115,7 +116,7 @@ export function createSignedOAuthState(provider: string, workspaceId: string): s
   const payload = `${provider}:${workspaceId}:${timestamp}`;
   const hmac = createHmac("sha256", getSecret());
   hmac.update(payload);
-  const sig = hmac.digest("hex").slice(0, 32);
+  const sig = hmac.digest("hex");
   return `${payload}.${sig}`;
 }
 
@@ -132,11 +133,11 @@ export function verifyOAuthState(state: string): { provider: string; workspaceId
 
   const hmac = createHmac("sha256", getSecret());
   hmac.update(payload);
-  const expected = hmac.digest("hex").slice(0, 32);
+  const expected = hmac.digest("hex");
 
   try {
-    const expectedBuf = Buffer.from(expected, "utf8");
-    const actualBuf = Buffer.from(sig, "utf8");
+    const expectedBuf = Buffer.from(expected, "hex");
+    const actualBuf = Buffer.from(sig, "hex");
     if (expectedBuf.length !== actualBuf.length) return null;
     if (!timingSafeEqual(expectedBuf, actualBuf)) return null;
   } catch {

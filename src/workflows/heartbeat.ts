@@ -44,8 +44,9 @@ export const heartbeatWorkflow = inngest.createFunction(
 
     // Step 2: For each workspace, check integrations for changes
     for (const workspace of workspacesData) {
-      const updates = await step.run(`check-${workspace.id.slice(0, 8)}`, async () => {
-        const workspaceUpdates: string[] = [];
+      const checkResult = await step.run(`check-${workspace.id.slice(0, 8)}`, async () => {
+        const updates: string[] = [];
+        const metadataUpdates: Array<{ integrationId: string; metadata: Record<string, unknown> }> = [];
 
         // Check GitHub integrations
         const githubIntegrations = await getDb()
@@ -59,61 +60,46 @@ export const heartbeatWorkflow = inngest.createFunction(
           .limit(1);
 
         if (githubIntegrations.length > 0) {
+          const integration = githubIntegrations[0];
+          const metadata = (integration.metadata as Record<string, unknown>) || {};
+          const lastNotifiedAt = metadata.lastNotifiedGitHubAt ? new Date(metadata.lastNotifiedGitHubAt as string) : new Date(0);
+
           try {
             const { githubListRepos } = await import("@/integrations/clients");
             const repos = await githubListRepos(workspace.id);
-            // Filter repos updated in the last 2 hours
-            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-            const recentRepos = repos.filter((r: { updatedAt: string }) => {
+            // Find repos updated after lastNotifiedAt
+            const newRepos = repos.filter((r: { updatedAt: string }) => {
               if (!r.updatedAt) return false;
-              return new Date(r.updatedAt) >= twoHoursAgo;
+              return new Date(r.updatedAt) > lastNotifiedAt;
             });
-            if (recentRepos.length > 0) {
-              const repoList = recentRepos
+
+            if (newRepos.length > 0) {
+              const repoList = newRepos
                 .slice(0, 5)
                 .map((r: { name: string; updatedAt: string }) => `• *${r.name}* — updated ${new Date(r.updatedAt).toLocaleTimeString()}`)
                 .join("\n");
-              workspaceUpdates.push(`*GitHub Activity*\n${recentRepos.length} repo(s) updated recently:\n${repoList}`);
+              updates.push(`*GitHub Activity*\n${newRepos.length} repo(s) updated recently:\n${repoList}`);
+
+              // Find max updatedAt
+              const maxUpdatedAt = newRepos.reduce((max: string, r: { updatedAt: string }) => {
+                return new Date(r.updatedAt) > new Date(max) ? r.updatedAt : max;
+              }, newRepos[0].updatedAt);
+
+              metadataUpdates.push({
+                integrationId: integration.id,
+                metadata: {
+                  ...metadata,
+                  lastNotifiedGitHubAt: maxUpdatedAt,
+                },
+              });
             }
-          } catch {
-            // GitHub check failed — skip silently
+          } catch (err) {
+            console.warn(`[HEARTBEAT] GitHub list repos failed for workspace ${workspace.id}:`, err);
           }
         }
 
-        // Check Google Drive integrations
-        const driveIntegrations = await getDb()
-          .select()
-          .from(integrations)
-          .where(and(
-            eq(integrations.workspaceId, workspace.id),
-            eq(integrations.provider, "google_drive"),
-            eq(integrations.status, "active"),
-          ))
-          .limit(1);
-
-        if (driveIntegrations.length > 0) {
-          try {
-            const { googleDriveListFiles } = await import("@/integrations/clients");
-            const files = await googleDriveListFiles(workspace.id, 10);
-            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-            const recentFiles = files.filter((f: { modifiedAt: string }) => {
-              if (!f.modifiedAt) return false;
-              return new Date(f.modifiedAt) >= twoHoursAgo;
-            });
-            if (recentFiles.length > 0) {
-              const fileList = recentFiles
-                .slice(0, 5)
-                .map((f: { name: string; modifiedAt: string }) => `• *${f.name}* — modified ${new Date(f.modifiedAt).toLocaleTimeString()}`)
-                .join("\n");
-              workspaceUpdates.push(`*Google Drive Activity*\n${recentFiles.length} file(s) modified recently:\n${fileList}`);
-            }
-          } catch {
-            // Google Drive check failed — skip silently
-          }
-        }
-
-        // Check Gmail integrations
-        const gmailIntegrations = await getDb()
+        // Check Google integrations (Drive & Gmail)
+        const googleIntegrations = await getDb()
           .select()
           .from(integrations)
           .where(and(
@@ -123,33 +109,89 @@ export const heartbeatWorkflow = inngest.createFunction(
           ))
           .limit(1);
 
-        if (gmailIntegrations.length > 0) {
+        if (googleIntegrations.length > 0) {
+          const integration = googleIntegrations[0];
+          const metadata = (integration.metadata as Record<string, unknown>) || {};
+          const lastNotifiedDriveAt = metadata.lastNotifiedDriveAt ? new Date(metadata.lastNotifiedDriveAt as string) : new Date(0);
+          const lastNotifiedGmailIds = (metadata.lastNotifiedGmailIds as string[]) || [];
+
+          let hasGoogleUpdates = false;
+          let newLastNotifiedDriveAt: string | undefined = undefined;
+          let newLastNotifiedGmailIds = [...lastNotifiedGmailIds];
+
+          // Check Google Drive
+          try {
+            const { googleDriveListFiles } = await import("@/integrations/clients");
+            const files = await googleDriveListFiles(workspace.id, 10);
+            const newFiles = files.filter((f: { modifiedAt: string }) => {
+              if (!f.modifiedAt) return false;
+              return new Date(f.modifiedAt) > lastNotifiedDriveAt;
+            });
+
+            if (newFiles.length > 0) {
+              const fileList = newFiles
+                .slice(0, 5)
+                .map((f: { name: string; modifiedAt: string }) => `• *${f.name}* — modified ${new Date(f.modifiedAt).toLocaleTimeString()}`)
+                .join("\n");
+              updates.push(`*Google Drive Activity*\n${newFiles.length} file(s) modified recently:\n${fileList}`);
+
+              // Find max modifiedAt
+              newLastNotifiedDriveAt = newFiles.reduce((max: string, f: { modifiedAt: string }) => {
+                return new Date(f.modifiedAt) > new Date(max) ? f.modifiedAt : max;
+              }, newFiles[0].modifiedAt);
+              hasGoogleUpdates = true;
+            }
+          } catch (err) {
+            console.warn(`[HEARTBEAT] Google Drive list files failed for workspace ${workspace.id}:`, err);
+          }
+
+          // Check Gmail
           try {
             const { gmailListMessages } = await import("@/integrations/clients");
-            const emails = await gmailListMessages(workspace.id, 5, "is:unread");
-            if (emails && emails.length > 0) {
-              const emailList = emails
+            const emails = await gmailListMessages(workspace.id, 10, "is:unread");
+            
+            // Filter out emails we have already notified
+            const newEmails = emails.filter((e: { id: string }) => !lastNotifiedGmailIds.includes(e.id));
+
+            if (newEmails.length > 0) {
+              const emailList = newEmails
                 .slice(0, 3)
                 .map((m: any) => `• *From:* ${m.from}\n  *Subject:* ${m.subject}\n  *Snippet:* ${m.snippet}`)
                 .join("\n");
-              workspaceUpdates.push(`*Gmail Activity*\n${emails.length} new unread email(s):\n${emailList}`);
+              updates.push(`*Gmail Activity*\n${newEmails.length} new unread email(s):\n${emailList}`);
+
+              // Append new email IDs
+              const newIds = newEmails.map((e: { id: string }) => e.id);
+              newLastNotifiedGmailIds = [...newIds, ...newLastNotifiedGmailIds].slice(0, 100);
+              hasGoogleUpdates = true;
             }
-          } catch {
-            // Gmail check failed — skip silently
+          } catch (err) {
+            console.warn(`[HEARTBEAT] Gmail list messages failed for workspace ${workspace.id}:`, err);
+          }
+
+          if (hasGoogleUpdates) {
+            metadataUpdates.push({
+              integrationId: integration.id,
+              metadata: {
+                ...metadata,
+                ...(newLastNotifiedDriveAt ? { lastNotifiedDriveAt: newLastNotifiedDriveAt } : {}),
+                lastNotifiedGmailIds: newLastNotifiedGmailIds,
+              },
+            });
           }
         }
 
-        return workspaceUpdates;
+        return { updates, metadataUpdates };
       });
 
       // Step 3: Post updates to Slack if there are any
-      if (updates.length > 0) {
+      if (checkResult.updates.length > 0) {
         await step.run(`notify-${workspace.id.slice(0, 8)}`, async () => {
           try {
             // Dedup check: skip if we already posted for this workspace recently
             const lastPost = lastUpdateCache.get(workspace.id);
             if (lastPost && Date.now() - lastPost < CACHE_TTL) {
-              return; // Skip — already posted recently
+              return;
             }
 
             // Use workspace-specific Slack client
@@ -169,19 +211,26 @@ export const heartbeatWorkflow = inngest.createFunction(
             if (memberChannels.length === 0) return;
 
             // Post to the first channel where bot is a member
-            // (In future, could be configurable per workspace)
-            const message = `:pulse: *Klawhub Heartbeat* — ${workspace.name}\n\n${updates.join("\n\n")}\n\n_I monitor your integrations every 30 minutes. Reply with any questions._`;
+            const message = `:pulse: *Klawhub Heartbeat* — ${workspace.name}\n\n${checkResult.updates.join("\n\n")}\n\n_I monitor your integrations. Reply with any questions._`;
 
             await wsSlack.chat.postMessage({
               channel: memberChannels[0],
               text: message,
             });
 
-            // Mark as posted
+            // On success: Update integration metadata in DB to persist watermarks
+            for (const item of checkResult.metadataUpdates) {
+              await getDb()
+                .update(integrations)
+                .set({ metadata: item.metadata, updatedAt: new Date() })
+                .where(eq(integrations.id, item.integrationId));
+            }
+
+            // Mark as posted in ephemeral cache
             lastUpdateCache.set(workspace.id, Date.now());
-            totalUpdates += updates.length;
-          } catch {
-            // Slack posting failed — skip
+            totalUpdates += checkResult.updates.length;
+          } catch (err) {
+            console.error(`[HEARTBEAT] Failed to post message for workspace ${workspace.id}:`, err);
           }
         });
       }

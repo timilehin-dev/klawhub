@@ -29,9 +29,9 @@ export async function claimEvent(eventId: string): Promise<boolean> {
 
     return result.length > 0;
   } catch (err) {
-    // Fail-open: if DB is down, allow processing (Slack will dedup via event_id retry)
-    console.error("[DEDUP] DB error (fail-open):", err instanceof Error ? err.message : err);
-    return true;
+    // Fail-safe: if DB is down, prevent processing to avoid duplicates
+    console.error("[DEDUP] DB error (fail-safe):", err instanceof Error ? err.message : err);
+    return false; // Return false to indicate failure to claim, preventing duplicate processing
   }
 }
 

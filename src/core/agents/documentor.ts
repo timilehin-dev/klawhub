@@ -23,28 +23,36 @@ Rules:
 - Return ONLY the JSON, no markdown fences, no explanation`;
 
 function safeJsonParse(raw: string): Record<string, any> | null {
-  // Try direct parse first
-  try {
-    return JSON.parse(raw);
-  } catch { /* continue */ }
-
-  // Strip markdown fences if present
   let cleaned = raw.trim();
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-  }
+
+  // Attempt to parse directly
   try {
     return JSON.parse(cleaned);
-  } catch { /* continue */ }
+  } catch (e) {
+    // console.debug("First JSON parse attempt failed:", e.message);
+  }
 
-  // Try to extract JSON object from surrounding text
+  // If it's wrapped in markdown code block, try to extract and parse
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+    try {
+      return JSON.parse(cleaned);
+    } catch (e) {
+      // console.debug("Second JSON parse attempt (after markdown strip) failed:", e.message);
+    }
+  }
+
+  // Fallback: try to find the first JSON object in the string
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
       return JSON.parse(jsonMatch[0]);
-    } catch { /* continue */ }
+    } catch (e) {
+      // console.debug("Third JSON parse attempt (regex extract) failed:", e.message);
+    }
   }
 
+  console.error("Failed to parse JSON after multiple attempts. Raw input:", raw.slice(0, 500));
   return null;
 }
 

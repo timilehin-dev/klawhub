@@ -23,7 +23,7 @@ AI models are only orchestration layers. Tools, skills, and memory are the found
 ## Current State (May 2026)
 
 *   **Phase 0 & 1 Complete**: Klawhub now possesses foundational autonomy via the `dispatch_task` tool, cross-thread context memory (Upstash Redis), and fully hardened Slack markdown handling. 
-*   **Active Infrastructure**: Supabase (PostgreSQL), Vercel (Hosting), Inngest (Workflows), Slack (UI), Ollama / AIHubMix (LLMs), Upstash Redis (Context Cache).
+*   **Active Infrastructure**: Supabase (PostgreSQL), Vercel (Hosting), Inngest (Workflows), Slack (UI), Ollama (LLMs), Upstash Redis (Context Cache).
 *   **Database**: All tables required for multi-tenant memory, orchestrations, and skills are active (`runs`, `tasks`, `memory`, `knowledge`, `schedules`, etc.).
 
 ---

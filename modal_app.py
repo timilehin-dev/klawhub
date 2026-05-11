@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import os
 import json
+import resource
 import base64
 import glob
 import hmac
@@ -47,11 +48,11 @@ image = (
 def verify_request(request: Request) -> bool:
     """Verify requests using a shared webhook secret."""
     provided = request.headers.get("X-Webhook-Secret", "")
-    expected = os.environ.get("MODAL_WEBHOOK_SECRET", "")
+    expected = modal.container_app.secrets["klawhub-webhook-secret"]
 
     if not expected:
-        # No secret configured — allow (dev mode)
-        return True
+        # Secret MUST be configured in production
+        return False
 
     if not provided:
         return False
@@ -69,33 +70,12 @@ def execute_code(code: str, language: str = "python", dependencies: str = ""):
         return {"success": False, "error": f"Unsupported language: {language}"}
 
     if dependencies:
-        import re
-        if language == "python":
-            cleaned = dependencies.replace("pip install", "").replace("-r requirements.txt", "").strip()
-            packages = [p.strip() for p in re.split(r"[\s,]+", cleaned) if p.strip()]
-            if packages:
-                try:
-                    subprocess.run(["pip", "install"] + packages, capture_output=True, check=True)
-                except subprocess.CalledProcessError as e:
-                    return {
-                        "success": False,
-                        "stdout": "",
-                        "stderr": e.stderr or "",
-                        "error": f"Failed to install python dependencies: {e.stderr or str(e)}"
-                    }
-        elif language == "javascript":
-            cleaned = dependencies.replace("npm install", "").replace("npm i", "").strip()
-            packages = [p.strip() for p in re.split(r"[\s,]+", cleaned) if p.strip()]
-            if packages:
-                try:
-                    subprocess.run(["npm", "install"] + packages, capture_output=True, check=True)
-                except subprocess.CalledProcessError as e:
-                    return {
-                        "success": False,
-                        "stdout": "",
-                        "stderr": e.stderr or "",
-                        "error": f"Failed to install javascript dependencies: {e.stderr or str(e)}"
-                    }
+        # CRITICAL: Arbitrary pip/npm install is disabled for security.
+        # Use the pre-configured 'image' to add new persistent dependencies.
+        return {
+            "success": False,
+            "error": "Dynamic dependency installation is disabled for security. Please request image updates."
+        }
 
     try:
         ext = ".py" if language == "python" else ".js"
@@ -105,8 +85,39 @@ def execute_code(code: str, language: str = "python", dependencies: str = ""):
             f.write(code)
             filepath = f.name
 
+        def set_resource_limits():
+            # Set virtual memory limit to 512 MB (512 * 1024 * 1024 bytes).
+            # RLIMIT_AS limits the total address space (virtual memory).
+            # Both soft and hard limits are set to the same value.
+            # These limits are for the child process executing user code.
+            # Note: These values are examples and should be tuned based on expected usage.
+            try:
+                resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+            except ValueError:
+                # This can happen if the limit is too high for the system or already exceeded.
+                # In a production environment, this should be logged.
+                pass
+
+            # Set CPU time limit to 30 seconds.
+            # RLIMIT_CPU limits the amount of CPU time the process can consume.
+            # Both soft and hard limits are set to the same value.
+            # Note: This value aligns with the subprocess.run timeout.
+            try:
+                resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
+            except ValueError:
+                # In a production environment, this should be logged.
+                pass
+
         try:
-            result = subprocess.run(cmd + [filepath], capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                cmd + [filepath],
+                capture_output=True,
+                timeout=30, # This timeout is for the parent process waiting for the child.
+                preexec_fn=set_resource_limits # Apply resource limits to the child process before exec.
+            )
+            # Decode stdout/stderr explicitly to avoid UnicodeDecodeError
+            stdout_decoded = result.stdout.decode('utf-8', errors='replace')
+            stderr_decoded = result.stderr.decode('utf-8', errors='replace')
         finally:
             try:
                 os.unlink(filepath)
@@ -381,7 +392,7 @@ def parse_document(file_b64: str, filename: str):
                 text_content = "\n\n".join(pages_text)
                 metadata = {"pages": len(pdf.pages)}
         elif ext in [".txt", ".csv", ".json", ".xml", ".yaml", ".yml", ".md"]:
-            text_content = file_bytes.decode("utf-8", errors="ignore")
+            text_content = file_bytes.decode("utf-8", errors="replace")
         elif ext == ".docx":
             from docx import Document
             doc = Document(temp_path)
@@ -392,7 +403,7 @@ def parse_document(file_b64: str, filename: str):
                     tables_text.append(" | ".join([cell.text.strip() for cell in row.cells]))
             text_content = "\n".join(paragraphs) + "\n\n--- Tables ---\n" + "\n".join(tables_text)
         else:
-            text_content = file_bytes.decode("utf-8", errors="ignore")
+            text_content = file_bytes.decode("utf-8", errors="replace")
             
         try:
             os.unlink(temp_path)

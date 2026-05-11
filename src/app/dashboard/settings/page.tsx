@@ -35,7 +35,7 @@ export default function SettingsPage() {
         const res = await fetch("/api/dashboard/settings");
         if (!res.ok) throw new Error("Failed to load settings");
         const json = await res.json();
-        
+
         setAgentName(json.agentName);
         setAgentPersonality(json.agentPersonality);
         setMonthlyRunLimit(json.monthlyRunLimit);
@@ -126,7 +126,7 @@ export default function SettingsPage() {
 
       {/* Settings Form */}
       <form onSubmit={handleSave} className="space-y-6">
-        
+
         {/* Card: Identity */}
         <div className="rounded-2xl border border-surface-200 bg-white p-6 shadow-sm space-y-6">
           <h2 className="text-lg font-bold text-surface-900 flex items-center gap-2 border-b border-surface-100 pb-3">
@@ -135,7 +135,7 @@ export default function SettingsPage() {
           </h2>
 
           <div className="grid grid-cols-1 gap-6">
-            
+
             {/* Agent Name */}
             <div className="space-y-2">
               <label htmlFor="agentName" className="block text-sm font-semibold text-surface-950">
@@ -188,7 +188,7 @@ export default function SettingsPage() {
           </h2>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            
+
             {/* Monthly Budget Input */}
             <div className="space-y-2">
               <label htmlFor="limit" className="block text-sm font-semibold text-surface-950">
@@ -198,7 +198,9 @@ export default function SettingsPage() {
                 type="number"
                 id="limit"
                 min={1}
-                max={500}
+                // max={500} // Remove hardcoded max, as it might conflict with higher plan limits
+                // Consider dynamically setting max based on the current plan if needed
+                // max={plan === 'pro' ? 1000 : (plan === 'enterprise' ? 999999 : 50)}
                 value={monthlyRunLimit}
                 onChange={(e) => setMonthlyRunLimit(parseInt(e.target.value) || 50)}
                 className="block w-full rounded-lg border border-surface-200 bg-surface-50 px-4 py-2.5 text-sm text-surface-900 focus:border-indigo-500 focus:bg-white focus:outline-none transition-all"
@@ -244,14 +246,12 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setIsActive(!isActive)}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                isActive ? "bg-indigo-600" : "bg-slate-200"
-              }`}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isActive ? "bg-indigo-600" : "bg-slate-200"
+                }`}
             >
               <span
-                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                  isActive ? "translate-x-5" : "translate-x-0"
-                }`}
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${isActive ? "translate-x-5" : "translate-x-0"
+                  }`}
               />
             </button>
           </div>

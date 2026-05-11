@@ -15,11 +15,14 @@ export const agentCheckInWorkflow = inngest.createFunction(
       await step.run(`proactive-check-${ws.id}`, async () => {
         // 1. Get channels the bot is in for this workspace
         const channels = await listUserChannels(ws.slackTeamId);
-        
+
         for (const channel of channels) {
           // 2. Fetch recent history (Zero-Persistence: not saved to DB)
-          const history = await getChannelHistory(channel.id, 15, ws.slackTeamId);
-          
+          let history = await getChannelHistory(channel.id, 15, ws.slackTeamId);
+          if (ws.slackBotUserId) {
+            history = history.filter(m => m.user !== ws.slackBotUserId);
+          }
+
           if (history.length === 0) continue;
 
           // 3. Analyze for unanswered questions or silence
@@ -43,8 +46,8 @@ export const agentCheckInWorkflow = inngest.createFunction(
             // 4. Post proactive suggestion to the last message thread (or channel)
             const lastMsg = history[0];
             await postToThread(
-              channel.id, 
-              lastMsg.thread_ts || lastMsg.ts, 
+              channel.id,
+              lastMsg.thread_ts || lastMsg.ts,
               `*Proactive Suggestion:* ${suggestion}\n\n_I noticed this thread was quiet and wanted to help out!_`,
               undefined,
               ws.slackTeamId

@@ -1,4 +1,5 @@
 import { llm } from "@/core/llm";
+import { isValidCron } from "@/utils/cron-validator";
 
 interface ParsedSchedule {
   name: string;
@@ -15,6 +16,7 @@ Rules:
   - "every day at 8am" → "0 8 * * *"
   - "every monday at 2pm" → "0 14 * * 1"
   - "every 2 hours" → "0 */2 * * *"
+  - "last Friday of every month at 5pm" → "0 17 25-31 * 5"
 - "timezone": IANA timezone string. WAT = Africa/Lagos, EST = America/New_York. Default: Africa/Lagos
 - "name": short descriptive name, max 50 chars
 - "action": the task/prompt to execute when the schedule fires
@@ -24,7 +26,7 @@ Example output: {"name": "Daily Forex Summary", "cron_expr": "0 8 * * 1-5", "tim
 
 Input:`;
 
-export async function parseScheduleRequest(request: string): Promise<ParsedSchedule> {
+export async function parseScheduleRequest(request: string, retries = 1): Promise<ParsedSchedule> {
   const response = await llm.chat([
     { role: "system", content: SCHEDULE_PARSER_PROMPT },
     { role: "user", content: request },
@@ -35,12 +37,16 @@ export async function parseScheduleRequest(request: string): Promise<ParsedSched
 
   // Extract JSON object
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Could not parse schedule request from LLM response");
+  if (!jsonMatch) {
+    if (retries > 0) return parseScheduleRequest(request, retries - 1);
+    throw new Error("Could not parse schedule request from LLM response");
+  }
 
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(jsonMatch[0]);
   } catch {
+    if (retries > 0) return parseScheduleRequest(request, retries - 1);
     throw new Error("Invalid JSON returned by LLM");
   }
 
@@ -50,13 +56,13 @@ export async function parseScheduleRequest(request: string): Promise<ParsedSched
   const name = (parsed.name || parsed.title || "Untitled Schedule") as string;
   const action = (parsed.action || parsed.task || parsed.prompt || request) as string;
 
-  if (!cronExpr || typeof cronExpr !== "string") {
-    throw new Error("Missing or invalid cron_expr in schedule response");
-  }
-
-  const parts = cronExpr.trim().split(/\s+/);
-  if (parts.length !== 5) {
-    throw new Error(`Invalid cron expression: ${cronExpr}`);
+  if (!cronExpr || typeof cronExpr !== "string" || !isValidCron(cronExpr)) {
+    if (retries > 0) {
+      console.warn(`[PARSER] Invalid cron "${cronExpr}" detected. Retrying with explicit corrective prompt...`);
+      const correctiveRequest = `The following request resulted in an invalid cron expression "${cronExpr}". Please provide a valid 5-field cron for: "${request}"`;
+      return parseScheduleRequest(correctiveRequest, retries - 1);
+    }
+    throw new Error(`Invalid or missing cron expression after parsing: ${cronExpr}`);
   }
 
   return {

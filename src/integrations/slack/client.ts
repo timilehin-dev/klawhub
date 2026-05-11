@@ -50,8 +50,8 @@ export async function getWorkspaceSlack(teamId?: string): Promise<WebClient> {
         return client;
       }
     }
-  } catch {
-    // DB lookup failed — fall through to default
+  } catch (err) {
+    console.error(`[Slack Client] Error fetching workspace or decrypting token for team ${teamId}:`, err);
   }
 
   // Fallback: use default token and cache it for this teamId
@@ -151,6 +151,8 @@ export async function addReaction(channel: string, timestamp: string, emoji: str
   try {
     return await client.reactions.add({ channel, timestamp, name: emoji });
   } catch (error: any) {
+    // Slack API errors often have a 'code' or specific error types. Relying on message string is fragile.
+    // For now, keeping as is, but noting as a potential area for improvement.
     if (error?.data?.error === "already_reacted" || error?.message?.includes("already_reacted")) {
       console.warn(`[Slack] Reaction ${emoji} already added to ${timestamp}`);
       return;
@@ -267,9 +269,9 @@ export async function listUserChannels(teamId?: string) {
   const result = await client.conversations.list({
     types: "public_channel,private_channel",
   });
-  
+
   if (!result.ok) throw new Error("Failed to list Slack channels");
-  
+
   // Filter for channels where is_member is true
   return (result.channels || []).filter(c => c.is_member).map(c => ({
     id: c.id!,
@@ -284,9 +286,9 @@ export async function getChannelHistory(channelId: string, limit: number = 20, t
     channel: channelId,
     limit,
   });
-  
+
   if (!result.ok) throw new Error(`Failed to fetch history for channel ${channelId}`);
-  
+
   return (result.messages || []).map(m => ({
     user: m.user,
     text: m.text || "",

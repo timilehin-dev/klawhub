@@ -1,12 +1,14 @@
 import { messageBus, AgentMessage } from "@/core/a2a/message-bus";
 import { saveAgentState, getAgentState } from "@/db";
 
+export type AgentName = "general" | "pm" | "researcher" | "engineer" | "qa" | "analyst";
+
 export abstract class BaseAgent {
-  protected name: string;
+  protected name: AgentName;
   protected workspaceId?: string;
   protected capabilities: string[] = [];
 
-  constructor(name: string, workspaceId?: string) {
+  constructor(name: AgentName, workspaceId?: string) {
     this.name = name;
     this.workspaceId = workspaceId;
     this.initialize();
@@ -20,7 +22,9 @@ export abstract class BaseAgent {
     }
 
     // Subscribe to messages
-    messageBus.subscribe(this.name, this.handleMessage.bind(this));
+    messageBus.subscribe(this.name, this.handleMessage.bind(this)).catch((err) => {
+      console.warn(`[AGENT] Failed to subscribe ${this.name} to message bus:`, err);
+    });
   }
 
   protected abstract handleMessage(message: AgentMessage): Promise<void>;

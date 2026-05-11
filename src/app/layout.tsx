@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://klawhub.com"),
+  metadataBase: process.env.NEXT_PUBLIC_SITE_URL ? new URL(process.env.NEXT_PUBLIC_SITE_URL) : null,
   title: "Klawhub — Your AI Coworker in Slack",
   description:
     "Multi-agent AI coworker that lives in Slack. Build tools, generate documents, conduct research, and analyze data — all from a single chat.",

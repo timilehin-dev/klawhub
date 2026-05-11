@@ -53,7 +53,8 @@ interface RegexResult {
 
 function tryRegexClassify(userMessage: string): RegexResult | null {
   const text = userMessage.trim();
-  if (!text || text.length < 3) return { type: "chat", extractedRequest: text };
+  if (!text) return { type: "chat", extractedRequest: text }; // Empty message is chat
+  if (text.length < 3) return null; // Too short to classify by regex, let LLM handle or default to unclear
 
   // Check chat patterns first (cheapest — pure greetings/casual)
   // Length guard: Only short-circuit to chat if message is brief.
@@ -125,7 +126,7 @@ const INTENT_PATTERN: Record<Intent, RegExp> = {
 
 async function classifyViaLLM(userMessage: string, threadHistory?: string): Promise<ClassificationResult> {
   const systemPrompt = await buildClassifierPrompt();
-  
+
   const fullMessage = threadHistory
     ? `[PREVIOUS CONTEXT]\n${threadHistory}\n\n[USER'S CURRENT MESSAGE]\n${userMessage}\n\nNote: If the message is a short continuation of the context (like "yes", "go ahead", or a minor fix), classify it as CHAT so the conversational agent can handle it.`
     : userMessage;
@@ -157,7 +158,7 @@ async function classifyViaLLM(userMessage: string, threadHistory?: string): Prom
   }
 
   // Fallback: chat
-  return { type: "chat", response: userMessage };
+  return { type: "unclear", question: "I couldn't determine the intent of your request. Could you please rephrase or provide more details?" };
 }
 
 /**

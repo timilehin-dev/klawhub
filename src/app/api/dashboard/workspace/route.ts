@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     const cookiesList = request.cookies.getAll().map((c) => `${c.name}=${c.value ? c.value.slice(0, 15) + "..." : "empty"}`).join("; ");
     const sessionSecretPresent = !!process.env.SESSION_SECRET;
     const integrationKeyPresent = !!process.env.INTEGRATION_ENCRYPTION_KEY;
-    
+
     let verifyError: string | null = null;
     let verifySuccessId: string | null = null;
     try {
@@ -39,10 +39,10 @@ export async function GET(request: NextRequest) {
         verifyError,
         verifySuccessId,
         host: request.headers.get("host") || "unknown",
-        env: {
-          SESSION_SECRET: sessionSecretPresent,
-          INTEGRATION_ENCRYPTION_KEY: integrationKeyPresent,
-        }
+        // env: {
+        //   SESSION_SECRET: sessionSecretPresent, // Do not expose env var presence to client
+        //   INTEGRATION_ENCRYPTION_KEY: integrationKeyPresent,
+        // }
       }
     });
   }

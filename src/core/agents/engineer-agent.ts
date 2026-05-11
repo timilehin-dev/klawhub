@@ -110,7 +110,7 @@ export class EngineerAgent extends BaseAgent {
       // If spec involves code, offer to implement
       if (specData.spec.language || specData.spec.includes("code")) {
         await this.broadcast("broadcast", {
-          eventType: "offer_help",
+          type: "offer_help",
           message: "I can implement the code for this specification. Would you like me to proceed?",
           spec: specData.spec,
           requester: specData.requester,

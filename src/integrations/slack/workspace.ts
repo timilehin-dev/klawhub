@@ -91,7 +91,8 @@ export async function checkUsageLimit(teamId?: string): Promise<{ allowed: boole
 
     const { checkWorkspaceUsageLimit } = await import("@/db");
     return await checkWorkspaceUsageLimit(ws[0].id);
-  } catch {
+  } catch (err) {
+    console.error(`[WORKSPACE] Failed to check usage limit for team ${teamId}:`, err);
     return null;
   }
 }

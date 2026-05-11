@@ -27,7 +27,7 @@ CREATE POLICY "Tenant Workspace Isolation" ON "memory"
     "workspace_id" IS NULL OR 
     "workspace_id" IN (
       SELECT "workspace_id" FROM "workspace_members" 
-      WHERE "slack_user_id" = current_setting('request.jwt.claim.sub', true)
+      WHERE "slack_user_id" = current_setting('request.jwt.claim.slack_user_id', true) AND "workspace_id" = current_setting('request.jwt.claim.workspace_id', true)
     )
   );
 
@@ -38,6 +38,6 @@ CREATE POLICY "Tenant Workspace Isolation" ON "knowledge"
     "workspace_id" IS NULL OR 
     "workspace_id" IN (
       SELECT "workspace_id" FROM "workspace_members" 
-      WHERE "slack_user_id" = current_setting('request.jwt.claim.sub', true)
+      WHERE "slack_user_id" = current_setting('request.jwt.claim.slack_user_id', true) AND "workspace_id" = current_setting('request.jwt.claim.workspace_id', true)
     )
   );

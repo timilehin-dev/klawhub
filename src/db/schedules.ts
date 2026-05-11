@@ -45,9 +45,10 @@ export function getDueSchedules(now: Date) {
     .where(eq(schedules.isActive, true))
     .then((all) =>
       all.filter((s) => {
-        if (!s.lastTriggeredAt) return true;
-        // Rough due check — cron matching happens in-memory for precision
-        return now.getTime() - new Date(s.lastTriggeredAt).getTime() > 4 * 60 * 1000; // min 4min gap
+        // This logic is flawed for cron-based schedules. The cron expression itself should determine if it's due.
+        // The `cronMatchesNow` function should be used to determine if a schedule is due.
+        // This filter should likely be removed or re-evaluated based on the intended behavior.
+        return true; // All schedules are passed to cronMatchesNow for proper evaluation
       })
     );
 }
@@ -65,7 +66,7 @@ export function incrementFailCount(id: string) {
     .set({
       failCount: sql`${schedules.failCount} + 1`,
       updatedAt: new Date(),
-      isActive: sql`${schedules.failCount} < 2`, // auto-pause after 3 failures (failCount 0,1,2 -> stays active; 3+ -> paused)
+      isActive: sql`${schedules.failCount} < 3`, // Deactivate after 2 failures (when count becomes 2) // auto-pause after 3 failures (failCount 0,1,2 -> stays active; 3+ -> paused)
     })
     .where(eq(schedules.id, id));
 }

@@ -34,7 +34,12 @@ export async function analyzeData(request: string, data?: string, meta?: { taskI
 
   const codeResponse = await agentChat("analyst", messages, { temperature: 0.3, maxTokens: 2000 }, meta);
   const codeMatch = codeResponse.match(/```(?:python)?\n?([\s\S]*?)```/);
-  const code = codeMatch?.[1]?.trim() || codeResponse.trim();
+  let code = codeMatch?.[1]?.trim();
+  if (!code) {
+    // Fallback: if no markdown block, assume the entire response is code, but log a warning
+    console.warn("[Analyst Agent] LLM did not return code in markdown block. Assuming full response is code.");
+    code = codeResponse.trim();
+  }
 
   const execution = (await sandbox({ type: "analytics", code })) as SandboxResponse & {
     output_file?: string;

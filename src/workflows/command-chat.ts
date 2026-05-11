@@ -35,7 +35,9 @@ export const commandChatWorkflow = inngest.createFunction(
           const ws = await getWorkspaceByTeamId(teamId);
           if (ws && ws.length > 0) workspaceId = ws[0].id;
         }
-      } catch { /* non-critical */ }
+      } catch (err) {
+        console.error(`[DB] Error getting workspace by team ID for command chat:`, err);
+      }
 
       return chatAsAgent(userId, text, { workspaceId });
     });
