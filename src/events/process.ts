@@ -302,26 +302,7 @@ async function handleThreadReply(ctx: {
     ? await getActiveTaskByThreadTs(threadTs).catch(() => null)
     : null;
 
-  if ((activeRun && activeRun.length > 0) || (activeTask && activeTask.length > 0)) {
-    const status = activeRun?.[0]?.status || activeTask?.[0]?.status || "processing";
-    const type = activeRun ? "build" : "task";
-    const statusMessages: Record<string, string> = {
-      pending: "being queued",
-      pm: "in the PM phase (analyzing requirements)",
-      coding: "in the Engineering phase (writing code)",
-      qa: "in the QA phase (testing code)",
-      pending_approval: "waiting for approval",
-      processing: "being processed",
-    };
-    const detail = statusMessages[status] || status;
-
-    await postToThread(channelId, messageTs,
-      `:hourglass: A ${type} is already ${detail}. Your request will be handled after it completes.`,
-      undefined, teamId);
-    return;
-  }
-
-  // ── Classify thread reply to prevent casual chat from reactivating tasks ──
+  // ── Classify thread reply to determine intent (saves logic later) ──
   const RUN_CONTROL_PATTERNS = [
     /^\s*(retry|re-run|re-execute|try again|run again|go again|execute again)\s*$/i,
     /\b(fix|bug|error|fail|issue|modify|change|update|add|remove|refactor)\b/i
@@ -329,6 +310,29 @@ async function handleThreadReply(ctx: {
 
   const classification = await classify(text, threadHistory);
   const isControlSignal = RUN_CONTROL_PATTERNS.some((p) => p.test(text));
+
+  // ── 2. Handle active runs — only block if the NEW message is another task (not chat) ──
+  if ((activeRun && activeRun.length > 0) || (activeTask && activeTask.length > 0)) {
+    if (classification.type !== "chat") {
+      const status = activeRun?.[0]?.status || activeTask?.[0]?.status || "processing";
+      const type = activeRun ? "build" : "task";
+      const statusMessages: Record<string, string> = {
+        pending: "being queued",
+        pm: "in the PM phase (analyzing requirements)",
+        coding: "in the Engineering phase (writing code)",
+        qa: "in the QA phase (testing code)",
+        pending_approval: "waiting for approval",
+        processing: "being processed",
+      };
+      const detail = statusMessages[status] || status;
+
+      await postToThread(channelId, messageTs,
+        `:hourglass: A ${type} is already ${detail}. Your request will be handled after it completes.`,
+        undefined, teamId);
+      return;
+    }
+    // If it IS a chat intent, we let it fall through to the chat handler below!
+  }
 
   if (classification.type === "chat" && !isControlSignal) {
     try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }

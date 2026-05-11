@@ -414,6 +414,20 @@ const gmailListMessagesTool: ToolDefinition = {
   },
 };
 
+const githubListReposTool: ToolDefinition = {
+  name: "github_list_repos",
+  description: "List all GitHub repositories accessible via the connected account. Use this to see what projects are available, their full names, and when they were last updated.",
+  parameters: {},
+  async execute(params, ctx) {
+    try {
+      const { githubListRepos } = await import("@/integrations/clients");
+      const repos = await githubListRepos(requireWorkspace(ctx));
+      if (repos.length === 0) return "No GitHub repositories found.";
+      return repos.map((r: any) => `- **${r.name}**\n  URL: ${r.url}\n  Lang: ${r.language || "N/A"} | Stars: ${r.stars} | Updated: ${r.updatedAt}`).join("\n\n");
+    } catch (err) { return integrationError("GitHub", err); }
+  },
+};
+
 const githubSearchTool: ToolDefinition = {
   name: "github_search",
   description: "Search for code, repositories, or issues on GitHub. Use this to find code examples, repos, or specific issues in the connected GitHub account.",
@@ -1107,6 +1121,7 @@ export const generalAgentTools: ToolDefinition[] = [
   googleDriveReadTool,
   gmailSendEmailTool,
   gmailListMessagesTool,
+  githubListReposTool,
   githubSearchTool,
   githubReadFileTool,
   githubIssuesTool,
@@ -1136,7 +1151,6 @@ export const generalAgentTools: ToolDefinition[] = [
   scheduleListPresetsTool,
   slackListChannelsTool,
   sequentialThinkingTool,
-
 ];
 
 /** Tools available to the PM Agent (research for specs) */
@@ -1147,6 +1161,7 @@ export const pmAgentTools: ToolDefinition[] = [
   browserScrapeTool,
   googleDriveSearchTool,
   googleDriveReadTool,
+  githubListReposTool,
   githubIssuesTool,
   memorySearchTool,
   knowledgeSearchTool,
@@ -1181,13 +1196,12 @@ export const analystAgentTools: ToolDefinition[] = [
 
 /** Tools available to the Engineer Agent (research + code verification + docs browsing) */
 export const engineerAgentTools: ToolDefinition[] = [
-  webSearchTool,
-  webReadTool,
-  codeExecuteTool,
-  browserBrowseTool,
+  githubListReposTool,
   githubSearchTool,
   githubReadFileTool,
   githubIssuesTool,
+  githubUpdateFileTool,
+  githubCreatePullRequestTool,
   parseDocumentTool,
   memorySearchTool,
   knowledgeSearchTool,
@@ -1196,6 +1210,7 @@ export const engineerAgentTools: ToolDefinition[] = [
 
 /** Tools available to the QA Agent (code evaluation + deployment) */
 export const qaAgentTools: ToolDefinition[] = [
+  githubListReposTool,
   webSearchTool,
   webReadTool,
   codeExecuteTool,

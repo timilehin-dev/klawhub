@@ -23,7 +23,9 @@ import type { SandboxResponse } from "@/types";
  * Extract a brief summary from QA evaluation for Slack display.
  * Keeps detailed diagnosis in logs only.
  */
-function extractQABrief(evaluation: string): string {
+function extractQABrief(evaluation: string, passed: boolean): string {
+  if (passed) return "All checks passed. Ready for delivery.";
+
   const verdictMatch = evaluation.match(/VERDICT:\s*(PASS|FAIL)/i);
   const reasonMatch = evaluation.match(/REASON:\s*([\s\S]*?)(?=DIAGNOSIS:|OUTPUT:|$)/i);
   const diagnosisMatch = evaluation.match(/DIAGNOSIS:\s*([\s\S]*?)(?=OUTPUT:|$)/i);
@@ -31,6 +33,11 @@ function extractQABrief(evaluation: string): string {
   const verdict = verdictMatch?.[1] || "UNKNOWN";
   const reason = reasonMatch?.[1]?.trim().split('\n')[0] || ""; // First line only
   const diagnosis = diagnosisMatch?.[1]?.trim().split('\n')[0] || ""; // First line only
+
+  // If the LLM says PASS but passed is FALSE, it means a runtime/sandbox error occurred
+  if (verdict === "PASS" && !passed) {
+    return "Code passed logic verification but failed to execute in the sandbox. Checking logs...";
+  }
 
   if (verdict === "PASS") return "All checks passed.";
 
@@ -54,8 +61,13 @@ export const buildSquadWorkflow = inngest.createFunction(
       event.data as BuildEventData;
 
     try {
+      // Add initial reaction to show we've started
+      await addReaction(slackChannelId, slackThreadTs, "eyes", teamId).catch(() => {});
+
       // Step 1: PM researches and writes spec
       const specResult = await step.run("pm-spec", async () => {
+        await postToThread(slackChannelId, slackThreadTs, "_PM Agent is researching and drafting the specification..._", undefined, teamId);
+
         const runsList = await getRun(runId).catch((err) => { console.error("[DB] Error getting run by ID:", err); return null; });
         const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
 
@@ -142,6 +154,9 @@ export const buildSquadWorkflow = inngest.createFunction(
 
       // Step 4: Engineer writes code (with learnings context)
       const codeResult = await step.run("engineer-code", async () => {
+        await addReaction(slackChannelId, slackThreadTs, "writing_hand", teamId).catch(() => {});
+        await postToThread(slackChannelId, slackThreadTs, "_Engineer Agent is implementing the solution..._", undefined, teamId);
+
         const approverId = decision.data.userId || "unknown";
         const updatedBlocks = replaceActionsWithDecision(
           approval.blocks,
@@ -200,6 +215,9 @@ export const buildSquadWorkflow = inngest.createFunction(
 
       // Step 5: QA Test 1
       const test1 = await step.run("qa-test-1", async () => {
+        await addReaction(slackChannelId, slackThreadTs, "microscope", teamId).catch(() => {});
+        await postToThread(slackChannelId, slackThreadTs, "_QA Agent is verifying the implementation in the sandbox..._", undefined, teamId);
+
         const runsList = await getRun(runId).catch((err) => { console.error("[DB] Error getting run by ID:", err); return null; });
         const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
 
@@ -211,7 +229,7 @@ export const buildSquadWorkflow = inngest.createFunction(
           { runId, slackUserId, dependencies: specResult.dependencies }
         );
 
-        const qaBrief = result.passed ? "All checks passed. Ready for delivery." : extractQABrief(result.evaluation);
+        const qaBrief = extractQABrief(result.evaluation, result.passed);
         await postToThread(
           slackChannelId,
           slackThreadTs,
@@ -272,7 +290,7 @@ export const buildSquadWorkflow = inngest.createFunction(
             { runId, slackUserId, dependencies: specResult.dependencies }
           );
 
-          const qaBrief2 = result.passed ? "All checks passed. Ready for delivery." : extractQABrief(result.evaluation);
+          const qaBrief2 = extractQABrief(result.evaluation, result.passed);
           await postToThread(
             slackChannelId,
             slackThreadTs,
