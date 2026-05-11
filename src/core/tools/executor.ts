@@ -100,11 +100,9 @@ export async function runToolUseLoop(
       return cleaned || response;
     }
 
-    // Extract any reasoning text before/after tool calls
-    const reasoningText = stripToolCalls(response);
-    if (reasoningText) {
-      messages.push({ role: "assistant", content: reasoningText });
-    }
+    // Always push the assistant message to the history so the model knows what it did.
+    // If it only contained tool calls, content will be empty but the turn is preserved.
+    messages.push({ role: "assistant", content: response });
 
     // Execute all tool calls in parallel
     const results = await Promise.all(

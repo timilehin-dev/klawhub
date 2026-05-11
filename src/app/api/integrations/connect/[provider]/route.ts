@@ -35,8 +35,8 @@ export async function GET(
   // HMAC-signed state with timestamp (prevents forgery + replay)
   const state = createSignedOAuthState(providerId, workspaceId);
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const redirectUri = `${appUrl}/api/integrations/callback/${providerId}`;
+  const { origin } = new URL(request.url);
+  const redirectUri = `${origin}/api/integrations/callback/${providerId}`;
   const authUrl = buildAuthUrl(provider, state, redirectUri);
 
   return NextResponse.json({ authUrl, provider: provider.id, providerName: provider.name });

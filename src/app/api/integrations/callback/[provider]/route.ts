@@ -51,8 +51,8 @@ export async function GET(
   }
 
   try {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const redirectUri = `${appUrl}/api/integrations/callback/${providerId}`;
+    const { origin } = new URL(request.url);
+    const redirectUri = `${origin}/api/integrations/callback/${providerId}`;
 
     await completeOAuthFlow(provider, code, redirectUri, ws[0].id);
 
