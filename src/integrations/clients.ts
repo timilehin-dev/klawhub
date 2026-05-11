@@ -354,7 +354,22 @@ export async function gmailListMessages(workspaceId: string, maxResults = 10, qu
         const date = headers.find((h: any) => h.name?.toLowerCase() === "date")?.value || "";
         const snippet = detailData.snippet || "";
 
-        return { id: msg.id, subject, from, date, snippet };
+        // Attempt to extract full body text for summarization
+        let body = "";
+        const parts = detailData.payload?.parts || [detailData.payload];
+        for (const part of parts) {
+          if (part.mimeType === "text/plain" && part.body?.data) {
+            body = Buffer.from(part.body.data, "base64").toString("utf-8");
+            break;
+          }
+          if (part.mimeType === "text/html" && part.body?.data) {
+            // Very basic HTML strip
+            const html = Buffer.from(part.body.data, "base64").toString("utf-8");
+            body = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          }
+        }
+
+        return { id: msg.id, subject, from, date, snippet, body: body || snippet };
       } catch {
         return null;
       }

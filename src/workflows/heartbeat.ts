@@ -3,6 +3,7 @@ import { getDb } from "@/db/connection";
 import { workspaces, workspaceMembers, integrations } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getWorkspaceSlack } from "@/integrations/slack/client";
+import { agentChat } from "@/core/llm";
 
 /**
  * Heartbeat workflow — runs every 30 minutes.
@@ -154,11 +155,17 @@ export const heartbeatWorkflow = inngest.createFunction(
             const newEmails = emails.filter((e: { id: string }) => !lastNotifiedGmailIds.includes(e.id));
 
             if (newEmails.length > 0) {
-              const emailList = newEmails
-                .slice(0, 3)
-                .map((m: any) => `• *From:* ${m.from}\n  *Subject:* ${m.subject}\n  *Snippet:* ${m.snippet}`)
-                .join("\n");
-              updates.push(`*Gmail Activity*\n${newEmails.length} new unread email(s):\n${emailList}`);
+              const summarizedEmails = await Promise.all(
+                newEmails.slice(0, 3).map(async (m: any) => {
+                  const summary = await agentChat("general", [
+                    { role: "system", content: "You are a specialized Email Intelligence Analyst. Summarize the following email into one single, powerful sentence that captures the key 'intel' or action required." },
+                    { role: "user", content: `From: ${m.from}\nSubject: ${m.subject}\nContent: ${m.body.slice(0, 2000)}` }
+                  ], { temperature: 0.1, maxTokens: 150 }, { workspaceId: workspace.id });
+                  return `• *From:* ${m.from}\n  *Intel:* ${summary}`;
+                })
+              );
+
+              updates.push(`*Gmail Intelligence*\n${newEmails.length} new unread email(s):\n${summarizedEmails.join("\n")}`);
 
               // Append new email IDs
               const newIds = newEmails.map((e: { id: string }) => e.id);
@@ -211,7 +218,7 @@ export const heartbeatWorkflow = inngest.createFunction(
             if (memberChannels.length === 0) return;
 
             // Post to the first channel where bot is a member
-            const message = `:pulse: *Klawhub Heartbeat* — ${workspace.name}\n\n${checkResult.updates.join("\n\n")}\n\n_I monitor your integrations. Reply with any questions._`;
+            const message = `:pulse: *Klawhub Heartbeat* — ${workspace.name}\n\n${checkResult.updates.join("\n\n")}`;
 
             await wsSlack.chat.postMessage({
               channel: memberChannels[0],
