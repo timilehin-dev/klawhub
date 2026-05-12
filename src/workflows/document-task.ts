@@ -54,7 +54,7 @@ export const documentWorkflow = inngest.createFunction(
         const msg = await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*Document Agent* — Outline ready for review`,
+          `I've drafted an outline for your document. Please review it below:`,
           { blocks },
           teamId
         );
@@ -81,7 +81,7 @@ export const documentWorkflow = inngest.createFunction(
             await updateMessage(
               slackChannelId,
               approval.messageTs,
-              `*Document Agent* — Outline was *rejected*`,
+              `Got it, I've cancelled the document generation since the outline was rejected.`,
               { blocks: updatedBlocks },
               teamId
             );
@@ -119,7 +119,7 @@ export const documentWorkflow = inngest.createFunction(
           await updateMessage(
             slackChannelId,
             approval.messageTs,
-            `*Document Agent* — Outline *approved*, generating full document...`,
+            `Outline approved! I'm generating the full document now...`,
             { blocks: updatedBlocks },
             teamId
           );
@@ -183,7 +183,7 @@ export const documentWorkflow = inngest.createFunction(
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*Document Delivered*\n\n*${result.title}* (${result.format.toUpperCase()})\n${result.sections.length} sections — see the file above.\n_Reply in this thread for revisions._`,
+          `Here's your document: *${result.title}* (${result.format.toUpperCase()}).\nIt has ${result.sections.length} sections — you can find the file above.\n_Reply in this thread if you need any revisions._`,
           undefined,
           teamId
         );

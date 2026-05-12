@@ -17,7 +17,7 @@ import { agentChat } from "@/core/llm";
 const STALE_THRESHOLD_MINUTES = 15;
 
 export const taskMonitorWorkflow = inngest.createFunction(
-  { id: "task-monitor", name: "Task Monitor" },
+  { id: "task-monitor", name: "Task Monitor", retries: 3 },
   { cron: "*/15 * * * *" },
   async ({ step }) => {
     // Step 1: Fetch stale runs and tasks in parallel
@@ -53,8 +53,8 @@ export const taskMonitorWorkflow = inngest.createFunction(
           : STALE_THRESHOLD_MINUTES;
 
         const message = run.status === "pending_approval"
-          ? `:bell: *Reminder:* A build is *waiting for your approval* (${age}min ago). Reply *approve* or *reject* to continue.`
-          : `:warning: *Stale Build Detected:* This build has been *${detail}* for ${age} minutes. I'm flagging it so it doesn't fall through the cracks.\n\nIf this is unexpected, you can start a new request.`;
+          ? `Hey, just a reminder! A build is waiting for your approval (${age}min ago). Just reply *approve* or *reject* when you have a moment.`
+          : `Just a heads up, this build has been ${detail} for ${age} minutes. Let me know if you want me to cancel it or if you'd prefer to start a new request!`;
 
         try {
           await postToThread(channelId, threadTs || channelId, message);
@@ -83,8 +83,8 @@ export const taskMonitorWorkflow = inngest.createFunction(
           : STALE_THRESHOLD_MINUTES;
 
         const message = task.status === "pending_approval"
-          ? `:bell: *Reminder:* A ${task.type} task is *waiting for your approval* (${age}min ago). Reply *approve* or *reject* to continue.`
-          : `:warning: *Stale Task Detected:* This ${task.type} task has been *${detail}* for ${age} minutes.\n\nIf this is unexpected, you can start a new request.`;
+          ? `Hey, just a reminder! A ${task.type} task is waiting for your approval (${age}min ago). Just reply *approve* or *reject* when you're ready.`
+          : `Just checking in, this ${task.type} task has been ${detail} for ${age} minutes. Want me to cancel it, or should we start a new request?`;
 
         try {
           await postToThread(channelId, threadTs || channelId, message);

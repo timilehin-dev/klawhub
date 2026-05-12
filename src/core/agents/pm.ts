@@ -1,8 +1,10 @@
 import { runToolUseLoop } from "@/core/tools/executor";
 import { pmAgentTools } from "@/core/tools/registry";
 import { toSlackMrkdwn } from "@/utils/slack-mrkdwn";
+import { COWORKER_VOICE_MODULE } from "./persona";
 
 const PM_PROMPT = `You are a Senior Technical Product Manager at Klawhub. You translate vague user requests into crystal-clear implementation specs.
+${COWORKER_VOICE_MODULE}
 
 YOUR CORE MISSION:
 1. *Deep Understanding*: Use the *sequential_thinking* tool to analyze the user's request. Don't just look at the last message — look at the entire thread and the user's intent.

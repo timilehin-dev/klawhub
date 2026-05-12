@@ -825,7 +825,6 @@ const resendSendEmailTool: ToolDefinition = {
     }
   },
 };
-
 const googleCalendarListEventsTool: ToolDefinition = {
   name: "google_calendar_list_events",
   description: "Retrieve upcoming meetings and agendas from the connected Google Calendar. Use this to prepare documentation, meeting briefings, or agendas.",
@@ -1062,7 +1061,77 @@ const scheduleListPresetsTool: ToolDefinition = {
   }
 };
 
+const gmailReadEmailTool: ToolDefinition = {
+  name: "gmail_read_email",
+  description: "Read the full content of a specific email by its message ID. Use this when a user asks to 'read that email', 'summarize the email from X', or needs the complete text of an email referenced in the heartbeat briefing.",
+  parameters: {
+    message_id: { type: "string", description: "The Gmail message ID (from gmail_list_messages results)", required: true },
+  },
+  async execute(params, ctx) {
+    try {
+      const wsId = requireWorkspace(ctx);
+      const { gmailReadEmail } = await import("@/integrations/clients");
+      const email = await gmailReadEmail(wsId, params.message_id);
+      return `*Email Details*\nFrom: ${email.from}\nSubject: ${email.subject}\nDate: ${email.date}\n\n*Full Content:*\n${email.body.slice(0, 8000)}`;
+    } catch (err) {
+      return integrationError("Gmail", err);
+    }
+  },
+};
+
+const gmailReplyEmailTool: ToolDefinition = {
+  name: "gmail_reply_email",
+  description: "Reply to an existing email thread from the user's connected Gmail account. Use this when the user says 'reply to that email' or 'respond to X's message'.",
+  parameters: {
+    message_id: { type: "string", description: "The Gmail message ID to reply to", required: true },
+    body: { type: "string", description: "The reply body content (plain text or HTML)", required: true },
+  },
+  async execute(params, ctx) {
+    try {
+      const wsId = requireWorkspace(ctx);
+      const { gmailReplyEmail } = await import("@/integrations/clients");
+      const result = await gmailReplyEmail(wsId, params.message_id, params.body);
+      return `Reply sent successfully to ${result.to} (subject: "${result.subject}").`;
+    } catch (err) {
+      return integrationError("Gmail", err);
+    }
+  },
+};
+
+const slackPostToChannelTool: ToolDefinition = {
+  name: "slack_post_to_channel",
+  description: "Post a message to any Slack channel the bot is a member of. Use this for cross-channel coordination (e.g., posting a standup update to #huddles while responding in #general), scheduled updates, or proactive notifications to specific channels.",
+  parameters: {
+    channel_id: { type: "string", description: "The Slack channel ID to post to. Use 'slack_list_channels' first to find the correct ID.", required: true },
+    message: { type: "string", description: "The message text to post (Slack mrkdwn format)", required: true },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackTeamId) {
+      return "Error: Slack Team ID context is missing. Unable to post to channel.";
+    }
+
+    try {
+      const { getWorkspaceSlack } = await import("@/integrations/slack/client");
+      const wsSlack = await getWorkspaceSlack(ctx.slackTeamId);
+
+      const result = await wsSlack.chat.postMessage({
+        channel: params.channel_id,
+        text: params.message,
+      });
+
+      if (result.ok) {
+        return `Message posted successfully to <#${params.channel_id}>.`;
+      } else {
+        return `Failed to post to channel: ${(result as any).error || "Unknown error"}`;
+      }
+    } catch (err) {
+      return `Failed to post to channel: ${(err as Error).message}`;
+    }
+  },
+};
+
 // ── Tool Registry ──
+
 
 export const allTools: ToolDefinition[] = [
   webSearchTool,
@@ -1121,6 +1190,8 @@ export const generalAgentTools: ToolDefinition[] = [
   googleDriveReadTool,
   gmailSendEmailTool,
   gmailListMessagesTool,
+  gmailReadEmailTool,
+  gmailReplyEmailTool,
   githubListReposTool,
   githubSearchTool,
   githubReadFileTool,
@@ -1149,7 +1220,9 @@ export const generalAgentTools: ToolDefinition[] = [
   scheduleDeleteTool,
   scheduleToggleTool,
   scheduleListPresetsTool,
+  // Channel awareness
   slackListChannelsTool,
+  slackPostToChannelTool,
   sequentialThinkingTool,
 ];
 

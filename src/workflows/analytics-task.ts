@@ -74,10 +74,11 @@ export const analyticsWorkflow = inngest.createFunction(
           teamId
         );
 
+        const messagePrefix = exec.success ? "" : "*Analysis Failed*\n\n";
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*Analysis ${exec.success ? "Complete" : "Failed"}*\n\n${String(result.insights)}\n${exec.output_file ? "\n_Chart uploaded above._" : ""}\n_Reply in this thread for follow-up analysis._`,
+          `${messagePrefix}${String(result.insights)}\n${exec.output_file ? "\n_Chart uploaded above._" : ""}`,
           undefined,
           teamId
         );

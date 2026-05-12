@@ -44,6 +44,9 @@ const CHAT_PATTERNS = [
   /^(suggest|recommend|pick|choose|decide|you decide|your choice|up to you|whatever you think|you choose)\b/i,
   /^(what('?s| is) the (status|progress|update))/i,
   /^status\b/i,
+  // Email-related requests should route to tool-enabled General Agent
+  /\b(read|open|check|show|summarize|reply to|respond to|forward|send)\b.*(email|mail|inbox|message from|newsletter)/i,
+  /\b(email|mail)\b.*(from|about|regarding)/i,
 ];
 
 interface RegexResult {
@@ -98,10 +101,9 @@ Classification rules:
 - DOCUMENT: reports, proposals, invoices, contracts, any file generation (PDF/DOCX)
 - RESEARCH: web research, finding information, "what is/are", "latest trends"
 - ANALYTICS: data analysis, charts, visualizations, statistics (Use this ONLY for processing existing data or complex math)
-- CHAT: greetings, self-introduction, conversation, and ALL requests that require accessing external tools (GitHub, Gmail, Google Drive, Slack), even if they involve simple sorting or analysis.
-- UNCLEAR: genuinely ambiguous requests
+- CHAT: greetings, self-introduction, conversation, and ALL requests that require accessing external tools (GitHub, Gmail, Google Drive, Slack), even if they involve simple sorting or analysis. Also use CHAT for any email-related actions (read, reply, send, forward). If unsure, default to CHAT.
 
-Be fast and decisive. Never explain. Never combine categories. If it feels like it needs a tool, pick CHAT.`;
+Be fast and decisive. Never explain. Never combine categories. If it feels like it needs a tool, pick CHAT. If you truly cannot determine intent, pick CHAT.`;
 
 async function buildClassifierPrompt(): Promise<string> {
   let skillSection = "";
@@ -157,8 +159,8 @@ async function classifyViaLLM(userMessage: string, threadHistory?: string): Prom
     }
   }
 
-  // Fallback: chat
-  return { type: "unclear", question: "I couldn't determine the intent of your request. Could you please rephrase or provide more details?" };
+  // Fallback: default to CHAT so the tool-enabled General Agent handles it
+  return { type: "chat", response: response.trim() || userMessage };
 }
 
 /**

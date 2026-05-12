@@ -19,11 +19,14 @@ from fastapi import Request, HTTPException
 
 app = modal.App("klawhub-sandbox")
 
+# ── Persistent Cache ──
+# Caches pip downloads across ALL sandbox executions
+pip_cache = modal.Volume.from_name("klawhub-pip-cache", create_if_missing=True)
+
 # ── Secrets ──
 try:
     webhook_secret = modal.Secret.from_name("klawhub-webhook-secret")
 except Exception:
-    # Fallback if secret not found during local init
     webhook_secret = modal.Secret.from_dict({"MODAL_WEBHOOK_SECRET": ""})
 
 # ── Image Definition ──
@@ -36,11 +39,13 @@ image = (
         "libpangoft2-1.0-0",
         "libharfbuzz-subset0",
         "libjpeg-dev", "libopenjp2-7-dev", "libffi-dev",
-        "curl", "ca-certificates"   # For downloading binaries
+        "curl", "ca-certificates",  # For downloading binaries
+        "fonts-noto-color-emoji"    # For better document rendering
     )
     .pip_install(
         "fastapi[standard]",
         "requests",
+        "httpx",                    # Better async HTTP
         "lxml",                     # Fastest raw HTML parsing
         "beautifulsoup4",
         "polars",                   # Modern, fast alternative to Pandas
@@ -48,20 +53,31 @@ image = (
         "numpy",
         "matplotlib",
         "seaborn",
+        "plotly",                   # Interactive charts
         "scikit-learn",             # Modern ML
         "typst",                    # Novel, professional PDF generation
         "pypandoc",                 # Pandoc wrapper for DOCX
         "markdown",                 # For converting text to HTML
         "pdfplumber",
+        "weasyprint",               # Best-in-class HTML-to-PDF
         "fastembed",
         "crawl4ai",                 # LLM-ready web crawling
         "lightpanda-py",            # Lightpanda headless browser
         "playwright"                # CDP interaction with Lightpanda
     )
     .run_commands(
+        "python -m playwright install chromium", # Pre-install browser for crawl4ai
         "python -c 'from fastembed import TextEmbedding; TextEmbedding()'"
     )
 )
+
+# Optimization: Skip pip if these are requested
+PRE_INSTALLED_PACKAGES = {
+    "fastapi", "requests", "httpx", "lxml", "beautifulsoup4", "polars", "pandas",
+    "numpy", "matplotlib", "seaborn", "plotly", "scikit-learn", "typst", "pypandoc",
+    "markdown", "pdfplumber", "weasyprint", "fastembed", "crawl4ai", "lightpanda-py",
+    "playwright"
+}
 
 
 # ─────────────────────────────────────────────
@@ -91,7 +107,7 @@ def verify_request(request: Request) -> bool:
 # Code Execution (with Dynamic Dependencies)
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=600)
+@app.function(image=image, timeout=600, volumes={"/root/.cache": pip_cache})
 def execute_code(code: str, language: str = "python", dependencies: list[str] = None):
     if language not in ["python", "javascript"]:
         return {"success": False, "error": f"Unsupported language: {language}"}
@@ -110,16 +126,30 @@ def execute_code(code: str, language: str = "python", dependencies: list[str] = 
 
             if language == "python":
                 if dependencies:
-                    dep_dir = os.path.join(env_dir, "deps")
-                    os.makedirs(dep_dir, exist_ok=True)
-                    try:
-                        # 3-minute timeout for dependency installation
-                        subprocess.run(["python3", "-m", "pip", "install", "--target", dep_dir] + dependencies, check=True, capture_output=True, timeout=180)
-                    except subprocess.CalledProcessError as e:
-                        return {"success": False, "error": f"Failed to install Python dependencies:\n{e.stderr.decode('utf-8', errors='replace')}"}
-                    except subprocess.TimeoutExpired:
-                        return {"success": False, "error": "Python dependency installation timed out after 180s."}
-                    env["PYTHONPATH"] = f"{dep_dir}:{env.get('PYTHONPATH', '')}"
+                    # Efficiency Check: filter out already pre-installed packages
+                    to_install = [d for d in dependencies if d.split("==")[0].lower() not in PRE_INSTALLED_PACKAGES]
+                    
+                    user_base = os.path.join(env_dir, "user_packages")
+                    os.makedirs(user_base, exist_ok=True)
+                    env["PYTHONUSERBASE"] = user_base
+                    
+                    if to_install:
+                        install_env = env.copy()
+                        try:
+                            # 3-minute timeout for dependency installation
+                            pip_result = subprocess.run(
+                                ["python3", "-m", "pip", "install", "--user", "--no-warn-script-location"] + to_install,
+                                capture_output=True, timeout=180, env=install_env
+                            )
+                            if pip_result.returncode != 0:
+                                pip_stderr = pip_result.stderr.decode('utf-8', errors='replace')
+                                return {"success": False, "error": f"Failed to install Python dependencies:\n{pip_stderr[:2000]}"}
+                        except subprocess.TimeoutExpired:
+                            return {"success": False, "error": "Python dependency installation timed out after 180s."}
+                    
+                    # Add the user site-packages to PYTHONPATH (even if nothing new was installed, for isolation)
+                    user_site = os.path.join(user_base, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
+                    env["PYTHONPATH"] = f"{user_site}:{env.get('PYTHONPATH', '')}"
                 
                 cmd = ["python3", filepath]
 
@@ -138,14 +168,14 @@ def execute_code(code: str, language: str = "python", dependencies: list[str] = 
             def set_resource_limits():
                 if resource is None:
                     return
-                # Limit memory to 2GB (for ML and data processing)
+                # Limit memory to 4GB (for ML and data processing)
                 try:
-                    resource.setrlimit(resource.RLIMIT_AS, (2048 * 1024 * 1024, 2048 * 1024 * 1024))
+                    resource.setrlimit(resource.RLIMIT_AS, (4096 * 1024 * 1024, 4096 * 1024 * 1024))
                 except ValueError:
                     pass
-                # Limit CPU to 60 seconds
+                # Limit CPU to 120 seconds (matches subprocess timeout)
                 try:
-                    resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
+                    resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
                 except ValueError:
                     pass
 
@@ -166,9 +196,10 @@ def execute_code(code: str, language: str = "python", dependencies: list[str] = 
             }
 
         except subprocess.TimeoutExpired:
-            return {"success": False, "error": "Code execution timed out (60s)"}
+            return {"success": False, "error": "Code execution timed out (120s)"}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
 
 
 # ─────────────────────────────────────────────
@@ -310,7 +341,7 @@ def generate_document(data: dict):
 # Data Analytics
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=120, memory=512, secrets=[webhook_secret])
+@app.function(image=image, timeout=120, memory=2048, volumes={"/root/.cache": pip_cache}, secrets=[webhook_secret])
 def run_analytics(data: dict):
     code = data.get("code", "")
     dependencies = data.get("dependencies", [])
@@ -325,11 +356,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import polars as pl
+import seaborn as sns
 import io, os, sys, time
 
 plt.rcParams['figure.dpi'] = 150
 plt.rcParams['savefig.bbox'] = 'tight'
 plt.rcParams['font.size'] = 10
+sns.set_theme(style="whitegrid")
 """
     full_code = preamble + "\n" + code
 
@@ -342,18 +375,31 @@ plt.rcParams['font.size'] = 10
 
             env = os.environ.copy()
             env["MPLBACKEND"] = "Agg"
-            
-            cmd = ["python3"]
-            
+
             if dependencies:
-                dep_dir = os.path.join(env_dir, "deps")
-                os.makedirs(dep_dir, exist_ok=True)
-                subprocess.run(["python3", "-m", "pip", "install", "--target", dep_dir] + dependencies, check=True, capture_output=True)
-                env["PYTHONPATH"] = f"{dep_dir}:{env.get('PYTHONPATH', '')}"
+                # Efficiency Check: skip libraries already baked into the image
+                to_install = [d for d in dependencies if d.split("==")[0].lower() not in PRE_INSTALLED_PACKAGES]
+
+                if to_install:
+                    user_base = os.path.join(env_dir, "user_packages")
+                    os.makedirs(user_base, exist_ok=True)
+                    env["PYTHONUSERBASE"] = user_base
+                    try:
+                        pip_result = subprocess.run(
+                            ["python3", "-m", "pip", "install", "--user", "--no-warn-script-location"] + to_install,
+                            capture_output=True, timeout=120, env=env
+                        )
+                        if pip_result.returncode != 0:
+                            return {"success": False, "error": f"Failed to install: {pip_result.stderr.decode('utf-8', errors='replace')[:1000]}"}
+                    except subprocess.TimeoutExpired:
+                        return {"success": False, "error": "Dependency install timed out (120s)"}
+
+                    user_site = os.path.join(user_base, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
+                    env["PYTHONPATH"] = f"{user_site}:{env.get('PYTHONPATH', '')}"
 
             result = subprocess.run(
-                cmd + [filepath],
-                capture_output=True, text=True, timeout=60, cwd=env_dir, env=env,
+                ["python3", filepath],
+                capture_output=True, text=True, timeout=90, cwd=env_dir, env=env,
             )
 
             output_file = None
@@ -377,7 +423,7 @@ plt.rcParams['font.size'] = 10
             }
 
         except subprocess.TimeoutExpired:
-            return {"success": False, "error": "Analytics timed out (60s)"}
+            return {"success": False, "error": "Analytics timed out (90s)"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 

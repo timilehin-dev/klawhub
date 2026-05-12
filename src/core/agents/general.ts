@@ -1,16 +1,12 @@
 import { runToolUseLoop } from "@/core/tools/executor";
 import { generalAgentTools } from "@/core/tools/registry";
-import { getActiveSkills, getUserSchedules, getUserSkillStats, getActiveAgents } from "@/db";
+import { getActiveSkills, getUserSchedules, getUserSkillStats } from "@/db";
 import { buildUserContext } from "@/core/tools/memory";
 import { buildKnowledgeContext } from "@/db/knowledge";
 import { agentChat } from "@/core/llm";
 import { getSessionSummary } from "@/core/memory/thread-summary";
-import { messageBus } from "@/core/a2a/message-bus";
-import { PMAgent } from "./pm-agent";
-import { ResearcherAgent } from "./researcher-agent";
-import { EngineerAgent } from "./engineer-agent";
-import { QAAgent } from "./qa-agent";
-import { AnalystAgent } from "./analyst-agent";
+import { updateMessage } from "@/integrations/slack/client";
+import { COWORKER_VOICE_MODULE } from "./persona";
 
 const GENERAL_AGENT_SYSTEM = `You are Klawhub, a multi-agent AI coworker. You are the conductor of a high-performance orchestration engine.
 
@@ -35,6 +31,15 @@ Use this context to understand what the user is referring to. If someone says "t
 "make it better", or any vague instruction, look at the context to understand WHAT they mean.
 Never say "try what?" or "what do you mean?" if there is context that makes it obvious.
 Always infer intent from context before asking for clarification.
+
+TOOL AWARENESS RULES (Mapping Intents to Actions):
+You have specialized tools. You MUST use them correctly based on the user's intent. Never try to "write out" an action in text if a tool exists for it.
+• "Schedule this", "Remind me every day", "Run this periodically" -> MUST use \`schedule_create\`. Never try to use a generic chat response.
+• "Build a feature", "Write some code", "Create an app" -> MUST use \`dispatch_task\` (type='build').
+• "Research X", "Find out about Y" -> MUST use \`dispatch_task\` (type='research') or \`web_search\` directly.
+• "Create a document", "Write a proposal" -> MUST use \`dispatch_task\` (type='document').
+• "Analyze this data", "Create a chart" -> MUST use \`dispatch_task\` (type='analytics').
+• Any complex, ambiguous, or multi-step logic -> MUST use \`sequential_thinking\` FIRST to plan your approach.
 
 Your Architecture:
 
@@ -111,7 +116,10 @@ When context from previous conversation is provided:
 • Continue the conversation naturally, building on what was already discussed
 • If user said "yes" or "go ahead", DO the thing that was being discussed
 
-Keep responses natural, professional, and helpful. You're a coworker, not a servant.`;
+Keep responses natural, professional, and helpful. You're a coworker, not a servant.
+
+${COWORKER_VOICE_MODULE}
+`;
 
 export interface ChatOptions {
   workspaceId?: string;
@@ -119,154 +127,9 @@ export interface ChatOptions {
   slackChannelId?: string;
   slackThreadTs?: string;
   slackTeamId?: string;
+  statusMessageTs?: string;
 }
 
-// A2A Agent Coordination
-class AgentCoordinator {
-  private agents: Map<string, any> = new Map();
-  public workspaceId?: string;
-
-  constructor(workspaceId?: string) {
-    this.workspaceId = workspaceId;
-    this.initializeAgents();
-  }
-
-  private initializeAgents() {
-    this.agents.set("pm", new PMAgent(this.workspaceId));
-    this.agents.set("researcher", new ResearcherAgent(this.workspaceId));
-    this.agents.set("engineer", new EngineerAgent(this.workspaceId));
-    this.agents.set("qa", new QAAgent(this.workspaceId));
-    this.agents.set("analyst", new AnalystAgent(this.workspaceId));
-  }
-
-  async coordinateTask(task: any, requester: string): Promise<any> {
-    // Determine which agent should handle this
-    const agent = this.selectAgent(task);
-
-    if (agent) {
-      return agent.executeTask({ ...task, from: requester });
-    }
-
-    return null;
-  }
-
-  /**
-   * Autonomous A2A Discussion Loop
-   * Allows multiple agents to collaborate on a complex request before presenting to the user.
-   */
-  async discussionLoop(initialRequest: string, agentsToInvolve: string[]): Promise<string> {
-    let discussionLog = `Discussion started for: "${initialRequest}"\n\n`;
-    let currentTurn = 0;
-    const maxTurns = 5;
-    let nextAgent = agentsToInvolve[0] || "pm";
-
-    while (currentTurn < maxTurns) {
-      const agent = this.agents.get(nextAgent);
-      if (!agent) break;
-
-      const prompt = `You are participating in an internal multi-agent discussion.
-Context so far:
-${discussionLog}
-
-Your role: ${nextAgent.toUpperCase()}
-Goal: Contribute your expertise to solve the request.
-If you have enough information to conclude, start your message with [DONE].
-If you need another agent's input, end your message with [NEXT: agent_name].
-
-Your contribution:`;
-
-      const response = await agentChat(nextAgent, [
-        { role: "system", content: `You are the ${nextAgent.toUpperCase()} agent. Collaborate with your colleagues.` },
-        { role: "user", content: prompt }
-      ], { temperature: 0.7 }, { workspaceId: this.workspaceId });
-
-      discussionLog += `*${nextAgent.toUpperCase()}*: ${response}\n\n`;
-
-      if (response.includes("[DONE]")) break;
-
-      const nextMatch = response.match(/\[NEXT: (\w+)\]/);
-      if (nextMatch && this.agents.has(nextMatch[1])) {
-        nextAgent = nextMatch[1];
-      } else {
-        // Round robin if not specified
-        const currentIndex = agentsToInvolve.indexOf(nextAgent);
-        nextAgent = agentsToInvolve[(currentIndex + 1) % agentsToInvolve.length];
-      }
-
-      currentTurn++;
-    }
-
-    // Final synthesis by General Agent (or PM)
-    const synthesisPrompt = `Synthesize the following multi-agent discussion into a final response for the user:
-${discussionLog}`;
-
-    return agentChat("general", [
-      { role: "system", content: "Synthesize the discussion into a clear, actionable summary for the team." },
-      { role: "user", content: synthesisPrompt }
-    ], { temperature: 0.5 }, { workspaceId: this.workspaceId });
-  }
-
-  private selectAgent(task: any): any {
-    const taskType = task.type || this.inferTaskType(task);
-
-    switch (taskType) {
-      case "spec":
-      case "requirements":
-        return this.agents.get("pm");
-      case "research":
-      case "investigate":
-        return this.agents.get("researcher");
-      case "code":
-      case "implement":
-        return this.agents.get("engineer");
-      case "test":
-      case "qa":
-        return this.agents.get("qa");
-      case "analyze":
-      case "report":
-        return this.agents.get("analyst");
-      default:
-        return this.agents.get("pm"); // Default to PM for analysis
-    }
-  }
-
-  private inferTaskType(task: any): string {
-    const desc = JSON.stringify(task).toLowerCase();
-
-    if (desc.includes("research") || desc.includes("find") || desc.includes("investigate")) {
-      return "research";
-    }
-    if (desc.includes("code") || desc.includes("implement") || desc.includes("build")) {
-      return "code";
-    }
-    if (desc.includes("test") || desc.includes("qa") || desc.includes("check")) {
-      return "test";
-    }
-    if (desc.includes("analyze") || desc.includes("report") || desc.includes("data")) {
-      return "analyze";
-    }
-
-    return "spec";
-  }
-
-  async broadcastUpdate(eventType: string, payload: any): Promise<void> {
-    await messageBus.broadcast({
-      from: "general",
-      type: eventType,
-      payload,
-    });
-  }
-
-  async getAgentCapabilities(): Promise<Record<string, string[]>> {
-    const capabilities: Record<string, string[]> = {};
-
-    for (const [name, agent] of this.agents) {
-      capabilities[name] = agent.capabilities || [];
-    }
-
-    return capabilities;
-  }
-}
 
 /**
  * Fast path: Single LLM call with minimal context.
@@ -290,28 +153,7 @@ You have tools: Web Search, Web Page Reader, Browser Automation, Memory System, 
 
 Be concise, natural, and helpful. You're a coworker, not a servant.`;
 
-/**
- * Detect if a message likely needs tool use (web search, code execution, etc.)
- * vs just a conversational reply.
- */
-function needsTools(message: string): boolean {
-  const toolSignals = [
-    /\b(search|find|look ?up|google|browse|check)\b.*(for|on|about|the|online|web|internet)/i,
-    /\b(screenshot|scrape|crawl|extract.*from|read.*url|open.*page)\b/i,
-    /\b(https?:\/\/|www\.)\S+/i,
-    /\b(execute|run|calculate|compute|convert)\b/i,
-    /\b(schedule|remind|cron|recurring|every \d)\b/i,
-    /\b(save|remember|store|note)\b.*(this|that|it)/i,
-    /\b(github|google drive|drive)\b/i,
-    /\b(build|script|code|program|app|automate|analyze|report|document|spec|implement|create|target|task|do it|go ahead|start|execute)\b/i,
-  ];
-  return toolSignals.some((p) => p.test(message));
-}
 
-// The AgentCoordinator should be instantiated per request or per workspace to maintain tenant isolation.
-// Instantiating it globally will lead to shared state across different workspaces.
-// For now, we'll instantiate it within chatAsAgent to ensure isolation.
-// const agentCoordinator = new AgentCoordinator();
 
 export async function chatAsAgent(
   slackUserId: string,
@@ -326,9 +168,6 @@ export async function chatAsAgent(
     slackTeamId: options?.slackTeamId,
   };
 
-  // Initialize agent coordinator for this workspace
-  const agentCoordinator = new AgentCoordinator(options?.workspaceId);
-
   // Build the user message with thread history if available
   let fullMessage = userMessage;
   if (options?.threadHistory) {
@@ -341,45 +180,10 @@ ${options.threadHistory}
 ${userMessage}`;
   }
 
-  // ── FAST PATH: Simple chat — single LLM call, minimal context ──
-  // Covers: greetings, short questions, follow-ups, general conversation
-  if (!needsTools(userMessage)) {
-    const t0 = Date.now();
-
-    // Gather only essential context (memory + knowledge — parallel, lightweight)
-    const [memoryContext, knowledgeContext, sessionSummary] = await Promise.all([
-      buildUserContext(slackUserId, userMessage, options?.workspaceId),
-      buildKnowledgeContext(slackUserId, userMessage, options?.workspaceId),
-      getSessionSummary(slackUserId),
-    ]);
-
-    let systemPrompt = FAST_SYSTEM_PROMPT;
-    const contextParts: string[] = [];
-    if (sessionSummary) contextParts.push(`*Recent Session Context (cross-thread)*\n${sessionSummary}`);
-    if (memoryContext) contextParts.push(`*User Context*\n${memoryContext}`);
-    if (knowledgeContext) contextParts.push(`*Knowledge*\n${knowledgeContext}`);
-    if (contextParts.length > 0) {
-      systemPrompt += "\n\n---\n\n" + contextParts.join("\n\n");
-    }
-
-    try {
-      const result = await agentChat("general", [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: fullMessage },
-      ], { temperature: 0.7, maxTokens: 2048 }, { slackUserId });
-
-      console.log(`[PERF] chatAsAgent FAST path: ${Date.now() - t0}ms`);
-      return result;
-    } catch (err) {
-      console.error(`[PERF] FAST path failed, falling to tool loop:`, err);
-      // Fall through to tool loop
-    }
-  }
-
-  // ── TOOL PATH: Message needs tools — full context + tool loop ──
+  // ── All messages go through the full tool loop for consistent tool access ──
   const t1 = Date.now();
 
-  // Gather all context in parallel (only when tools are actually needed)
+  // Gather all context in parallel
   const [activeSkills, userSchedules, skillStats, memoryContext, knowledgeContext, sessionSummary] = await Promise.all([
     getActiveSkills().catch(() => []),
     getUserSchedules(slackUserId).catch(() => []),
@@ -432,44 +236,18 @@ ${userMessage}`;
 
   const systemPrompt = GENERAL_AGENT_SYSTEM + contextSection;
 
-  // Check for proactive agent coordination opportunities
-  // Ensure agentCoordinator is properly initialized with workspaceId before calling proactive actions
-  // This line should be moved after the agentCoordinator is correctly set up for the current workspace.
-  // For now, assuming agentCoordinator is correctly handling workspace context.
-  // await checkProactiveActions(options?.workspaceId, userMessage);
+
 
   const result = await runToolUseLoop(fullMessage, {
     systemPrompt,
     tools: generalAgentTools,
     context: toolContext,
-    maxIterations: 5,
+    maxIterations: 8,
     temperature: 0.7,
     maxTokens: 4096,
     agentName: "general",
   });
 
-  // Broadcast workspace update to agents
-  await agentCoordinator.broadcastUpdate("workspace_update", {
-    user: slackUserId,
-    message: userMessage,
-    channel: options?.slackChannelId,
-  });
-
   console.log(`[PERF] chatAsAgent TOOL path: ${Date.now() - t1}ms`);
   return result;
-}
-
-// Proactive agent coordination
-async function checkProactiveActions(workspaceId: string | undefined, userMessage: string): Promise<void> {
-  // Check if this is a good time for agents to take initiative
-  const activeAgents = await getActiveAgents(workspaceId);
-
-  if (activeAgents.length > 0) {
-    const agentCoordinator = new AgentCoordinator(workspaceId);
-    // Have agents check their patterns
-    await agentCoordinator.broadcastUpdate("workspace_update", {
-      trigger: "user_message",
-      message: userMessage,
-    });
-  }
 }

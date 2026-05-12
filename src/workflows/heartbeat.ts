@@ -158,14 +158,23 @@ export const heartbeatWorkflow = inngest.createFunction(
               const summarizedEmails = await Promise.all(
                 newEmails.slice(0, 3).map(async (m: any) => {
                   const summary = await agentChat("general", [
-                    { role: "system", content: "You are a specialized Email Intelligence Analyst. Summarize the following email into one single, powerful sentence that captures the key 'intel' or action required." },
-                    { role: "user", content: `From: ${m.from}\nSubject: ${m.subject}\nContent: ${m.body.slice(0, 2000)}` }
-                  ], { temperature: 0.1, maxTokens: 150 }, { workspaceId: workspace.id });
-                  return `• *From:* ${m.from}\n  *Intel:* ${summary}`;
+                    { role: "system", content: `You are a concise email triage analyst. Classify and summarize the email in this EXACT format:
+[CATEGORY] One-sentence summary of the key intel or action required.
+
+Categories: [Action Required], [Newsletter], [Update], [Promo/Spam], [Finance], [Social], [Alert]
+Rules:
+- Be specific: names, numbers, deadlines.
+- Never start with "This email is..." — lead with the insight.
+- If it's spam or broken HTML, say so in 5 words or less.` },
+                    { role: "user", content: `From: ${m.from}\nSubject: ${m.subject}\nContent: ${(m.body || m.snippet || "").slice(0, 2000)}` }
+                  ], { temperature: 0.1, maxTokens: 120 }, { workspaceId: workspace.id });
+                  // Strip any accidental <> or markdown artifacts from the summary
+                  const cleanSummary = summary.replace(/<[^>]*>/g, "").replace(/\*\*/g, "*").trim();
+                  return `• *${m.from.split("<")[0].trim()}*\n  ${cleanSummary}`;
                 })
               );
 
-              updates.push(`*Gmail Intelligence*\n${newEmails.length} new unread email(s):\n${summarizedEmails.join("\n")}`);
+              updates.push(`*Inbox* (${newEmails.length} new)\n${summarizedEmails.join("\n")}`);
 
               // Append new email IDs
               const newIds = newEmails.map((e: { id: string }) => e.id);
@@ -218,7 +227,7 @@ export const heartbeatWorkflow = inngest.createFunction(
             if (memberChannels.length === 0) return;
 
             // Post to the first channel where bot is a member
-            const message = `:pulse: *Klawhub Heartbeat* — ${workspace.name}\n\n${checkResult.updates.join("\n\n")}`;
+            const message = `*Klawhub Activity Briefing*\n\n${checkResult.updates.join("\n\n")}`;
 
             await wsSlack.chat.postMessage({
               channel: memberChannels[0],

@@ -1,9 +1,11 @@
 import { agentChat } from "@/core/llm";
 import { sandbox } from "@/core/tools/sandbox";
+import { COWORKER_VOICE_MODULE } from "./persona";
 
 const DOCSTRUCTURE_PROMPT = `You are the Document Agent of Klawhub. You structure content for professional documents.
+${COWORKER_VOICE_MODULE}
 
-Given a document request, produce a structured JSON object with the document content.
+YOUR ROLE: Given a document request, produce a structured JSON object with the document content.
 The output must be valid JSON with this exact structure:
 {
   "title": "Document Title",
@@ -98,7 +100,7 @@ export async function generateOutline(request: string, userContext = "", meta?: 
     {
       role: "system" as const,
       content: `You are the Document Agent of Klawhub. Given a document request, produce a brief outline.
-
+${COWORKER_VOICE_MODULE}
 
 Return ONLY a JSON object:
 {

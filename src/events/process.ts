@@ -14,7 +14,7 @@
  *     → processSlackEvent() runs in background (fire-and-forget)
  */
 
-import { postToThread, addReaction, getCachedWorkspaceId, getChannelName, downloadSlackFile } from "@/integrations/slack/client";
+import { postToThread, updateMessage, addReaction, getCachedWorkspaceId, getChannelName, downloadSlackFile } from "@/integrations/slack/client";
 import { sandbox } from "@/core/tools/sandbox";
 import { classify } from "@/core/agents/classifier";
 import { chatAsAgent } from "@/core/agents/general";
@@ -147,8 +147,7 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
       try {
         console.log(`[EVENTS] Posting proactive suggestion for skill: ${matchedSkill.name}`);
         await addReaction(channelId, messageTs, "bulb", teamId);
-        const suggestion = `I noticed you're discussing *${matchedSkill.name}*. Would you like me to help with that? 
-_I can start this task for you right now._`;
+        const suggestion = `Looks like you're dealing with *${matchedSkill.name}*. Want me to take a pass at this?`;
         await postToThread(channelId, messageTs, suggestion, undefined, teamId);
       } catch (e) {
         console.warn("[LISTENING] Failed to post suggestion:", e);
@@ -483,8 +482,10 @@ async function handleThreadReply(ctx: {
     return;
   }
 
-  // UNCLEAR classification — ask for clarification
-  await postToThread(channelId, messageTs, `:thinking: ${classification.question || "Could you clarify what you need?"}`, undefined, teamId);
+  // Fallback: route to General Agent (even for unclear intents)
+  try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
+  const fallbackResponse = await chatAsAgent(userId, text, { workspaceId, threadHistory, slackChannelId: channelId, slackThreadTs: threadTs, slackTeamId: teamId });
+  await postToThread(channelId, messageTs, fallbackResponse, undefined, teamId);
 }
 
 // ── New Thread / DM Handler ──
@@ -587,9 +588,12 @@ Please analyze this document/message proactively as a human coworker would.
     return;
   }
 
-  // UNCLEAR
+  // Previously UNCLEAR — now route to General Agent with tools instead of dead-ending
   if (classification.type === "unclear") {
-    await postToThread(channelId, messageTs, `:thinking: ${classification.question || "Could you clarify what you need?"}`, undefined, teamId);
+    try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
+    const responseText = await chatAsAgent(userId, text, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
+    memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => { });
+    await postToThread(channelId, messageTs, responseText, undefined, teamId);
     return;
   }
 
@@ -626,16 +630,29 @@ Please analyze this document/message proactively as a human coworker would.
 
   if (isMultiIntent) {
     try { await addReaction(channelId, messageTs, "robot_face", teamId); } catch { /* ok */ }
-    await postToThread(channelId, messageTs, `*Multi-Agent Coordination activated!*\n_Synthesizing a complete solution for your request..._`, undefined, teamId);
+    const statusMsg = await postToThread(channelId, messageTs, 
+      `*Multi-Agent Coordination activated!*\n• :white_check_mark: Request Received\n• :large_blue_circle: Synthesizing solution...`, 
+      undefined, teamId
+    );
+    const statusTs = (statusMsg as any).ts;
 
-    const responseText = await chatAsAgent(userId, text, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
-    await postToThread(channelId, messageTs, responseText, undefined, teamId);
+    const responseText = await chatAsAgent(userId, text, { 
+      workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, 
+      slackTeamId: teamId, statusMessageTs: statusTs 
+    });
+    
+    await updateMessage(channelId, statusTs, responseText, undefined, teamId);
     return;
   }
 
   if (classification.type === "build") {
     try { await addReaction(channelId, messageTs, "gear", teamId); } catch { /* ok */ }
-    await postToThread(channelId, messageTs, `*Build Squad activated!*\n_Request: ${requestText}_\n\nPM Agent is analyzing...`, undefined, teamId);
+    
+    const statusMsg = await postToThread(channelId, messageTs, 
+      `*Build Squad activated*\n• :large_blue_circle: Strategy & Requirements\n• :white_circle: Implementation\n• :white_circle: QA Verification\n• :white_circle: Final Delivery`, 
+      undefined, teamId
+    );
+    const statusTs = (statusMsg as any).ts;
 
     const [run] = await createRun({
       slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs,
@@ -643,14 +660,18 @@ Please analyze this document/message proactively as a human coworker would.
     });
     await inngest.send({
       name: "slack/build.requested",
-      data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: requestText, runId: run.id, teamId },
+      data: { slackChannelId: channelId, slackThreadTs: messageTs, statusMessageTs: statusTs, slackUserId: userId, messageText: requestText, runId: run.id, teamId },
     });
     return;
   }
 
   if (classification.type === "document") {
     try { await addReaction(channelId, messageTs, "page_facing_up", teamId); } catch { /* ok */ }
-    await postToThread(channelId, messageTs, `*Generating document...*\n_Request: ${requestText}_`, undefined, teamId);
+    const statusMsg = await postToThread(channelId, messageTs, 
+      `*Task Force activated [DOCUMENT]*\n• :large_blue_circle: Context Gathering\n• :white_circle: Execution\n• :white_circle: Verification\n• :white_circle: Delivery`, 
+      undefined, teamId
+    );
+    const statusTs = (statusMsg as any).ts;
 
     const [task] = await createTask({
       slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs,
@@ -658,14 +679,18 @@ Please analyze this document/message proactively as a human coworker would.
     });
     await inngest.send({
       name: "slack/document.requested",
-      data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId },
+      data: { slackChannelId: channelId, slackThreadTs: messageTs, statusMessageTs: statusTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId },
     });
     return;
   }
 
   if (classification.type === "research") {
     try { await addReaction(channelId, messageTs, "mag", teamId); } catch { /* ok */ }
-    await postToThread(channelId, messageTs, `*Researching...*\n_Topic: ${requestText}_`, undefined, teamId);
+    const statusMsg = await postToThread(channelId, messageTs, 
+      `*Task Force activated [RESEARCH]*\n• :large_blue_circle: Context Gathering\n• :white_circle: Execution\n• :white_circle: Verification\n• :white_circle: Delivery`, 
+      undefined, teamId
+    );
+    const statusTs = (statusMsg as any).ts;
 
     const [task] = await createTask({
       slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs,
@@ -673,14 +698,18 @@ Please analyze this document/message proactively as a human coworker would.
     });
     await inngest.send({
       name: "slack/research.requested",
-      data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId },
+      data: { slackChannelId: channelId, slackThreadTs: messageTs, statusMessageTs: statusTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId },
     });
     return;
   }
 
   if (classification.type === "analytics") {
     try { await addReaction(channelId, messageTs, "chart_with_upwards_trend", teamId); } catch { /* ok */ }
-    await postToThread(channelId, messageTs, `*Analyzing data...*\n_Request: ${requestText}_`, undefined, teamId);
+    const statusMsg = await postToThread(channelId, messageTs, 
+      `*Task Force activated [ANALYTICS]*\n• :large_blue_circle: Context Gathering\n• :white_circle: Execution\n• :white_circle: Verification\n• :white_circle: Delivery`, 
+      undefined, teamId
+    );
+    const statusTs = (statusMsg as any).ts;
 
     const [task] = await createTask({
       slackUserId: userId, slackChannelId: channelId, slackThreadTs: messageTs,
@@ -688,7 +717,7 @@ Please analyze this document/message proactively as a human coworker would.
     });
     await inngest.send({
       name: "slack/analytics.requested",
-      data: { slackChannelId: channelId, slackThreadTs: messageTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId },
+      data: { slackChannelId: channelId, slackThreadTs: messageTs, statusMessageTs: statusTs, slackUserId: userId, messageText: requestText, taskId: task.id, teamId },
     });
     return;
   }

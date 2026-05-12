@@ -413,3 +413,99 @@ export async function googleCalendarListEvents(workspaceId: string, options: { t
     htmlLink: e.htmlLink || "",
   }));
 }
+
+// ═══════════════════════════════════════════════════════════
+// GMAIL - READ SINGLE EMAIL
+// ═══════════════════════════════════════════════════════════
+
+export async function gmailReadEmail(workspaceId: string, messageId: string) {
+  const token = await getAccessToken(workspaceId, "google");
+  if (!token) throw new Error("Google Workspace is not connected");
+
+  const resp = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (!resp.ok) throw new Error(`Gmail read email failed: ${resp.status}`);
+  const data = await resp.json();
+
+  const headers = data.payload?.headers || [];
+  const subject = headers.find((h: any) => h.name?.toLowerCase() === "subject")?.value || "No Subject";
+  const from = headers.find((h: any) => h.name?.toLowerCase() === "from")?.value || "Unknown";
+  const date = headers.find((h: any) => h.name?.toLowerCase() === "date")?.value || "";
+
+  // Deep body extraction — recurse into multipart
+  let body = "";
+  function extractBody(part: any) {
+    if (part.mimeType === "text/plain" && part.body?.data) {
+      body = Buffer.from(part.body.data, "base64").toString("utf-8");
+      return;
+    }
+    if (part.parts) {
+      for (const sub of part.parts) {
+        extractBody(sub);
+        if (body) return;
+      }
+    }
+    if (!body && part.mimeType === "text/html" && part.body?.data) {
+      const html = Buffer.from(part.body.data, "base64").toString("utf-8");
+      body = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    }
+  }
+  extractBody(data.payload);
+
+  return { id: messageId, subject, from, date, body: body || data.snippet || "" };
+}
+
+// ═══════════════════════════════════════════════════════════
+// GMAIL - REPLY TO EMAIL
+// ═══════════════════════════════════════════════════════════
+
+export async function gmailReplyEmail(workspaceId: string, messageId: string, replyBody: string) {
+  const token = await getAccessToken(workspaceId, "google");
+  if (!token) throw new Error("Google Workspace is not connected");
+
+  // First, get the original email's headers
+  const origResp = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Message-ID`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!origResp.ok) throw new Error(`Gmail read original email failed: ${origResp.status}`);
+  const origData = await origResp.json();
+
+  const origHeaders = origData.payload?.headers || [];
+  const originalFrom = origHeaders.find((h: any) => h.name?.toLowerCase() === "from")?.value || "";
+  const originalSubject = origHeaders.find((h: any) => h.name?.toLowerCase() === "subject")?.value || "";
+  const originalMessageId = origHeaders.find((h: any) => h.name?.toLowerCase() === "message-id")?.value || "";
+  const threadId = origData.threadId;
+
+  const replySubject = originalSubject.startsWith("Re:") ? originalSubject : `Re: ${originalSubject}`;
+  const rawEmail = [
+    `To: ${originalFrom}`,
+    `Subject: ${replySubject}`,
+    `In-Reply-To: ${originalMessageId}`,
+    `References: ${originalMessageId}`,
+    `Content-Type: text/html; charset=utf-8`,
+    "",
+    replyBody,
+  ].join("\r\n");
+
+  const encodedMessage = Buffer.from(rawEmail).toString("base64url");
+
+  const sendResp = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/send`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ raw: encodedMessage, threadId }),
+    }
+  );
+
+  if (!sendResp.ok) {
+    const errText = await sendResp.text();
+    throw new Error(`Gmail reply failed: ${sendResp.status} — ${errText.slice(0, 200)}`);
+  }
+
+  return { to: originalFrom, subject: replySubject };
+}

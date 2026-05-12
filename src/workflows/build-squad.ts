@@ -47,26 +47,35 @@ function extractQABrief(evaluation: string, passed: boolean): string {
 interface BuildEventData {
   slackChannelId: string;
   slackThreadTs: string;
+  statusMessageTs?: string;
   slackUserId: string;
   messageText: string;
   runId: string;
   teamId?: string;
 }
 
+const LEDGER_TEMPLATE = (s1: string, s2: string, s3: string, s4: string, note?: string) =>
+  `*Build Squad* — Active\n• ${s1} Strategy & Requirements
+• ${s2} Implementation _(~2 min)_
+• ${s3} QA Verification _(~1 min)_
+• ${s4} Final Delivery${note ? `\n\n_${note}_` : ``}`;
+
 export const buildSquadWorkflow = inngest.createFunction(
   { id: "build-squad", name: "Build Squad", retries: 2 },
   { event: "slack/build.requested" },
   async ({ event, step }): Promise<void> => {
-    const { slackChannelId, slackThreadTs, slackUserId, messageText, runId, teamId } =
+    const { slackChannelId, slackThreadTs, statusMessageTs, slackUserId, messageText, runId, teamId } =
       event.data as BuildEventData;
 
     try {
-      // Add initial reaction to show we've started
+      // 👀 Reaction lifecycle: signal we're reading the request
       await addReaction(slackChannelId, slackThreadTs, "eyes", teamId).catch(() => {});
 
       // Step 1: PM researches and writes spec
       const specResult = await step.run("pm-spec", async () => {
-        await postToThread(slackChannelId, slackThreadTs, "_PM Agent is researching and drafting the specification..._", undefined, teamId);
+        if (statusMessageTs) {
+          await updateMessage(slackChannelId, statusMessageTs, LEDGER_TEMPLATE(":large_blue_circle:", ":white_circle:", ":white_circle:", ":white_circle:"), undefined, teamId);
+        }
 
         const runsList = await getRun(runId).catch((err) => { console.error("[DB] Error getting run by ID:", err); return null; });
         const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
@@ -154,8 +163,12 @@ export const buildSquadWorkflow = inngest.createFunction(
 
       // Step 4: Engineer writes code (with learnings context)
       const codeResult = await step.run("engineer-code", async () => {
+        if (statusMessageTs) {
+          await updateMessage(slackChannelId, statusMessageTs, LEDGER_TEMPLATE(":white_check_mark:", ":large_blue_circle:", ":white_circle:", ":white_circle:", "Engineer is writing code..."), undefined, teamId);
+        }
+        // 🧠→✍️ Reaction lifecycle: shift from reading to implementing
+        await removeReaction(slackChannelId, slackThreadTs, "eyes", teamId).catch(() => {});
         await addReaction(slackChannelId, slackThreadTs, "writing_hand", teamId).catch(() => {});
-        await postToThread(slackChannelId, slackThreadTs, "_Engineer Agent is implementing the solution..._", undefined, teamId);
 
         const approverId = decision.data.userId || "unknown";
         const updatedBlocks = replaceActionsWithDecision(
@@ -201,11 +214,19 @@ export const buildSquadWorkflow = inngest.createFunction(
         );
 
         const ext = specResult.language === "javascript" ? "js" : "py";
+        // Use a meaningful filename derived from the spec rather than a random ID hash
+        const specTitle = specResult.spec
+          ?.split("\n").find((l: string) => l.trim().length > 5)
+          ?.replace(/[^a-z0-9\s]/gi, "")
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .slice(0, 40) || `build_${runId.slice(0, 8)}`;
         await uploadFile(
           slackChannelId,
           slackThreadTs,
           result.code,
-          `build-${runId.slice(0, 8)}.${ext}`,
+          `${specTitle}.${ext}`,
           "Generated Code",
           teamId
         );
@@ -215,8 +236,12 @@ export const buildSquadWorkflow = inngest.createFunction(
 
       // Step 5: QA Test 1
       const test1 = await step.run("qa-test-1", async () => {
+        if (statusMessageTs) {
+          await updateMessage(slackChannelId, statusMessageTs, LEDGER_TEMPLATE(":white_check_mark:", ":white_check_mark:", ":large_blue_circle:", ":white_circle:", "QA running verification..."), undefined, teamId);
+        }
+        // ⚡ Reaction lifecycle: shift to testing
+        await removeReaction(slackChannelId, slackThreadTs, "writing_hand", teamId).catch(() => {});
         await addReaction(slackChannelId, slackThreadTs, "microscope", teamId).catch(() => {});
-        await postToThread(slackChannelId, slackThreadTs, "_QA Agent is verifying the implementation in the sandbox..._", undefined, teamId);
 
         const runsList = await getRun(runId).catch((err) => { console.error("[DB] Error getting run by ID:", err); return null; });
         const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
@@ -261,15 +286,15 @@ export const buildSquadWorkflow = inngest.createFunction(
           const fixed = await fixCode(codeResult.code, error, specResult.spec, { runId, slackUserId });
 
           await updateRun(runId, { code: fixed.code });
-          await postToThread(slackChannelId, slackThreadTs, "*Engineer Agent* -- Fixing issues...", undefined, teamId);
+          await postToThread(slackChannelId, slackThreadTs, "*Engineer Agent* — Taking a different angle on the fix...", undefined, teamId);
 
           const ext = specResult.language === "javascript" ? "js" : "py";
           await uploadFile(
             slackChannelId,
             slackThreadTs,
             fixed.code,
-            `build-${runId.slice(0, 8)}-fixed.${ext}`,
-            "Fixed Code",
+            `build-${runId.slice(0, 8)}-v2.${ext}`,
+            "Revised Code",
             teamId
           );
           return fixed;
@@ -294,31 +319,83 @@ export const buildSquadWorkflow = inngest.createFunction(
           await postToThread(
             slackChannelId,
             slackThreadTs,
-            `*QA Agent* -- Test 2: ${result.passed ? "PASS" : "FAIL"}\n${qaBrief2}`,
+            `*QA Agent* — Test 2: ${result.passed ? "PASS" : "FAIL"}\n${qaBrief2}`,
             undefined,
             teamId
           );
 
-          // Persist fix learnings
-          persistLearning(
-            specResult.language,
-            specResult.spec,
-            finalCode,
-            result,
-            runId
-          ).catch(() => { });
-
+          persistLearning(specResult.language, specResult.spec, finalCode, result, runId).catch(() => {});
           return result;
         });
+
+        // Step 7b: AUTONOMOUS ROOT CAUSE ANALYSIS on double-fail
+        // Instead of silently delivering broken code, diagnose and present recovery options.
+        if (!finalTest.passed) {
+          await step.run("double-fail-rca", async () => {
+            const { agentChat } = await import("@/core/llm");
+
+            const rcaPrompt = `You are a senior engineer diagnosing a persistent build failure.
+
+Original Request: ${messageText}
+
+Spec:
+${specResult.spec}
+
+Test 1 failure:
+${test1.evaluation?.slice(0, 1500)}
+
+Test 2 failure (after fix attempt):
+${finalTest.evaluation?.slice(0, 1500)}
+
+Analyze the PATTERN across both failures. What is the ROOT CAUSE? Then propose exactly 3 recovery options.
+
+Respond in this format (use Slack mrkdwn, *bold* not **bold**):
+*Root Cause:* [one clear sentence]
+
+*Recovery Options:*
+1. [Option A — most likely fix]
+2. [Option B — alternative approach]
+3. [Option C — simplified version or different library]`;
+
+            const rca = await agentChat("general", [
+              { role: "system", content: "You are a senior engineer diagnosing a build failure. Be surgical and direct." },
+              { role: "user", content: rcaPrompt }
+            ], { temperature: 0.2, maxTokens: 1000 }, { workspaceId: undefined });
+
+            const retryBtn = retryBlocks(runId, slackChannelId, slackThreadTs, slackUserId, messageText);
+
+            await postToThread(
+              slackChannelId,
+              slackThreadTs,
+              `*Build Squad — Two attempts, still failing.*\n\nI've tried this twice. Here's my analysis:\n\n${rca}\n\n_Reply with which option you want, or click Retry to go again with the same spec._`,
+              { blocks: retryBtn },
+              teamId
+            );
+          });
+
+          // Update ledger to reflect double-fail state
+          if (statusMessageTs) {
+            await updateMessage(
+              slackChannelId, statusMessageTs,
+              LEDGER_TEMPLATE(":white_check_mark:", ":white_check_mark:", ":x:", ":x:", "Needs your input — see diagnosis below"),
+              undefined, teamId
+            );
+          }
+
+          await removeReaction(slackChannelId, slackThreadTs, "microscope", teamId).catch(() => {});
+          await addReaction(slackChannelId, slackThreadTs, "red_circle", teamId).catch(() => {});
+          await updateRun(runId, { status: "error" });
+          await trackSkillUsage("build", slackUserId, slackChannelId, messageText, "error");
+          return; // Exit early — we've given the user actionable recovery options
+        }
       }
 
       // Step 8: Deliver
       await step.run("deliver", async () => {
-        const status = finalTest.passed ? "done" : "error";
         const exec = finalTest.execution as SandboxResponse;
 
         await updateRun(runId, {
-          status,
+          status: "done",
           testResult: {
             passed: finalTest.passed,
             output: exec.stdout,
@@ -327,51 +404,52 @@ export const buildSquadWorkflow = inngest.createFunction(
           finalOutput: finalTest.evaluation,
         });
 
-        try {
-          await removeReaction(slackChannelId, slackThreadTs, "gear", teamId);
-        } catch { /* ok */ }
-        await addReaction(
-          slackChannelId,
-          slackThreadTs,
-          finalTest.passed ? "white_check_mark" : "warning",
-          teamId
-        );
+        // ✅ Reaction lifecycle: clear microscope, set final state
+        await removeReaction(slackChannelId, slackThreadTs, "microscope", teamId).catch(() => {});
+        await addReaction(slackChannelId, slackThreadTs, "white_check_mark", teamId).catch(() => {});
 
-        const deliverBlocks = finalTest.passed
-          ? []
-          : retryBlocks(runId, slackChannelId, slackThreadTs, slackUserId, messageText);
+        if (statusMessageTs) {
+          await updateMessage(
+            slackChannelId, statusMessageTs,
+            LEDGER_TEMPLATE(":white_check_mark:", ":white_check_mark:", ":white_check_mark:", ":white_check_mark:"),
+            undefined, teamId
+          );
+        }
 
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          finalTest.passed
-            ? "*Build Squad -- Delivered*\n\nYour tool is ready and tested. Check the files above.\n_Reply in this thread if you need changes._"
-            : "*Build Squad -- Delivered with Issues*\n\nQA flagged issues. Check the output above.",
-          finalTest.passed ? undefined : { blocks: deliverBlocks },
+          `*Build Squad — Done.* Ready and tested. Check the files above.\n_Reply here if you need changes._`,
+          undefined,
           teamId
         );
 
-        await trackSkillUsage(
-          "build",
-          slackUserId,
-          slackChannelId,
-          messageText,
-          finalTest.passed ? "success" : "error"
-        );
+        await trackSkillUsage("build", slackUserId, slackChannelId, messageText, "success");
       });
     } catch (workflowError) {
       console.error("[BUILD-SQUAD] Workflow error:", workflowError);
       try {
         await updateRun(runId, { status: "error" });
         await trackSkillUsage("build", slackUserId, slackChannelId, messageText, "error");
+        // 🔴 Reaction lifecycle: clear any in-progress reaction, set error state
+        await removeReaction(slackChannelId, slackThreadTs, "eyes", teamId).catch(() => {});
+        await removeReaction(slackChannelId, slackThreadTs, "writing_hand", teamId).catch(() => {});
+        await removeReaction(slackChannelId, slackThreadTs, "microscope", teamId).catch(() => {});
+        await addReaction(slackChannelId, slackThreadTs, "red_circle", teamId).catch(() => {});
+        if (statusMessageTs) {
+          await updateMessage(
+            slackChannelId, statusMessageTs,
+            LEDGER_TEMPLATE(":x:", ":x:", ":x:", ":x:", "Unexpected error — see thread"),
+            undefined, teamId
+          ).catch(() => {});
+        }
         await postToThread(
           slackChannelId,
           slackThreadTs,
-          `*Build Squad -- Error*\n\nAn error occurred during the build process: ${(workflowError as Error).message?.slice(0, 500) || "Unknown error"}.\n_Reply in this thread to retry._`,
+          `*Build Squad — Something went wrong.*\n\n${(workflowError as Error).message?.slice(0, 400) || "Unknown error"}\n_Reply here to retry._`,
           undefined,
           teamId
         );
-        try { await addReaction(slackChannelId, slackThreadTs, "warning", teamId); } catch { /* ok */ }
       } catch (notifyError) {
         console.error("[BUILD-SQUAD] Failed to notify user of error:", notifyError);
       }

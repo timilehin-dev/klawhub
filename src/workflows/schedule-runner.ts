@@ -7,7 +7,7 @@ import { chatAsAgent } from "@/core/agents/general";
 import { createRun, createTask } from "@/db";
 
 export const scheduleRunnerWorkflow = inngest.createFunction(
-  { id: "schedule-runner", name: "Schedule Runner" },
+  { id: "schedule-runner", name: "Schedule Runner", retries: 3 },
   { cron: "*/5 * * * *" }, // Run every 5 minutes
   async ({ step }) => {
     const now = new Date();
@@ -106,8 +106,13 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
           }
 
           if (classification.type === "chat" || classification.type === "unclear") {
-            // Run through the general agent (with full tool-use)
-            const response = await chatAsAgent(userId, schedule.action, { workspaceId });
+            // Run through the general agent (with full tool-use and workspace context)
+            const response = await chatAsAgent(userId, schedule.action, {
+              workspaceId,
+              slackChannelId: targetChannel,
+              slackThreadTs: threadTs,
+              slackTeamId: targetTeamId,
+            });
             await postToThread(targetChannel, threadTs!, response, undefined, targetTeamId);
             await updateSchedule(schedule.id, {
               lastRunStatus: "success",
@@ -164,10 +169,19 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
           // Try to post error message using per-workspace client
           try {
             const wsClient = await getWorkspaceSlack(targetTeamId);
-            await wsClient.chat.postMessage({
-              channel: targetChannel,
-              text: `:warning: *${schedule.name}* — Scheduled task failed: ${(err as Error).message.slice(0, 200)}`,
-            });
+            
+            if (schedule.failCount === 2) {
+              // It's hitting 3 failures and being auto-paused by the DB
+              await wsClient.chat.postMessage({
+                channel: targetChannel,
+                text: `Heads up: I've paused the *${schedule.name}* schedule because it failed 3 times in a row. Let me know when you want me to look into it!`,
+              });
+            } else {
+              await wsClient.chat.postMessage({
+                channel: targetChannel,
+                text: `:warning: *${schedule.name}* — Scheduled task failed: ${(err as Error).message.slice(0, 200)}`,
+              });
+            }
           } catch { /* ignore */ }
 
           await incrementFailCount(schedule.id);

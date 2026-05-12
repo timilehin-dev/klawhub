@@ -9,8 +9,9 @@ import {
 type Message = { role: "system" | "user" | "assistant"; content: string };
 
 const TOOL_CALL_PATTERN = /\[TOOL:(\w+)\]([\s\S]*?)(?:\[\/TOOL\]|$)/gi;
-const METADATA_PATTERN = /<(?:tool_call|thought|internal|call)\|?.*?>/gi;
+const METADATA_PATTERN = /<(?:tool_call|tool_result|thought|internal|call|\/tool_call|\/tool_result|\/thought|\|assistant\||\|end\||\|user\|)\|?[^>]*>/gi;
 const JSON_BLOCK_PATTERN = /^\s*\{\s*"thought":[\s\S]*?\}\s*$/gm;
+const DOUBLE_ASTERISK_PATTERN = /\*\*([^*]+)\*\*/g; // **text** → *text* for Slack mrkdwn
 
 /**
  * Parse tool calls from an LLM response.
@@ -47,6 +48,7 @@ export function stripToolCalls(response: string): string {
     .replace(METADATA_PATTERN, "")
     .replace(JSON_BLOCK_PATTERN, "")
     .replace(/```json\s*\{\s*"thought":[\s\S]*?\}\s*```/gi, "")
+    .replace(DOUBLE_ASTERISK_PATTERN, "*$1*")
     .trim();
 }
 
