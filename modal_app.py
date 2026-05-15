@@ -98,11 +98,7 @@ def get_embedding_model():
 
 def verify_request(request: Request) -> bool:
     """Verify requests using a shared webhook secret."""
-    try:
-        expected = modal.container_app.secrets.get("klawhub-webhook-secret")
-    except Exception:
-        expected = os.environ.get("MODAL_WEBHOOK_SECRET")
-
+    expected = os.environ.get("MODAL_WEBHOOK_SECRET")
     provided = request.headers.get("X-Webhook-Secret", "")
 
     if not expected:
@@ -120,7 +116,7 @@ def verify_request(request: Request) -> bool:
 # Code Execution (with Dynamic Dependencies)
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=600, memory=4096, volumes={"/root/.cache": pip_cache})
+@app.function(image=image, timeout=600, memory=4096, volumes={"/root/.pip_cache": pip_cache})
 def execute_code(code: str, language: str = "python", dependencies: list[str] = None):
     if language not in ["python", "javascript"]:
         return {"success": False, "error": f"Unsupported language: {language}"}
@@ -181,9 +177,9 @@ def execute_code(code: str, language: str = "python", dependencies: list[str] = 
             def set_resource_limits():
                 if resource is None:
                     return
-                # Limit memory to 4GB (for ML and data processing)
+                # Limit memory to 8GB (for heavy ML and data processing)
                 try:
-                    resource.setrlimit(resource.RLIMIT_AS, (4096 * 1024 * 1024, 4096 * 1024 * 1024))
+                    resource.setrlimit(resource.RLIMIT_AS, (8192 * 1024 * 1024, 8192 * 1024 * 1024))
                 except ValueError:
                     pass
                 # Limit CPU to 120 seconds (matches subprocess timeout)
@@ -512,7 +508,7 @@ def generate_embedding(text: str) -> dict:
 # Unified Entry Point
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=120, secrets=[webhook_secret])
+@app.function(image=image, timeout=600, secrets=[webhook_secret])
 @modal.fastapi_endpoint(method="POST")
 async def execute(request: Request):
     if not verify_request(request):
@@ -522,21 +518,21 @@ async def execute(request: Request):
     task_type = payload.get("type", "code")
 
     if task_type == "code":
-        return execute_code.remote(
+        return await execute_code.remote.aio(
             payload["code"],
             payload.get("language", "python"),
             payload.get("dependencies", [])
         )
     elif task_type == "web_read":
-        return read_web_page.remote(payload["url"], payload.get("engine", "lightpanda"))
+        return await read_web_page.remote.aio(payload["url"], payload.get("engine", "lightpanda"))
     elif task_type == "document":
-        return generate_document.remote(payload)
+        return await generate_document.remote.aio(payload)
     elif task_type == "analytics":
-        return run_analytics.remote(payload)
+        return await run_analytics.remote.aio(payload)
     elif task_type == "parse_document":
-        return parse_document.remote(payload["file"], payload["filename"])
+        return await parse_document.remote.aio(payload["file"], payload["filename"])
     elif task_type == "generate_embedding":
-        return generate_embedding.remote(payload["text"])
+        return await generate_embedding.remote.aio(payload["text"])
     else:
         return {"success": False, "error": f"Unknown task type: {task_type}"}
 

@@ -8,14 +8,17 @@ class TavilyClient {
 
   private init() {
     if (this.initialized) return;
-    this.keys = [process.env.TAVILY_API_KEY_1, process.env.TAVILY_API_KEY_2].filter(
-      (k): k is string => !!k
-    );
+    this.keys = [
+      process.env.TAVILY_API_KEY,
+      process.env.TAVILY_API_KEY_1,
+      process.env.TAVILY_API_KEY_2,
+      process.env.TAVILY_API_KEY_3
+    ].filter((k): k is string => !!k);
     this._maxRetries = this.keys.length || 1;
     this.initialized = true;
 
     if (this.keys.length === 0) {
-      throw new Error("No TAVILY_API_KEY_1 or TAVILY_API_KEY_2 configured");
+      throw new Error("No TAVILY_API_KEY or TAVILY_API_KEY_1 configured");
     }
   }
 

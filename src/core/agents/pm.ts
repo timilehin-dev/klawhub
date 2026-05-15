@@ -120,7 +120,16 @@ The SPEC section MUST include:
 7. *Edge Cases* — error scenarios and how each is handled
 8. *Security Considerations* — (if applicable) API key handling, input validation
 
-IMPORTANT: Your final response MUST include the LANGUAGE, DEPENDENCIES, and SPEC headers. Do not use tool calls in your final answer — only use tools during research, then output the spec.`;
+IMPORTANT: Your final response MUST include the LANGUAGE, DEPENDENCIES, and SPEC headers. 
+
+CRITICAL NEGATIVE CONSTRAINT: 
+- NEVER output a markdown code block (\`\`\`).
+- NEVER write the actual code implementation.
+- You are a PRODUCT MANAGER. Your job is to define the requirements, not the code.
+- If you provide code, the Engineer will not have enough information to build a production-grade system.
+- Focus 100% on the logic flow, inputs, outputs, and edge cases.
+
+Do not use tool calls in your final answer — only use tools during research, then output the spec.`;
 
 export async function createSpec(request: string, userContext: string) {
   const contextNote = userContext ? `\n\nUser context/preferences: ${userContext}` : "";
@@ -138,23 +147,33 @@ export async function createSpec(request: string, userContext: string) {
   );
 
   const langMatch = specText.match(/LANGUAGE:\s*(\w+)/i);
-  const depMatch = specText.match(/DEPENDENCIES:\s*([\s\S]*?)(?=SPEC:|$)/i); // Ensure regex matches till end if SPEC is missing
+  const depMatch = specText.match(/DEPENDENCIES:\s*([\s\S]*?)(?=SPEC:|$)/i);
   const specMatch = specText.match(/SPEC:\s*([\s\S]*)/i);
 
-  const rawSpec = specMatch?.[1]?.trim() || "";
-  const rawDeps = depMatch?.[1]?.trim() || "";
+  let rawSpec = specMatch?.[1]?.trim() || "";
+  let rawDeps = depMatch?.[1]?.trim() || "";
+  let language = langMatch?.[1]?.toLowerCase() === "javascript" ? "javascript" : "python";
 
-  if (!langMatch || !specMatch) {
-    // If core parts are missing, it's a critical parsing failure.
-    // Log the full LLM response for debugging.
+  // FALLBACK: If the LLM just returned a code block without the SPEC headers, 
+  // we salvage it by treating the code block as the spec and inferring language.
+  if (!specMatch && specText.includes("```")) {
+    const codeBlockMatch = specText.match(/```(\w+)?\n([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      console.warn("[PM Agent] Salving spec from code block due to missing headers.");
+      rawSpec = `Direct Code provided by PM:\n\n${codeBlockMatch[0]}`;
+      language = codeBlockMatch[1]?.toLowerCase() === "javascript" ? "javascript" : "python";
+    }
+  }
+
+  if (!rawSpec && !specText.includes("```")) {
     console.error("[PM Agent] Failed to parse spec from LLM response. Full response:\n", specText);
     throw new Error("LLM did not return a valid specification format. Please try again.");
   }
 
-  const cleanSpec = toSlackMrkdwn(rawSpec);
+  const cleanSpec = toSlackMrkdwn(rawSpec || specText);
 
   return {
-    language: langMatch?.[1]?.toLowerCase() === "javascript" ? "javascript" : "python",
+    language: language as "python" | "javascript",
     spec: cleanSpec,
     dependencies: toSlackMrkdwn(rawDeps),
   };

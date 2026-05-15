@@ -57,7 +57,7 @@ async function enrichInstructions(
 export const dispatchTaskTool: ToolDefinition = {
   name: "dispatch_task",
   description:
-    "Dispatch a task to a specialized agent workflow. Use 'build' for code/scripts, 'research' for web research, 'document' for documents, 'analytics' for data analysis, or 'coordinated' for complex tasks that need BOTH research AND code generation (runs Research + Engineer in parallel).",
+    "Dispatch a task to a specialized agent workflow. Use 'build' for code/scripts/automation, 'research' for web research and information gathering, 'document' for creating reports/proposals/contracts/emails, 'analytics' for data analysis and charts, 'assist' for knowledge work like summarizing, drafting, advising or answering questions, or 'coordinated' for complex tasks that need research THEN a full build pipeline (Research → PM Spec → Engineer → QA).",
   parameters: {
     task_type: {
       type: "string",
@@ -90,24 +90,31 @@ export const dispatchTaskTool: ToolDefinition = {
     let nodes: any[] = [];
     if (task_type === "build") {
       nodes = [
-        { id: "plan", agent: "pm", instruction: `Create a detailed technical spec for: ${enrichedInstructions}`, dependsOn: [] },
-        { id: "approval", agent: "approval", instruction: "Please review the technical specification before coding begins.", dependsOn: ["plan"] },
-        { id: "code", agent: "engineer", instruction: "Implement the approved specification.", dependsOn: ["approval"] },
-        { id: "test", agent: "qa", instruction: "Verify the implementation and fix any bugs.", dependsOn: ["code"] }
+        { id: "plan", agent: "pm", instruction: `Create a detailed technical spec for: ${enrichedInstructions}`, dependsOn: [], taskType: "code" },
+        { id: "approval", agent: "approval", instruction: "Please review the technical specification before coding begins.", dependsOn: ["plan"], taskType: "general" },
+        { id: "code", agent: "engineer", instruction: "Implement the approved specification. Output ONLY: DEPENDENCIES line + code block. Do NOT execute anything.", dependsOn: ["approval"], taskType: "code" },
+        { id: "test", agent: "qa", instruction: "You are the Sandbox Executor. Parse the Engineer's output to extract the code, language, and dependencies. Execute it in the sandbox using the code_execute tool. Evaluate it against the spec. If it FAILS, provide a precise diagnosis to the Engineer, get fixed code, and retry execution. Repeat up to 3 times autonomously. Only escalate to the user after 3 failed attempts.", dependsOn: ["code"], taskType: "code" }
       ];
     } else if (task_type === "research") {
-      nodes = [{ id: "research", agent: "researcher", instruction: enrichedInstructions, dependsOn: [] }];
+      nodes = [{ id: "research", agent: "researcher", instruction: enrichedInstructions, dependsOn: [], taskType: "research" }];
     } else if (task_type === "document") {
-      nodes = [{ id: "write", agent: "documentor", instruction: enrichedInstructions, dependsOn: [] }];
+      nodes = [{ id: "write", agent: "documentor", instruction: enrichedInstructions, dependsOn: [], taskType: "document" }];
     } else if (task_type === "analytics") {
-      nodes = [{ id: "analyze", agent: "analyst", instruction: enrichedInstructions, dependsOn: [] }];
+      nodes = [{ id: "analyze", agent: "analyst", instruction: enrichedInstructions, dependsOn: [], taskType: "general" }];
+    } else if (task_type === "assist") {
+      // Generic knowledge work — no code, no sandbox. A single general-purpose agent handles it.
+      nodes = [{ id: "assist", agent: "researcher", instruction: enrichedInstructions, dependsOn: [], taskType: "general" }];
     } else if (task_type === "coordinated") {
+      // Full pipeline: Research → PM Spec → Approval → Engineer → QA
       nodes = [
-        { id: "research", agent: "researcher", instruction: `Research background for: ${enrichedInstructions}`, dependsOn: [] },
-        { id: "build", agent: "engineer", instruction: `Implement based on research: ${enrichedInstructions}`, dependsOn: ["research"] }
+        { id: "research", agent: "researcher", instruction: `Research background for: ${enrichedInstructions}`, dependsOn: [], taskType: "research" },
+        { id: "plan", agent: "pm", instruction: `Based on the research findings, create a detailed technical spec for: ${enrichedInstructions}`, dependsOn: ["research"], taskType: "code" },
+        { id: "approval", agent: "approval", instruction: "Please review the technical specification before coding begins.", dependsOn: ["plan"], taskType: "general" },
+        { id: "code", agent: "engineer", instruction: "Implement the approved specification. Output ONLY: DEPENDENCIES line + code block. Do NOT execute anything.", dependsOn: ["approval"], taskType: "code" },
+        { id: "test", agent: "qa", instruction: "You are the Sandbox Executor. Parse the Engineer's output to extract the code, language, and dependencies. Execute it in the sandbox using the code_execute tool. Evaluate it against the spec. If it FAILS, diagnose precisely, get the Engineer to fix it, and retry. Repeat up to 3 times autonomously.", dependsOn: ["code"], taskType: "code" }
       ];
     } else {
-      return `Error: Unknown task_type '${task_type}'. Must be build, research, document, analytics, or coordinated.`;
+      return `Error: Unknown task_type '${task_type}'. Must be build, research, document, analytics, assist, or coordinated.`;
     }
 
     try {

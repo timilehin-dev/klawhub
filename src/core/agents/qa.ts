@@ -196,6 +196,82 @@ export async function testCode(
 }
 
 /**
+ * Autonomous QA ↔ Engineer retry loop.
+ *
+ * Executes code in the sandbox. If it fails, the Engineer is called to fix it.
+ * Repeats up to MAX_RETRIES times with zero human intervention.
+ * Returns the final TestResult (pass or fail after exhausting retries).
+ */
+const MAX_RETRIES = 3;
+
+export async function runQACycle(
+  initialCode: string,
+  language: string,
+  spec: string,
+  requestText: string,
+  meta?: { runId?: string; slackUserId?: string; dependencies?: string },
+  onRetry?: (attempt: number, error: string) => void
+): Promise<TestResult & { finalCode: string; finalDependencies?: string; attempts: number }> {
+  const { fixCode } = await import("@/core/agents/engineer");
+
+  let code = initialCode;
+  let dependencies = meta?.dependencies;
+  let lastResult: TestResult | null = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const result = await testCode(code, language, spec, requestText, {
+      ...meta,
+      dependencies,
+    });
+
+    lastResult = result;
+
+    if (result.passed) {
+      // Persist learning on success
+      persistLearning(language, spec, code, result, meta?.runId).catch(() => {});
+      return { ...result, finalCode: code, finalDependencies: dependencies, attempts: attempt };
+    }
+
+    // On failure, log and optionally notify caller
+    const errorSummary = result.execution.error || result.execution.stderr || result.evaluation;
+    console.warn(`[QA] Attempt ${attempt}/${MAX_RETRIES} FAILED. Sending back to Engineer.`);
+    onRetry?.(attempt, errorSummary || "Unknown error");
+
+    if (attempt < MAX_RETRIES) {
+      // Ask the Engineer to fix the code
+      try {
+        const fixed = await fixCode(code, errorSummary || "Execution failed", spec, {
+          runId: meta?.runId,
+          slackUserId: meta?.slackUserId,
+          dependencies,
+        });
+        code = fixed.code;
+        if (fixed.dependencies) dependencies = fixed.dependencies;
+      } catch (fixErr) {
+        console.error(`[QA] Engineer fixCode failed on attempt ${attempt}:`, fixErr);
+        break; // Engineer itself crashed — stop retrying
+      }
+    }
+  }
+
+  // Exhausted all retries — persist learning and return final failure
+  if (lastResult) {
+    persistLearning(language, spec, code, lastResult, meta?.runId).catch(() => {});
+    return { ...lastResult, finalCode: code, finalDependencies: dependencies, attempts: MAX_RETRIES };
+  }
+
+  // Fallback (should never reach here)
+  return {
+    passed: false,
+    evaluation: "QA cycle exhausted all retries with no result.",
+    execution: { success: false, error: "Max retries exceeded." },
+    finalCode: code,
+    finalDependencies: dependencies,
+    attempts: MAX_RETRIES,
+  };
+}
+
+/**
  * Save QA learnings to the database for the engineer to improve.
  * Runs in background — failures are silently ignored.
  */

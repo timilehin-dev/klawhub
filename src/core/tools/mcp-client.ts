@@ -2,54 +2,35 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { ToolDefinition } from "./registry";
 
+const MCP_CONNECT_TIMEOUT_MS = 10_000;
+
 export class McpToolManager {
   private clients = new Map<string, Client>();
 
-  private cachedTools = new Map<string, ToolDefinition[]>();
-
   /**
-   * Connect to an MCP server via SSE and return its available tools mapped to Klawhub ToolDefinitions
+   * Connect to an MCP server via SSE and return its available tools mapped to Klawhub ToolDefinitions.
+   * Note: No in-memory tool cache — each DAG step runs in a fresh serverless context so caching
+   * would never be shared. Connections are cached per-invocation only.
    */
   async connectAndFetchTools(serverUrl: string, serverName: string, authConfig?: any): Promise<ToolDefinition[]> {
-    // Basic SSRF Prevention: reject localhost and private metadata IP
-    const forbiddenPatterns = [/^https?:\/\/localhost/i, /^https?:\/\/127\.0\.0\.1/i, /^https?:\/\/169\.254/i];
+    // Basic SSRF Prevention: reject localhost and private/metadata IPs
+    const forbiddenPatterns = [
+      /^https?:\/\/localhost/i,
+      /^https?:\/\/127\.0\.0\.1/i,
+      /^https?:\/\/169\.254/i,
+      /^https?:\/\/10\.\d+\.\d+\.\d+/i,
+      /^https?:\/\/192\.168\./i,
+    ];
     if (forbiddenPatterns.some(p => p.test(serverUrl))) {
-      console.warn(`[SECURITY] Blocked SSRF attempt to internal/metadata IP: ${serverUrl}`);
+      console.warn(`[MCP][SECURITY] Blocked SSRF attempt to internal IP: ${serverUrl}`);
       return [];
     }
 
-    if (this.cachedTools.has(serverUrl)) {
-      return this.cachedTools.get(serverUrl)!;
-    }
-
     try {
-      const url = new URL(serverUrl);
-      
-      // Inject Authorization headers if provided in authConfig
-      // Note: The official MCP SSEClientTransport uses EventSource which lacks native custom header support.
-      // For production auth, we either wrap global fetch or pass auth tokens via URL parameters.
-      if (authConfig && authConfig.token) {
-        url.searchParams.append("token", authConfig.token);
-      } else if (authConfig && authConfig.apiKey) {
-        url.searchParams.append("apiKey", authConfig.apiKey);
-      }
-
-      const transport = new SSEClientTransport(url);
-      
-      const client = new Client({
-        name: "Klawhub-OS",
-        version: "2.0.0",
-      }, {
-        capabilities: {}
-      });
-
-      await client.connect(transport);
-      this.clients.set(serverUrl, client);
-
+      const client = await this.getOrCreateClient(serverUrl, authConfig);
       const toolsRes = await client.listTools();
-      
+
       const mappedTools = toolsRes.tools.map(mcpTool => {
-        // Convert MCP JSONSchema to Klawhub ToolParamDef
         const params: Record<string, any> = {};
         const required = (mcpTool.inputSchema as any)?.required || [];
         const properties = (mcpTool.inputSchema as any)?.properties || {};
@@ -63,41 +44,100 @@ export class McpToolManager {
         }
 
         return {
-          name: `mcp_${serverName}_${mcpTool.name}`.replace(/[^a-zA-Z0-9_-]/g, '_'), // Namespace and sanitize
+          name: `mcp_${serverName}_${mcpTool.name}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
           description: `(MCP: ${serverName}) ${mcpTool.description}`,
           parameters: params,
-          execute: async (args: Record<string, any>, ctx: any) => {
+          execute: async (args: Record<string, any>, _ctx: any) => {
             try {
-              const res = await client.callTool({
-                name: mcpTool.name,
-                arguments: args
-              });
-              
+              // Attempt the tool call — reconnect once on failure
+              let res;
+              try {
+                res = await client.callTool({ name: mcpTool.name, arguments: args });
+              } catch (callErr) {
+                console.warn(`[MCP] Tool call failed on ${serverName}.${mcpTool.name}, attempting reconnect...`);
+                const freshClient = await this.reconnect(serverUrl, serverName, authConfig);
+                res = await freshClient.callTool({ name: mcpTool.name, arguments: args });
+              }
+
               if (res.isError) {
                 return `Error from MCP ${serverName}: ${JSON.stringify(res.content)}`;
               }
-              // Format standard text output
               const contentArray = res.content as any[];
               return contentArray.map(c => c.type === 'text' ? c.text : JSON.stringify(c)).join("\n");
             } catch (err) {
-              return `MCP Tool Execution Error: ${(err as Error).message}`;
+              return `MCP Tool Execution Error (${serverName}.${mcpTool.name}): ${(err as Error).message}`;
             }
           }
         };
       });
 
-      this.cachedTools.set(serverUrl, mappedTools);
       return mappedTools;
 
     } catch (error) {
-      console.error(`Failed to connect to MCP server ${serverName} at ${serverUrl}`, error);
+      console.error(`[MCP] Failed to connect to ${serverName} at ${serverUrl}:`, (error as Error).message);
       return [];
     }
   }
 
+  /** Get an existing client or create a new one with connection timeout */
+  private async getOrCreateClient(serverUrl: string, authConfig?: any): Promise<Client> {
+    if (this.clients.has(serverUrl)) {
+      return this.clients.get(serverUrl)!;
+    }
+    return this.createClient(serverUrl, authConfig);
+  }
+
+  /** Create and connect a new MCP client, with a timeout guard */
+  private async createClient(serverUrl: string, authConfig?: any): Promise<Client> {
+    const url = new URL(serverUrl);
+
+    if (authConfig?.token) {
+      url.searchParams.append("token", authConfig.token);
+    } else if (authConfig?.apiKey) {
+      url.searchParams.append("apiKey", authConfig.apiKey);
+    }
+
+    const transport = new SSEClientTransport(url);
+    const client = new Client({ name: "Klawhub-OS", version: "2.0.0" }, { capabilities: {} });
+
+    // Race connection against a timeout to prevent hanging DAG steps
+    await Promise.race([
+      client.connect(transport),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`MCP connection timeout after ${MCP_CONNECT_TIMEOUT_MS}ms`)), MCP_CONNECT_TIMEOUT_MS)
+      ),
+    ]);
+
+    this.clients.set(serverUrl, client);
+    return client;
+  }
+
+  /** Force-reconnect: close stale client and create a fresh one */
+  private async reconnect(serverUrl: string, serverName: string, authConfig?: any): Promise<Client> {
+    console.log(`[MCP] Reconnecting to ${serverName}...`);
+    try {
+      const stale = this.clients.get(serverUrl);
+      if (stale) await stale.close().catch(() => {});
+    } finally {
+      this.clients.delete(serverUrl);
+    }
+    return this.createClient(serverUrl, authConfig);
+  }
+
+  /** Health check: verify a server is reachable before a DAG run starts */
+  async healthCheck(serverUrl: string, authConfig?: any): Promise<boolean> {
+    try {
+      const client = await this.getOrCreateClient(serverUrl, authConfig);
+      await client.listTools();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async closeAll() {
-    for (const [url, client] of this.clients.entries()) {
-      await client.close();
+    for (const [, client] of this.clients.entries()) {
+      await client.close().catch(() => {});
     }
     this.clients.clear();
   }

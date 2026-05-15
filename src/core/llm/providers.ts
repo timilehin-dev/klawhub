@@ -38,7 +38,7 @@ export function getProviders(): ProviderConfig[] {
   // 1. Ollama (default — used by all agents unless overridden)
   const ollama = fromEnv(
     "ollama",
-    process.env.OLLAMA_BASE_URL || "https://api.ollama.com/v1",
+    process.env.OLLAMA_BASE_URL || "https://ollama.com/v1",
     ["OLLAMA_API_KEY_1", "OLLAMA_API_KEY_2", "OLLAMA_API_KEY_3"],
     process.env.OLLAMA_MODEL || "gemma4:31b-cloud",
     "ollama"
@@ -48,9 +48,9 @@ export function getProviders(): ProviderConfig[] {
   // 2. Ollama Engineer (used by engineer agent for coding tasks)
   const ollamaEngineer = fromEnv(
     "ollama_engineer",
-    process.env.OLLAMA_BASE_URL || "https://api.ollama.com/v1",
+    process.env.OLLAMA_BASE_URL || "https://ollama.com/v1",
     ["OLLAMA_API_KEY_1", "OLLAMA_API_KEY_2", "OLLAMA_API_KEY_3"],
-    process.env.OLLAMA_ENGINEER_MODEL || "nemotron-3-super:cloud",
+    process.env.OLLAMA_ENGINEER_MODEL || "gemma4:31b-cloud",
     "ollama"
   );
   if (ollamaEngineer) providers.push(ollamaEngineer);

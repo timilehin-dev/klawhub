@@ -108,7 +108,13 @@ NO explanatory text before or after. NO intermediate thoughts or research summar
 If you are responding to QA feedback, focus ONLY on the fix and return the full updated code.
 Include a brief docstring/JSDoc at the top explaining usage.
 If you need to research, do it internally and output ONLY the final DEPENDENCIES + code.
-Failure to provide both the DEPENDENCIES line and code block will cause a system execution error.`;
+Failure to provide both the DEPENDENCIES line and code block will cause a system execution error.
+
+CRITICAL EXECUTION CONSTRAINT:
+- You MUST NOT execute code. You are a CODE WRITER ONLY.
+- The QA Agent is the sole executor. It will run your code in the secure sandbox.
+- If you attempt to execute code, it will be ignored and your role will be violated.
+- Your job ends when you output: DEPENDENCIES + code block. Nothing more.`;
 
 const FIX_PROMPT = `You are a Distinguished Engineer performing surgical bug fixes. Analyze the error with extreme precision and apply the minimum change that resolves it completely.
 
