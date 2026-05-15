@@ -102,9 +102,9 @@ export async function completeOAuthFlow(
 
   const accountInfo = await fetchAccountInfo(provider, tokens.accessToken);
 
-    const integration = await createIntegration({
+  const integration = await createIntegration({
     workspaceId,
-    provider: provider.id as "google" | "github",
+    provider: provider.id as any,
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt,
@@ -113,6 +113,20 @@ export async function completeOAuthFlow(
     externalAccountName: accountInfo.name,
     externalAccountEmail: accountInfo.email,
   });
+
+  // Bridge to MCP if it's a managed service
+  const bridgedProviders = ["notion", "salesforce", "hubspot", "linear", "jira"];
+  if (bridgedProviders.includes(provider.id)) {
+    const { upsertMcpServer } = await import("@/db/mcp");
+    await upsertMcpServer(workspaceId, provider.name, {
+      url: `https://mcp.klawhub.xyz/${provider.id}/sse`,
+      authConfig: { 
+        type: "integration_linked",
+        integrationId: integration.id,
+        provider: provider.id
+      }
+    });
+  }
  
   return integration;
 }

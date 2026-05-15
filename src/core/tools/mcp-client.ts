@@ -93,7 +93,26 @@ export class McpToolManager {
 
     // Build auth headers — NEVER put tokens in URL query params (visible in logs/proxies)
     const authHeaders: Record<string, string> = {};
-    if (authConfig?.token) {
+
+    // Resolve dynamic auth if linked to a Klawhub integration
+    if (authConfig?.type === "integration_linked" && authConfig.integrationId) {
+      try {
+        const { getIntegration, getValidAccessToken } = await import("@/integrations/store");
+        const { getProvider } = await import("@/integrations/providers/registry");
+        const integration = await getIntegration(authConfig.integrationId);
+        if (integration) {
+          const provider = getProvider(authConfig.provider);
+          if (provider) {
+            const token = await getValidAccessToken(integration as any, provider);
+            if (token) {
+              authHeaders["Authorization"] = `Bearer ${token}`;
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[MCP] Failed to resolve integration-linked auth for ${serverUrl}:`, err);
+      }
+    } else if (authConfig?.token) {
       authHeaders["Authorization"] = `Bearer ${authConfig.token}`;
     } else if (authConfig?.apiKey) {
       authHeaders["X-Api-Key"] = authConfig.apiKey;

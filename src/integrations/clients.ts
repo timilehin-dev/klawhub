@@ -3,7 +3,7 @@ import { getProvider } from "./providers/registry";
 
 // ── Helper: get a valid access token for a workspace's integration ──
 
-type ProviderId = "google" | "github";
+type ProviderId = "google" | "github" | "google_drive" | "notion" | "salesforce" | "hubspot" | "linear" | "jira";
 
 async function getAccessToken(workspaceId: string, providerId: ProviderId): Promise<string | null> {
   const provider = getProvider(providerId);

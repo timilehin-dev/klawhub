@@ -19,6 +19,8 @@ import {
   LifeBuoy,
   PlusCircle,
   Trash2,
+  Plus,
+  Globe,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import { McpConnectionModal } from "./McpConnectionModal";
@@ -126,14 +128,14 @@ const FEATURED_MCP_SERVICES = [
     borderColor: "border-indigo-200",
   },
   {
-    id: "zendesk",
-    name: "Zendesk",
-    description: "Connect your support helpdesk. Klawhub can read tickets, summarize customer issues, and draft replies.",
+    id: "jira",
+    name: "Jira",
+    description: "Manage your Atlassian workspace. Klawhub can search issues, update tickets, and track sprints.",
     icon: LifeBuoy,
-    url: "https://mcp.klawhub.xyz/zendesk/sse",
-    color: "text-emerald-600",
-    bg: "bg-emerald-50",
-    borderColor: "border-emerald-200",
+    url: "https://mcp.klawhub.xyz/jira/sse",
+    color: "text-blue-600",
+    bg: "bg-blue-50",
+    borderColor: "border-blue-200",
   },
 ];
 
@@ -291,6 +293,34 @@ export default function IntegrationsPage() {
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedMcpService, setSelectedMcpService] = useState<typeof FEATURED_MCP_SERVICES[0] | null>(null);
+  const [isManualMcpModalOpen, setIsManualMcpModalOpen] = useState(false);
+
+  const handleConnectMcp = useCallback(
+    async (service: typeof FEATURED_MCP_SERVICES[0]) => {
+      setConnecting(service.id);
+      setError(null);
+      try {
+        const oauthProviders = ["notion", "salesforce", "hubspot", "linear", "jira"];
+        if (oauthProviders.includes(service.id)) {
+          const res = await fetch(`/api/integrations/connect/${service.id}?workspaceId=${data?.workspace?.id}`);
+          const json = await res.json();
+          if (json.authUrl) {
+            window.location.href = json.authUrl;
+            return;
+          } else {
+            setError(json.error || "Failed to start OAuth flow");
+          }
+        } else {
+          setSelectedMcpService(service);
+        }
+      } catch {
+        setError("Network error — please try again");
+      } finally {
+        setConnecting(null);
+      }
+    },
+    [data?.workspace?.id]
+  );
 
   const handleConnect = useCallback(
     async (providerId: string) => {
@@ -520,10 +550,11 @@ export default function IntegrationsPage() {
                     </button>
                   ) : (
                     <button
-                      onClick={() => setSelectedMcpService(service)}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl gradient-bg px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-brand-500/10 transition-all hover:shadow-xl hover:brightness-110 active:scale-95"
+                      onClick={() => handleConnectMcp(service)}
+                      disabled={connecting === service.id}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl gradient-bg px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-brand-500/10 transition-all hover:shadow-xl hover:brightness-110 active:scale-95 disabled:opacity-50"
                     >
-                      <PlusCircle size={14} />
+                      {connecting === service.id ? <Loader2 size={14} className="animate-spin" /> : <PlusCircle size={14} />}
                       Connect Now
                     </button>
                   )}
@@ -534,7 +565,35 @@ export default function IntegrationsPage() {
         </div>
       </div>
 
-      {/* MCP Connection Modal */}
+      {/* Custom MCP Servers */}
+      <div className="mt-8 rounded-2xl border border-dashed border-surface-300 p-8 text-center bg-surface-50/30">
+        <Globe size={32} className="mx-auto text-surface-400 mb-4" />
+        <h3 className="text-lg font-semibold text-surface-900">Have a custom MCP server?</h3>
+        <p className="mt-1 text-sm text-surface-600 max-w-md mx-auto mb-6">
+          Connect to any private or self-hosted MCP server by providing its SSE endpoint URL manually.
+        </p>
+        <button
+          onClick={() => setIsManualMcpModalOpen(true)}
+          className="inline-flex items-center gap-2 rounded-xl bg-surface-900 px-6 py-2.5 text-xs font-bold text-white shadow-lg transition-all hover:bg-surface-800 active:scale-95"
+        >
+          <Plus size={16} />
+          Connect Custom Server
+        </button>
+      </div>
+
+      {/* MCP Connection Modal (Custom/Manual) */}
+      {isManualMcpModalOpen && data?.workspace && (
+        <McpConnectionModal
+          workspaceId={data.workspace.id}
+          onClose={() => setIsManualMcpModalOpen(false)}
+          onSuccess={() => {
+            refresh();
+            setError(null);
+          }}
+        />
+      )}
+
+      {/* MCP Connection Modal (Specific Service - if needed as fallback) */}
       {selectedMcpService && data?.workspace && (
         <McpConnectionModal
           service={selectedMcpService}

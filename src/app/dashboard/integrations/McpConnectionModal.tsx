@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Loader2, ShieldCheck, AlertCircle } from "lucide-react";
+import { X, Loader2, ShieldCheck, AlertCircle, Globe } from "lucide-react";
 
 interface McpService {
   id: string;
@@ -14,7 +14,7 @@ interface McpService {
 }
 
 interface McpConnectionModalProps {
-  service: McpService;
+  service?: McpService;
   workspaceId: string;
   onClose: () => void;
   onSuccess: () => void;
@@ -22,10 +22,23 @@ interface McpConnectionModalProps {
 
 export function McpConnectionModal({ service, workspaceId, onClose, onSuccess }: McpConnectionModalProps) {
   const [apiKey, setApiKey] = useState("");
+  const [manualName, setManualName] = useState("");
+  const [manualUrl, setManualUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleConnect = async () => {
+    const name = service?.name || manualName;
+    const url = service?.url || manualUrl;
+
+    if (!name.trim()) {
+      setError("Please enter a server name");
+      return;
+    }
+    if (!url.trim()) {
+      setError("Please enter the SSE URL");
+      return;
+    }
     if (!apiKey.trim()) {
       setError("Please enter an API Key or Token");
       return;
@@ -40,8 +53,8 @@ export function McpConnectionModal({ service, workspaceId, onClose, onSuccess }:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workspaceId,
-          name: service.name,
-          url: service.url,
+          name: name.trim(),
+          url: url.trim(),
           apiKey: apiKey.trim(),
         }),
       });
@@ -66,12 +79,12 @@ export function McpConnectionModal({ service, workspaceId, onClose, onSuccess }:
       <div className="w-full max-w-md rounded-2xl border border-surface-200 bg-white p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${service.bg}`}>
-              <service.icon size={20} className={service.color} />
+            <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${service?.bg || 'bg-surface-100'}`}>
+              {service ? <service.icon size={20} className={service.color} /> : <Globe size={20} className="text-surface-600" />}
             </div>
             <div>
-              <h3 className="text-lg font-bold text-surface-900">Connect {service.name}</h3>
-              <p className="text-xs text-surface-500 truncate max-w-[200px]">{service.url}</p>
+              <h3 className="text-lg font-bold text-surface-900">{service ? `Connect ${service.name}` : 'Connect Custom MCP'}</h3>
+              <p className="text-xs text-surface-500 truncate max-w-[200px]">{service?.url || 'Provide SSE endpoint details'}</p>
             </div>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 text-surface-400 hover:bg-surface-100 hover:text-surface-600 transition-colors">
@@ -80,9 +93,28 @@ export function McpConnectionModal({ service, workspaceId, onClose, onSuccess }:
         </div>
 
         <div className="space-y-4">
-          <p className="text-sm text-surface-700 leading-relaxed">
-            {service.description} To connect, please provide your {service.name} API Key or Personal Access Token.
-          </p>
+          {!service && (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-surface-900 uppercase tracking-wider">Server Name</label>
+                <input
+                  placeholder="e.g. My Internal Tools"
+                  value={manualName}
+                  onChange={(e) => setManualName(e.target.value)}
+                  className="w-full rounded-xl border border-surface-200 bg-surface-50 px-4 py-3 text-sm focus:border-brand-500 focus:outline-none transition-all"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-surface-900 uppercase tracking-wider">SSE URL</label>
+                <input
+                  placeholder="https://mcp.yourdomain.com/sse"
+                  value={manualUrl}
+                  onChange={(e) => setManualUrl(e.target.value)}
+                  className="w-full rounded-xl border border-surface-200 bg-surface-50 px-4 py-3 text-sm focus:border-brand-500 focus:outline-none transition-all"
+                />
+              </div>
+            </>
+          )}
 
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-surface-900 uppercase tracking-wider">
@@ -90,7 +122,7 @@ export function McpConnectionModal({ service, workspaceId, onClose, onSuccess }:
             </label>
             <input
               type="password"
-              placeholder={`Enter your ${service.name} secret...`}
+              placeholder={`Enter the secret token...`}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               className="w-full rounded-xl border border-surface-200 bg-surface-50 px-4 py-3 text-sm focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/10 transition-all"
