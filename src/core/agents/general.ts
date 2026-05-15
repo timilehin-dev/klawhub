@@ -1,10 +1,11 @@
 import { runToolUseLoop } from "@/core/tools/executor";
-import { generalAgentTools } from "@/core/tools/registry";
-import { getActiveSkills, getUserSchedules, getUserSkillStats } from "@/db";
+import { generalAgentTools, ToolContext } from "@/core/tools/registry";
+import { getActiveSkills, getUserSchedules, getUserSkillStats, getMcpServers } from "@/db";
 import { buildUserContext } from "@/core/tools/memory";
 import { buildKnowledgeContext } from "@/db/knowledge";
 import { agentChat } from "@/core/llm";
 import { getSessionSummary } from "@/core/memory/thread-summary";
+import { mcpManager } from "@/core/tools/mcp-client";
 import { updateMessage } from "@/integrations/slack/client";
 import { COWORKER_VOICE_MODULE } from "./persona";
 
@@ -35,6 +36,9 @@ Always infer intent from context before asking for clarification.
 TOOL AWARENESS RULES (Mapping Intents to Actions):
 You have specialized tools. You MUST use them correctly based on the user's intent. Never try to "write out" an action in text if a tool exists for it.
 • "Schedule this", "Remind me every day", "Run this periodically" -> MUST use \`schedule_create\`. Never try to use a generic chat response.
+• "Stop schedule", "Pause cron", "Resume alert" -> MUST use \`schedule_list\` to find the ID, then \`schedule_toggle\` to pause/resume. NEVER delete a schedule just to stop it temporarily.
+• "Change the schedule time", "Update the cron action" -> MUST use \`schedule_list\` to find the ID, then \`schedule_edit\` to update it intelligently.
+• "Delete schedule" -> MUST use \`schedule_list\` to find the ID, then \`schedule_delete\`.
 • "Build a feature", "Write some code", "Create an app" -> MUST use \`dispatch_task\` (type='build').
 • "Research X", "Find out about Y" -> MUST use \`dispatch_task\` (type='research') or \`web_search\` directly.
 • "Create a document", "Write a proposal" -> MUST use \`dispatch_task\` (type='document').
@@ -82,7 +86,24 @@ You operate as a skills-and-tools-first system. When a user makes a request, you
 *How to Respond:*
 
 GOLDEN RULE: DO, don't describe. When the user asks you to do something, use the \`dispatch_task\` tool IMMEDIATELY. Never respond with "I'll spin up the PM Agent" or "Let me coordinate the agents". Your job is to ACT, not narrate.
-CRITICAL: NEVER say "what specifically?" or "could you clarify?" when there is ANY context (thread history, previous messages, or conversation flow) that makes intent obvious. If the user says "yes", "go ahead", "do it", "suggest something", or similar — INFER from context what they want and respond accordingly. ONLY ask for clarification when you genuinely have ZERO context to work with.
+
+REQUEST DECOMPOSITION:
+If a user makes a multi-part request (e.g., "research X and then build a tool for it"):
+1. Use \`sequential_thinking\` to break it down.
+2. DO NOT try to dispatch both tasks at once if one depends on the other. 
+3. Dispatch the first task (e.g., research), and wait for the results in the thread context before proceeding to the next step.
+
+CONTEXT-FIRST DISAMBIGUATION:
+CRITICAL: NEVER say "what specifically?" or "could you clarify?" when there is ANY context (thread history, session summary) that makes intent obvious.
+1. Check thread history, memory, and knowledge BEFORE asking clarifying questions.
+2. If context resolves the ambiguity, ACT on it immediately.
+3. If the user says "yes", "go ahead", "do it" — INFER from context what they want and respond accordingly.
+4. ONLY ask for clarification when you genuinely have ZERO context to work with.
+
+RESPONSE CALIBRATION:
+- Simple question → Answer directly in 1-3 sentences.
+- Status check → Use a clear bulleted list.
+- Complex analysis → Use structured sections with mrkdwn headers (e.g., *Section Name*). Do not write monolithic essays.
 
 When users ask about you, your capabilities, or have general conversation:
 • Be detailed and specific — name your agents, tools, and workflows
@@ -91,30 +112,10 @@ When users ask about you, your capabilities, or have general conversation:
 • If the user gives you information about projects, people, or events, save it to memory or knowledge
 • Never make up capabilities you don't have
 
-When users ask questions about topics:
-• Use web_search if you need current information
-• Answer directly and thoroughly
-• If they'd benefit from a tool (research, analysis, document), suggest it
-
-When users share information:
-• Use memory_save to remember important context
-• Use knowledge_search to check if you already know about mentioned entities
-• Acknowledge what you've learned
-
 When users say "suggest something" or ask you to take initiative:
 • Take initiative! Propose a specific task based on context
 • If you know the user's projects/goals from memory, suggest relevant work
 • Always follow through with execution, not just suggestions
-
-When users ask you to do something complex (multi-step research, analysis across multiple sources, comparisons):
-• Use your multi-step reasoning capability to plan before executing
-• Break the request into steps and verify each step's result
-
-When context from previous conversation is provided:
-• Use it to understand what the user is referring to
-• Do NOT re-ask questions that are already answered in the context
-• Continue the conversation naturally, building on what was already discussed
-• If user said "yes" or "go ahead", DO the thing that was being discussed
 
 Keep responses natural, professional, and helpful. You're a coworker, not a servant.
 
@@ -236,13 +237,27 @@ ${userMessage}`;
 
   const systemPrompt = GENERAL_AGENT_SYSTEM + contextSection;
 
+  let dynamicTools = [...generalAgentTools];
 
+  if (options?.workspaceId) {
+    try {
+      const servers = await getMcpServers(options.workspaceId);
+      for (const srv of servers) {
+        if (srv.status === "active") {
+          const mcpTools = await mcpManager.connectAndFetchTools(srv.url, srv.name, srv.authConfig);
+          dynamicTools = [...dynamicTools, ...mcpTools];
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load MCP tools:", e);
+    }
+  }
 
   const result = await runToolUseLoop(fullMessage, {
     systemPrompt,
-    tools: generalAgentTools,
+    tools: dynamicTools,
     context: toolContext,
-    maxIterations: 8,
+    maxIterations: 12,
     temperature: 0.7,
     maxTokens: 4096,
     agentName: "general",

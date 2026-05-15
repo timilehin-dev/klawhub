@@ -2,8 +2,11 @@ import { runToolUseLoop } from "@/core/tools/executor";
 import { sandbox } from "@/core/tools/sandbox";
 import { saveEngineerLearning } from "@/db";
 import { qaAgentTools } from "@/core/tools/registry";
+import { COWORKER_VOICE_MODULE } from "./persona";
 
 const QA_PROMPT = `You are the Principal QA Gatekeeper at Klawhub. You are the final authority on code quality and security. No code reaches a repository without your explicit verification and push.
+
+${COWORKER_VOICE_MODULE}
 
 YOUR ROLE:
 1. *Test & Verify*: Execute code in the sandbox and evaluate against the spec.

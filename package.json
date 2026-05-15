@@ -11,6 +11,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@slack/web-api": "^7.0.0",
     "@tailwindcss/postcss": "^4.2.4",
     "@upstash/redis": "^1.37.0",

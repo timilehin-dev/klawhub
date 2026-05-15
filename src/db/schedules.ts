@@ -34,7 +34,8 @@ export async function updateSchedule(id: string, updates: Partial<typeof schedul
   return getDb()
     .update(schedules)
     .set({ ...updates, updatedAt: new Date() })
-    .where(eq(schedules.id, id));
+    .where(eq(schedules.id, id))
+    .returning();
 }
 
 /** Get all active schedules that are due (system + all users). */

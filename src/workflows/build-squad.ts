@@ -246,12 +246,18 @@ export const buildSquadWorkflow = inngest.createFunction(
         const runsList = await getRun(runId).catch((err) => { console.error("[DB] Error getting run by ID:", err); return null; });
         const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
 
+        // Merge dependencies: engineer-extracted + PM-specified
+        const mergedDeps = [
+          codeResult.dependencies || "",
+          specResult.dependencies || ""
+        ].filter(Boolean).join(" ");
+
         const result = await testCode(
           codeResult.code,
           specResult.language,
           specResult.spec,
           actualRequest,
-          { runId, slackUserId, dependencies: specResult.dependencies }
+          { runId, slackUserId, dependencies: mergedDeps || undefined }
         );
 
         const qaBrief = extractQABrief(result.evaluation, result.passed);
@@ -307,12 +313,19 @@ export const buildSquadWorkflow = inngest.createFunction(
           const runsList = await getRun(runId).catch((err) => { console.error("[DB] Error getting run by ID:", err); return null; });
           const actualRequest = runsList && runsList.length > 0 ? runsList[0].request : messageText;
 
+          // Merge dependencies: fixResult may have new ones, plus originals
+          const mergedDeps = [
+            fixResult.dependencies || "",
+            codeResult.dependencies || "",
+            specResult.dependencies || ""
+          ].filter(Boolean).join(" ");
+
           const result = await testCode(
             finalCode,
             specResult.language,
             specResult.spec,
             actualRequest,
-            { runId, slackUserId, dependencies: specResult.dependencies }
+            { runId, slackUserId, dependencies: mergedDeps || undefined }
           );
 
           const qaBrief2 = extractQABrief(result.evaluation, result.passed);

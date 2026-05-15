@@ -873,6 +873,11 @@ const scheduleCreateTool: ToolDefinition = {
     }
 
     try {
+      const { isValidCron } = await import("@/utils/cron-validator");
+      if (!isValidCron(params.cron_expr)) {
+        return `Error: Invalid cron expression '${params.cron_expr}'. Please provide a valid 5-field cron expression.`;
+      }
+
       const [schedule] = await createSchedule({
         slackUserId: ctx.slackUserId || "system",
         slackTeamId: ctx.slackTeamId,
@@ -1038,6 +1043,69 @@ const scheduleToggleTool: ToolDefinition = {
       return `Successfully ${status} schedule: "${existing[0].name}" (ID: ${params.schedule_id}).`;
     } catch (err) {
       return `Failed to toggle schedule: ${(err as Error).message}`;
+    }
+  }
+};
+
+const scheduleEditTool: ToolDefinition = {
+  name: "schedule_edit",
+  description: "Edit/update an existing scheduled task (cron). Use this to change a schedule's time, action, channel, name, or timezone.",
+  parameters: {
+    schedule_id: { type: "string", description: "The UUID of the schedule to edit", required: true },
+    name: { type: "string", description: "New descriptive name (optional)" },
+    cron_expr: { type: "string", description: "New cron expression (optional, e.g. '0 9 * * 1-5')" },
+    action: { type: "string", description: "New action/prompt instructions (optional)" },
+    channel_id: { type: "string", description: "New Slack channel ID (optional)" },
+    timezone: { type: "string", description: "New timezone (optional, e.g. 'America/New_York')" },
+  },
+  async execute(params, ctx) {
+    try {
+      const getDb = (await import("@/db")).getDb;
+      const { eq } = await import("drizzle-orm");
+      const { updateSchedule } = await import("@/db/schedules");
+
+      // Verify ownership
+      const existing = await getDb()
+        .select()
+        .from(schedules)
+        .where(eq(schedules.id, params.schedule_id))
+        .limit(1);
+
+      if (existing.length === 0) {
+        return `Schedule with ID ${params.schedule_id} not found.`;
+      }
+
+      if (ctx.slackTeamId && existing[0].slackTeamId !== ctx.slackTeamId) {
+        return "Error: You do not have permission to edit this schedule.";
+      }
+
+      const updates: any = {};
+      if (params.name !== undefined) updates.name = params.name;
+      if (params.cron_expr !== undefined) updates.cronExpr = params.cron_expr;
+      if (params.action !== undefined) updates.action = params.action;
+      if (params.channel_id !== undefined) updates.channelId = params.channel_id;
+      if (params.timezone !== undefined) updates.timezone = params.timezone;
+
+      if (updates.cronExpr !== undefined) {
+        const { isValidCron } = await import("@/utils/cron-validator");
+        if (!isValidCron(updates.cronExpr)) {
+          return `Error: Invalid cron expression '${updates.cronExpr}'. Please provide a valid 5-field cron expression.`;
+        }
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return "No changes provided to update.";
+      }
+
+      const [updated] = await updateSchedule(params.schedule_id, updates);
+      return `Successfully updated schedule:
+ID: ${updated.id}
+Name: ${updated.name}
+Cron: ${updated.cronExpr} (Timezone: ${updated.timezone})
+Action: ${updated.action}
+Channel ID: ${updated.channelId}`;
+    } catch (err) {
+      return `Failed to edit schedule: ${(err as Error).message}`;
     }
   }
 };
@@ -1219,6 +1287,7 @@ export const generalAgentTools: ToolDefinition[] = [
   scheduleListTool,
   scheduleDeleteTool,
   scheduleToggleTool,
+  scheduleEditTool,
   scheduleListPresetsTool,
   // Channel awareness
   slackListChannelsTool,
@@ -1241,6 +1310,7 @@ export const pmAgentTools: ToolDefinition[] = [
   scheduleCreateTool,
   scheduleListTool,
   scheduleToggleTool,
+  scheduleEditTool,
   slackListChannelsTool,
   sequentialThinkingTool,
 ];

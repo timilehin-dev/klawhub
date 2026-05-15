@@ -309,4 +309,16 @@ export const pendingActions = pgTable("pending_actions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// ── MCP Servers: dynamically attached external tool providers ──
+export const mcpServers = pgTable("mcp_servers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  status: text("status").$type<"active" | "error" | "disabled">().default("active").notNull(),
+  authConfig: jsonb("auth_config"), // optional API keys or headers for the MCP server
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 export const INTENTS: Intent[] = ["build", "document", "research", "analytics", "chat", "unclear"];

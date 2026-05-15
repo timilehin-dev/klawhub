@@ -1,6 +1,7 @@
 import { runToolUseLoop } from "@/core/tools/executor";
 import { engineerAgentTools } from "@/core/tools/registry";
 import { getRelevantLearnings } from "@/db";
+import { COWORKER_VOICE_MODULE } from "./persona";
 
 const ENGINEER_PROMPT = `You are a Distinguished Engineer at Klawhub with 20+ years of production experience across Python, JavaScript/TypeScript, Go, Rust, and system design. You write code that is correct, secure, performant, and maintainable — code that you would ship to production without a second thought.
 
@@ -92,16 +93,26 @@ CODE STRUCTURE (follow this order):
 7. Entry point (if __name__ == "__main__" or module.exports)
 
 OUTPUT FORMAT (CRITICAL - FOLLOW EXACTLY):
-You MUST return ONLY a single markdown code block containing the complete, executable code.
-NO explanatory text before or after the code block.
+You MUST return your response in this exact structure:
+
+1. A DEPENDENCIES line listing ALL third-party packages the code requires (pip or npm names):
+   DEPENDENCIES: requests httpx beautifulsoup4
+   (If no external dependencies, write: DEPENDENCIES: none)
+
+2. Immediately after, a SINGLE markdown code block with the correct language tag:
+   \`\`\`python
+   # your code here
+   \`\`\`
+
+NO explanatory text before or after. NO intermediate thoughts or research summaries.
 If you are responding to QA feedback, focus ONLY on the fix and return the full updated code.
-NO intermediate thoughts, planning, or research summaries in the final response.
-The code block MUST have the correct language tag (\`\`\`python or \`\`\`javascript).
 Include a brief docstring/JSDoc at the top explaining usage.
-If you need to research, do it internally and output ONLY the final code.
-Failure to provide the code block will cause a system execution error.`;
+If you need to research, do it internally and output ONLY the final DEPENDENCIES + code.
+Failure to provide both the DEPENDENCIES line and code block will cause a system execution error.`;
 
 const FIX_PROMPT = `You are a Distinguished Engineer performing surgical bug fixes. Analyze the error with extreme precision and apply the minimum change that resolves it completely.
+
+${COWORKER_VOICE_MODULE}
 
 DIAGNOSIS FRAMEWORK:
 1. READ the error carefully — the error message tells you 90% of the story
@@ -124,7 +135,10 @@ FIX RULES:
 - Re-verify error handling around the fix — the fix itself shouldn't introduce new failure modes
 - If the error suggests a deeper architectural issue, fix the immediate problem and note the architectural concern
 
-Return ONLY the corrected code inside a markdown code block. NO explanatory text.`;
+Return your response in this exact structure:
+1. DEPENDENCIES: [space-separated list of ALL required third-party packages, or "none"]
+2. A single markdown code block with the corrected code.
+NO other text.`;
 
 export interface CodeMeta {
   runId?: string;
@@ -133,11 +147,83 @@ export interface CodeMeta {
   dependencies?: string;
 }
 
+export interface CodeResult {
+  code: string;
+  dependencies?: string;
+}
+
+/**
+ * Fallback dependency extractor — scans import/require statements from generated code
+ * to build a dependencies list when the LLM doesn't return an explicit DEPENDENCIES line.
+ */
+function extractDependenciesFromCode(code: string, language: string): string {
+  const deps = new Set<string>();
+  
+  // Standard library modules to exclude
+  const PYTHON_STDLIB = new Set([
+    "os", "sys", "json", "re", "math", "datetime", "time", "random",
+    "collections", "itertools", "functools", "pathlib", "io", "csv",
+    "typing", "dataclasses", "enum", "abc", "contextlib", "logging",
+    "unittest", "argparse", "hashlib", "base64", "urllib", "http",
+    "socket", "threading", "multiprocessing", "subprocess", "shutil",
+    "tempfile", "glob", "string", "textwrap", "struct", "copy",
+    "pprint", "statistics", "decimal", "fractions", "operator",
+    "configparser", "xml", "html", "email", "mimetypes",
+  ]);
+  
+  const NODE_BUILTINS = new Set([
+    "fs", "path", "os", "http", "https", "url", "util", "stream",
+    "crypto", "buffer", "events", "child_process", "cluster", "net",
+    "readline", "querystring", "zlib", "assert", "timers",
+  ]);
+  
+  if (language === "python") {
+    // Match: import X, from X import Y, from X.Y import Z
+    const importPattern = /^(?:from\s+([\w.]+)|import\s+([\w.]+))/gm;
+    let match;
+    while ((match = importPattern.exec(code)) !== null) {
+      const pkg = (match[1] || match[2]).split(".")[0];
+      if (!PYTHON_STDLIB.has(pkg)) deps.add(pkg);
+    }
+  } else if (language === "javascript") {
+    // Match: require('X'), import X from 'X', import { X } from 'X'
+    const requirePattern = /require\(['"]([^'"./][^'"]*)['"]\)/g;
+    const importPattern = /from\s+['"]([^'"./][^'"]*)['"]|import\s+['"]([^'"./][^'"]*)['"]$/gm;
+    let match;
+    while ((match = requirePattern.exec(code)) !== null) {
+      const pkg = match[1].split("/")[0];
+      if (!NODE_BUILTINS.has(pkg)) deps.add(pkg);
+    }
+    while ((match = importPattern.exec(code)) !== null) {
+      const pkg = (match[1] || match[2]).split("/")[0];
+      if (!NODE_BUILTINS.has(pkg)) deps.add(pkg);
+    }
+  }
+  
+  return deps.size > 0 ? [...deps].join(" ") : "";
+}
+
+/**
+ * Parse the DEPENDENCIES line from the LLM response.
+ * Falls back to scanning the code's import statements.
+ */
+function parseDependenciesFromResponse(response: string, code: string, language: string): string {
+  const depsMatch = response.match(/DEPENDENCIES:\s*(.+)/i);
+  if (depsMatch) {
+    const parsed = depsMatch[1].trim();
+    if (parsed.toLowerCase() !== "none" && parsed.length > 0) {
+      return parsed;
+    }
+  }
+  // Fallback: extract from import statements
+  return extractDependenciesFromCode(code, language);
+}
+
 export async function writeCode(
   spec: string,
   language: string,
   meta?: CodeMeta
-) {
+): Promise<CodeResult> {
   const learningsBlock = meta?.learningsContext
     ? `\n\nPAST QA FEEDBACK (internalize these lessons — they represent real bugs found in production):\n${meta.learningsContext}`
     : "";
@@ -147,7 +233,7 @@ export async function writeCode(
     : "";
 
   const codeText = await runToolUseLoop(
-    `Language: ${language}${depsBlock}\n\nSpecification:\n${spec}${learningsBlock}\n\nRESEARCH any libraries or APIs mentioned in the spec. Verify current documentation before writing. Then write complete, production-quality code that will pass QA on the first run.`,
+    `Language: ${language}${depsBlock}\n\nSpecification:\n${spec}${learningsBlock}\n\nRESEARCH any libraries or APIs mentioned in the spec. Verify current documentation before writing. Then write complete, production-quality code that will pass QA on the first run. Remember: output DEPENDENCIES line first, then the code block.`,
     {
       systemPrompt: ENGINEER_PROMPT,
       tools: engineerAgentTools,
@@ -164,10 +250,12 @@ export async function writeCode(
 
   const codeMatch = codeText.match(/```(?:\w+)?\n?([\s\S]*?)```/);
   if (codeMatch) {
-    return { code: codeMatch[1].trim() };
+    const code = codeMatch[1].trim();
+    const dependencies = parseDependenciesFromResponse(codeText, code, language);
+    return { code, dependencies: dependencies || undefined };
   }
 
-  // If no markdown block, check for conversational markers. If present, it\'s likely not code.
+  // If no markdown block, check for conversational markers. If present, it's likely not code.
   const hasConversationalMarkers = /\b(sure|here is|hope this|hi|hello|you can|let me|explain|created|built)\b/i.test(codeText);
   if (hasConversationalMarkers) {
     if (language === "python") {
@@ -178,9 +266,10 @@ export async function writeCode(
   }
 
   // If no markdown block and no conversational markers, assume the entire response is code.
-  // This is a less strict fallback, but prevents false positives for conversational text.
   console.warn("[Engineer Agent] LLM did not return code in markdown block. Assuming full response is code.");
-  return { code: codeText.trim() };
+  const code = codeText.trim();
+  const dependencies = parseDependenciesFromResponse(codeText, code, language);
+  return { code, dependencies: dependencies || undefined };
 }
 
 export async function writeCodeFromLearnings(
@@ -210,9 +299,11 @@ export async function fixCode(
   error: string,
   spec: string,
   meta?: CodeMeta
-) {
+): Promise<CodeResult> {
+  const language = code.includes("def ") || code.includes("import ") ? "python" : "javascript";
+
   const codeText = await runToolUseLoop(
-    `Fix this code to resolve the error.\n\nSpec:\n${spec}\n\nCurrent code:\n${code}\n\nError output:\n${error}\n\nDiagnose the root cause precisely, then return ONLY the corrected code inside a code block.`,
+    `Fix this code to resolve the error.\n\nSpec:\n${spec}\n\nCurrent code:\n${code}\n\nError output:\n${error}\n\nDiagnose the root cause precisely, then return DEPENDENCIES line + corrected code block.`,
     {
       systemPrompt: FIX_PROMPT,
       tools: engineerAgentTools,
@@ -229,13 +320,14 @@ export async function fixCode(
 
   const codeMatch = codeText.match(/```(?:\w+)?\n?([\s\S]*?)```/);
   if (codeMatch) {
-    return { code: codeMatch[1].trim() };
+    const fixedCode = codeMatch[1].trim();
+    const dependencies = parseDependenciesFromResponse(codeText, fixedCode, language);
+    return { code: fixedCode, dependencies: dependencies || undefined };
   }
 
   // If no code block found, check for conversational leaks
   const hasConversationalMarkers = /\b(sure|here is|hope this|hi|hello|you can|let me|explain|created|built)\b/i.test(codeText);
   if (hasConversationalMarkers) {
-    const language = code.includes("def ") || code.includes("import ") ? "python" : "javascript";
     if (language === "python") {
       return { code: `raise RuntimeError("AI Agent conversational fallback triggered. No code block was generated during fix. Raw text:\\n${codeText.replace(/"/g, '\\"').slice(0, 500)}")` };
     } else {
@@ -243,5 +335,7 @@ export async function fixCode(
     }
   }
 
-  return { code: codeText.trim() };
+  const fixedCode = codeText.trim();
+  const dependencies = parseDependenciesFromResponse(codeText, fixedCode, language);
+  return { code: fixedCode, dependencies: dependencies || undefined };
 }

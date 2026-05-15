@@ -1,6 +1,45 @@
 import { ToolDefinition } from "@/core/tools/registry";
 import { inngest } from "@/workflows/client";
 import { createRun, createTask } from "@/db";
+import { getThreadHistory } from "@/utils/thread-context";
+import { getSessionSummary } from "@/core/memory/thread-summary";
+
+/**
+ * Enrich task instructions with available context so sub-agents
+ * (PM, Engineer, Researcher) see the full picture — not just raw text.
+ */
+async function enrichInstructions(
+  instructions: string,
+  ctx: { slackChannelId?: string; slackThreadTs?: string; slackUserId?: string; slackTeamId?: string }
+): Promise<string> {
+  const parts: string[] = [instructions];
+
+  // Fetch thread history for context
+  if (ctx.slackChannelId && ctx.slackThreadTs && ctx.slackTeamId) {
+    try {
+      const history = await getThreadHistory(ctx.slackChannelId, ctx.slackThreadTs, ctx.slackTeamId, 10);
+      if (history && history.length > 20) {
+        parts.push(`\n\n--- THREAD CONTEXT ---\n${history.slice(0, 3000)}`);
+      }
+    } catch {
+      // Non-critical — proceed without thread context
+    }
+  }
+
+  // Fetch session summary for cross-thread context
+  if (ctx.slackUserId) {
+    try {
+      const session = await getSessionSummary(ctx.slackUserId);
+      if (session && session.length > 20) {
+        parts.push(`\n\n--- SESSION CONTEXT ---\n${session.slice(0, 2000)}`);
+      }
+    } catch {
+      // Non-critical — proceed without session context
+    }
+  }
+
+  return parts.join("");
+}
 
 export const dispatchTaskTool: ToolDefinition = {
   name: "dispatch_task",
@@ -23,7 +62,15 @@ export const dispatchTaskTool: ToolDefinition = {
       return "Error: Cannot dispatch task without Slack channel/thread/user context.";
     }
 
-    const { task_type, instructions } = params;
+    const { task_type } = params;
+
+    // Enrich instructions with thread and session context
+    const enrichedInstructions = await enrichInstructions(params.instructions, {
+      slackChannelId: ctx.slackChannelId,
+      slackThreadTs: ctx.slackThreadTs,
+      slackUserId: ctx.slackUserId,
+      slackTeamId: ctx.slackTeamId,
+    });
 
     // Map task types to Inngest event names
     const eventMap: Record<string, string> = {
@@ -47,7 +94,7 @@ export const dispatchTaskTool: ToolDefinition = {
           slackChannelId: ctx.slackChannelId,
           slackThreadTs: ctx.slackThreadTs,
           type: task_type as "document" | "research" | "analytics",
-          request: instructions,
+          request: enrichedInstructions,
           workspaceId: ctx.workspaceId,
         });
 
@@ -57,7 +104,7 @@ export const dispatchTaskTool: ToolDefinition = {
             slackChannelId: ctx.slackChannelId,
             slackThreadTs: ctx.slackThreadTs,
             slackUserId: ctx.slackUserId,
-            messageText: instructions,
+            messageText: enrichedInstructions,
             taskId: task.id,
             teamId: ctx.slackTeamId,
           },
@@ -71,7 +118,7 @@ export const dispatchTaskTool: ToolDefinition = {
         slackUserId: ctx.slackUserId,
         slackChannelId: ctx.slackChannelId,
         slackThreadTs: ctx.slackThreadTs,
-        request: instructions,
+        request: enrichedInstructions,
         workspaceId: ctx.workspaceId,
       });
 
@@ -81,7 +128,7 @@ export const dispatchTaskTool: ToolDefinition = {
           slackChannelId: ctx.slackChannelId,
           slackThreadTs: ctx.slackThreadTs,
           slackUserId: ctx.slackUserId,
-          messageText: instructions,
+          messageText: enrichedInstructions,
           runId: run.id,
           teamId: ctx.slackTeamId,
         },

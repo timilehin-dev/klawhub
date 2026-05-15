@@ -166,9 +166,19 @@ async function classifyViaLLM(userMessage: string, threadHistory?: string): Prom
 /**
  * Classify user intent — regex pre-check first, LLM as fallback.
  * ~40-60% of messages match regex patterns, saving an LLM call each time.
+ *
+ * IMPORTANT: When threadHistory is present (i.e., this is a thread reply),
+ * we ALWAYS use the LLM classifier. Regex has no access to conversation context
+ * and will misclassify follow-ups like "build a sort function" in a research
+ * thread as a new build request instead of a thread continuation.
  */
 export async function classify(userMessage: string, threadHistory?: string): Promise<ClassificationResult> {
-  // Fast path: regex pre-check
+  // Thread replies MUST go through LLM for context-aware classification
+  if (threadHistory) {
+    return classifyViaLLM(userMessage, threadHistory);
+  }
+
+  // Fast path: regex pre-check (only for top-level messages with no thread context)
   const regexResult = tryRegexClassify(userMessage);
   if (regexResult) {
     const { type, extractedRequest } = regexResult;
