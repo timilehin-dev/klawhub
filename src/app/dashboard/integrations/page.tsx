@@ -12,8 +12,16 @@ import {
   FolderOpen,
   GitBranch,
   Hash,
+  Cloud,
+  FileText,
+  Target,
+  Layers,
+  LifeBuoy,
+  PlusCircle,
+  Trash2,
 } from "lucide-react";
 import { useState, useCallback } from "react";
+import { McpConnectionModal } from "./McpConnectionModal";
 
 interface Integration {
   id: string;
@@ -24,6 +32,14 @@ interface Integration {
   scope: string | null;
   lastUsedAt: string | null;
   createdAt: string | null;
+}
+
+interface McpServer {
+  id: string;
+  name: string;
+  url: string;
+  status: string;
+  createdAt: string;
 }
 
 // ── Provider display config ──
@@ -65,6 +81,59 @@ const AVAILABLE_PROVIDERS: ProviderDisplay[] = [
     required: false,
     scopes: ["Repositories", "Issues & Pull Requests", "Code search", "Organization read"],
     setupGuide: "GitHub Settings → Developer settings → OAuth Apps → New OAuth App.",
+  },
+];
+
+const FEATURED_MCP_SERVICES = [
+  {
+    id: "notion",
+    name: "Notion",
+    description: "Sync your Notion workspaces. Klawhub can read pages, search databases, and append notes to your docs.",
+    icon: FileText,
+    url: "https://mcp.klawhub.xyz/notion/sse",
+    color: "text-zinc-900",
+    bg: "bg-zinc-100",
+    borderColor: "border-zinc-300",
+  },
+  {
+    id: "salesforce",
+    name: "Salesforce",
+    description: "Connect your CRM. Klawhub can manage opportunities, leads, and accounts to help you close deals faster.",
+    icon: Cloud,
+    url: "https://mcp.klawhub.xyz/salesforce/sse",
+    color: "text-sky-500",
+    bg: "bg-sky-50",
+    borderColor: "border-sky-200",
+  },
+  {
+    id: "hubspot",
+    name: "HubSpot",
+    description: "Manage your marketing and sales pipelines. Klawhub can track contacts, deals, and company data.",
+    icon: Target,
+    url: "https://mcp.klawhub.xyz/hubspot/sse",
+    color: "text-orange-500",
+    bg: "bg-orange-50",
+    borderColor: "border-orange-200",
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    description: "Steamline your project management. Klawhub can create issues, update statuses, and track project velocity.",
+    icon: Layers,
+    url: "https://mcp.klawhub.xyz/linear/sse",
+    color: "text-indigo-600",
+    bg: "bg-indigo-50",
+    borderColor: "border-indigo-200",
+  },
+  {
+    id: "zendesk",
+    name: "Zendesk",
+    description: "Connect your support helpdesk. Klawhub can read tickets, summarize customer issues, and draft replies.",
+    icon: LifeBuoy,
+    url: "https://mcp.klawhub.xyz/zendesk/sse",
+    color: "text-emerald-600",
+    bg: "bg-emerald-50",
+    borderColor: "border-emerald-200",
   },
 ];
 
@@ -221,6 +290,7 @@ export default function IntegrationsPage() {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedMcpService, setSelectedMcpService] = useState<typeof FEATURED_MCP_SERVICES[0] | null>(null);
 
   const handleConnect = useCallback(
     async (providerId: string) => {
@@ -278,9 +348,34 @@ export default function IntegrationsPage() {
     [refresh]
   );
 
+  const handleDisconnectMcp = useCallback(
+    async (serverId: string) => {
+      setDisconnecting(serverId);
+      setError(null);
+
+      try {
+        const res = await fetch(`/api/mcp/connect?id=${serverId}`, { method: "DELETE" });
+
+        if (!res.ok) {
+          const json = await res.json();
+          setError(json.error || "Failed to disconnect");
+          return;
+        }
+
+        refresh();
+      } catch {
+        setError("Network error — please try again");
+      } finally {
+        setDisconnecting(null);
+      }
+    },
+    [refresh]
+  );
+
   if (loading) return null;
 
   const integrations = data?.integrations || [];
+  const mcpServers = (data as any)?.mcpServers || [];
 
   return (
     <div className="space-y-8">
@@ -370,6 +465,87 @@ export default function IntegrationsPage() {
           />
         ))}
       </div>
+
+      {/* Featured MCP Connections */}
+      <div className="pt-4">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-surface-900 text-premium-gradient">Featured Managed Connections</h2>
+            <p className="mt-1 text-sm text-surface-700">
+              One-click setup for common enterprise tools via secure MCP integration.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {FEATURED_MCP_SERVICES.map((service) => {
+            const isConnected = mcpServers.some((s: McpServer) => s.name.toLowerCase() === service.name.toLowerCase());
+            const connectedServer = mcpServers.find((s: McpServer) => s.name.toLowerCase() === service.name.toLowerCase());
+            const ServiceIcon = service.icon;
+
+            return (
+              <div key={service.id} className={`group relative rounded-2xl border p-5 transition-all duration-300 ${isConnected ? 'border-emerald-200 bg-emerald-50/30' : 'border-surface-200 bg-white hover:border-brand-300 hover:shadow-xl hover:shadow-brand-500/5 hover:-translate-y-1'}`}>
+                <div className="flex items-start justify-between">
+                  <div className={`inline-flex h-12 w-12 items-center justify-center rounded-xl shadow-sm transition-transform group-hover:scale-110 ${service.bg}`}>
+                    <ServiceIcon size={24} className={service.color} />
+                  </div>
+                  {isConnected ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                      <CheckCircle2 size={12} />
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-surface-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-surface-500">
+                      Available
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="font-bold text-surface-900 group-hover:text-brand-600 transition-colors">{service.name}</h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-surface-600">
+                    {service.description}
+                  </p>
+                </div>
+
+                <div className="mt-6 flex items-center justify-between gap-3">
+                  {isConnected ? (
+                    <button
+                      onClick={() => handleDisconnectMcp(connectedServer!.id)}
+                      disabled={disconnecting === connectedServer!.id}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-xs font-bold text-red-600 transition-all hover:bg-red-50 hover:border-red-300 active:scale-95 disabled:opacity-50"
+                    >
+                      {disconnecting === connectedServer!.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setSelectedMcpService(service)}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl gradient-bg px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-brand-500/10 transition-all hover:shadow-xl hover:brightness-110 active:scale-95"
+                    >
+                      <PlusCircle size={14} />
+                      Connect Now
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* MCP Connection Modal */}
+      {selectedMcpService && data?.workspace && (
+        <McpConnectionModal
+          service={selectedMcpService}
+          workspaceId={data.workspace.id}
+          onClose={() => setSelectedMcpService(null)}
+          onSuccess={() => {
+            refresh();
+            setError(null);
+          }}
+        />
+      )}
 
       {/* Setup Help */}
       <div className="rounded-xl border border-surface-200 bg-surface-50 p-6">

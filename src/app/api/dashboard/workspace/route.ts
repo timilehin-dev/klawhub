@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkspaceById, getWorkspaceStats, checkWorkspaceUsageLimit, getWorkspaceMembers } from "@/db";
 import { getWorkspaceIntegrations } from "@/integrations/store";
+import { getMcpServers } from "@/db/mcp";
 import { verifyWorkspaceId } from "@/utils/session";
 
 // GET /api/dashboard/workspace — returns workspace info from cookie
@@ -61,11 +62,12 @@ export async function GET(request: NextRequest) {
 
     const workspace = ws[0];
 
-    const [stats, usage, members, integrations] = await Promise.all([
+    const [stats, usage, members, integrations, mcpServers] = await Promise.all([
       getWorkspaceStats(workspaceId),
       checkWorkspaceUsageLimit(workspaceId),
       getWorkspaceMembers(workspaceId),
       getWorkspaceIntegrations(workspaceId),
+      getMcpServers(workspaceId),
     ]);
 
     return NextResponse.json({
@@ -99,6 +101,13 @@ export async function GET(request: NextRequest) {
         scope: i.scope,
         lastUsedAt: i.lastUsedAt,
         createdAt: i.createdAt,
+      })),
+      mcpServers: mcpServers.map((s) => ({
+        id: s.id,
+        name: s.name,
+        url: s.url,
+        status: s.status,
+        createdAt: s.createdAt,
       })),
     });
   } catch (err) {

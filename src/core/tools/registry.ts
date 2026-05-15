@@ -2,6 +2,8 @@ import { llm } from "@/core/llm";
 import { tavily } from "@/core/tools/web-search";
 import { sandbox } from "@/core/tools/sandbox";
 import { dispatchTaskTool, dispatchWorkflowTool } from "@/core/tools/implementations/dispatch";
+import { mcpConnectTool, mcpListTool, mcpRemoveTool } from "@/core/tools/implementations/mcp";
+export { mcpConnectTool, mcpListTool, mcpRemoveTool };
 import {
   saveMemory,
   readMemory,
@@ -1167,6 +1169,10 @@ export const allTools: ToolDefinition[] = [
   scheduleListPresetsTool,
   slackListChannelsTool,
   sequentialThinkingTool,
+  // MCP Management
+  mcpConnectTool,
+  mcpListTool,
+  mcpRemoveTool,
 ];
 
 export function getToolsByName(names: string[]): ToolDefinition[] {
@@ -1220,6 +1226,10 @@ export const generalAgentTools: ToolDefinition[] = [
   slackListChannelsTool,
   slackPostToChannelTool,
   sequentialThinkingTool,
+  // MCP Management
+  mcpConnectTool,
+  mcpListTool,
+  mcpRemoveTool,
 ];
 
 /** Tools available to the PM Agent (research for specs) */

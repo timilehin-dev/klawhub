@@ -253,14 +253,21 @@ ${userMessage}`;
   if (options?.workspaceId) {
     try {
       const servers = await getMcpServers(options.workspaceId);
-      for (const srv of servers) {
-        if (srv.status === "active") {
-          const mcpTools = await mcpManager.connectAndFetchTools(srv.url, srv.name, srv.authConfig);
-          dynamicTools = [...dynamicTools, ...mcpTools];
+      const activeServers = servers.filter((s) => s.status === "active");
+
+      if (activeServers.length > 0) {
+        const mcpResults = await Promise.allSettled(
+          activeServers.map((srv) => mcpManager.connectAndFetchTools(srv.url, srv.name, srv.authConfig))
+        );
+
+        for (const res of mcpResults) {
+          if (res.status === "fulfilled" && res.value) {
+            dynamicTools.push(...res.value);
+          }
         }
       }
     } catch (e) {
-      console.error("Failed to load MCP tools:", e);
+      console.error("[general] Failed to load MCP tools:", e);
     }
   }
 

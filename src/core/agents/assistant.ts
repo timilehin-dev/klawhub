@@ -1,11 +1,16 @@
 import { runToolUseLoop } from "@/core/tools/executor";
 import { COWORKER_VOICE_MODULE } from "./persona";
-import { researchAgentTools, type ToolDefinition } from "@/core/tools/registry";
+import { researchAgentTools, mcpConnectTool, mcpListTool, mcpRemoveTool, type ToolDefinition } from "@/core/tools/registry";
 
-/** Lightweight tool set: web + memory + knowledge + drive, no heavy browser automation */
-export const assistantAgentTools: ToolDefinition[] = researchAgentTools.filter(
-  (t) => !["browser_browse", "browser_scrape", "browser_links", "browser_interact"].includes(t.name)
-);
+/** Lightweight tool set: web + memory + knowledge + drive, plus MCP management */
+export const assistantAgentTools: ToolDefinition[] = [
+  ...researchAgentTools.filter(
+    (t) => !["browser_browse", "browser_scrape", "browser_links", "browser_interact"].includes(t.name)
+  ),
+  mcpConnectTool,
+  mcpListTool,
+  mcpRemoveTool,
+];
 
 /**
  * Lightweight assistant prompt for knowledge work.
@@ -33,6 +38,7 @@ TOOL USE:
 - Use \`web_search\` + \`web_read\` ONLY if the question genuinely requires current external data.
 - Use \`google_drive_search\` + \`google_drive_read\` if the user refers to a document.
 - Use \`sequential_thinking\` for complex multi-part tasks that need structured planning.
+- Use \`mcp_connect\`, \`mcp_list\`, or \`mcp_remove\` if the user wants to manage external service integrations.
 
 OUTPUT RULES:
 - Be direct. Skip preamble. Get to the answer.
