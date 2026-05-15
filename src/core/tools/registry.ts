@@ -19,10 +19,6 @@ import {
 } from "@/db/knowledge";
 import { slack, postToThread } from "@/integrations/slack/client";
 import { githubUpdateFile, githubCreatePullRequest } from "@/integrations/clients";
-import { conductResearch } from "@/core/agents/researcher";
-import { createSpec } from "@/core/agents/pm";
-import { writeCodeFromLearnings, fixCode } from "@/core/agents/engineer";
-import { testCode } from "@/core/agents/qa";
 import { sequentialThinkingTool } from "./sequential-thinking";
 
 // ── Tool Types ──
@@ -625,121 +621,7 @@ const browserScreenshotTool: ToolDefinition = {
   },
 };
 
-// ── Agent Calling Tools (for direct multi-agent coordination) ──
 
-const callResearchAgentTool: ToolDefinition = {
-  name: "call_research_agent",
-  description: "Call the Research Agent to conduct web research and synthesize findings. Use this for gathering real-time data, API docs, or external information needed for tasks.",
-  parameters: {
-    instructions: { type: "string", description: "Detailed research instructions", required: true },
-  },
-  async execute(params, ctx) {
-    if (!ctx.slackUserId) return "Error: No user context for research.";
-    try {
-      const result = await conductResearch(params.instructions, { taskId: ctx.runId || "direct", slackUserId: ctx.slackUserId });
-      return `Research completed. Sources: ${result.sources.length}. Findings: ${result.findings.slice(0, 2000)}...`;
-    } catch (err) {
-      return `Research failed: ${(err as Error).message}`;
-    }
-  },
-};
-
-const callPMAgentTool: ToolDefinition = {
-  name: "call_pm_agent",
-  description: "Call the PM Agent to analyze requirements and create a technical specification. Use this to break down tasks and write specs for code generation.",
-  parameters: {
-    instructions: { type: "string", description: "Task description and requirements", required: true },
-    user_context: { type: "string", description: "Optional user preferences or context" },
-  },
-  async execute(params, ctx) {
-    if (!ctx.slackUserId) return "Error: No user context for PM.";
-    try {
-      const userContext = params.user_context || "";
-      const result = await createSpec(params.instructions, userContext);
-      return `Spec created. Language: ${result.language}. Dependencies: ${result.dependencies || "none"}. Spec: ${result.spec.slice(0, 2000)}...`;
-    } catch (err) {
-      return `PM spec failed: ${(err as Error).message}`;
-    }
-  },
-};
-
-const callEngineerAgentTool: ToolDefinition = {
-  name: "call_engineer_agent",
-  description: "Call the Engineer Agent to write code based on a specification. Use this for implementing features or generating code.",
-  parameters: {
-    spec: { type: "string", description: "Technical specification", required: true },
-    language: { type: "string", description: "Programming language (python, javascript, etc.)", required: true },
-    instructions: { type: "string", description: "Original task instructions", required: true },
-    dependencies: { type: "string", description: "Optional dependencies or libraries" },
-  },
-  async execute(params, ctx) {
-    if (!ctx.slackUserId) return "Error: No user context for engineering.";
-    try {
-      const result = await writeCodeFromLearnings(
-        params.spec,
-        params.language,
-        params.instructions,
-        {
-          runId: ctx.runId || "direct",
-          slackUserId: ctx.slackUserId,
-          dependencies: params.dependencies,
-        }
-      );
-      return `Code written. Code: ${result.code.slice(0, 2000)}...`;
-    } catch (err) {
-      return `Engineering failed: ${(err as Error).message}`;
-    }
-  },
-};
-
-const callQAAgentTool: ToolDefinition = {
-  name: "call_qa_agent",
-  description: "Call the QA Agent to test code in a sandbox. Use this to validate code execution and catch issues.",
-  parameters: {
-    code: { type: "string", description: "The code to test", required: true },
-    language: { type: "string", description: "Programming language", required: true },
-    spec: { type: "string", description: "Original specification for validation", required: true },
-    instructions: { type: "string", description: "Original task instructions", required: true },
-  },
-  async execute(params, ctx) {
-    if (!ctx.slackUserId) return "Error: No user context for QA.";
-    try {
-      const result = await testCode(
-        params.code,
-        params.language,
-        params.spec,
-        params.instructions,
-        { runId: ctx.runId || "direct", slackUserId: ctx.slackUserId }
-      );
-      return `QA completed. Passed: ${result.passed}. Evaluation: ${result.evaluation.slice(0, 1000)}...`;
-    } catch (err) {
-      return `QA failed: ${(err as Error).message}`;
-    }
-  },
-};
-
-const coordinateAgentsTool: ToolDefinition = {
-  name: "coordinate_agents",
-  description: "Coordinate with specialized agents (PM, Researcher, Engineer, QA, Analyst) for complex tasks. Use this for multi-step workflows requiring multiple agent types.",
-  parameters: {
-    task: { type: "string", description: "The task description", required: true },
-    type: { type: "string", description: "Task type: spec, research, code, test, analyze", required: true },
-  },
-  async execute(params, ctx) {
-    if (!ctx.slackUserId) return "Error: No user context.";
-    try {
-      return await dispatchTaskTool.execute(
-        {
-          task_type: params.type,
-          instructions: params.task,
-        },
-        ctx
-      );
-    } catch (err) {
-      return `Agent coordination failed: ${(err as Error).message}`;
-    }
-  },
-};
 
 const webhookCustomRequestTool: ToolDefinition = {
   name: "webhook_custom_request",
@@ -1274,12 +1156,7 @@ export const generalAgentTools: ToolDefinition[] = [
   webhookCustomRequestTool,
   resendSendEmailTool,
   googleCalendarListEventsTool,
-  // Agent calling tools (for direct multi-agent coordination)
-  callResearchAgentTool,
-  callPMAgentTool,
-  callEngineerAgentTool,
-  callQAAgentTool,
-  coordinateAgentsTool,
+
   // Agent dispatch (fallback for complex workflows)
   dispatchTaskTool,
   dispatchWorkflowTool,

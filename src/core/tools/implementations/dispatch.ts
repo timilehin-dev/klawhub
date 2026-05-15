@@ -72,58 +72,41 @@ export const dispatchTaskTool: ToolDefinition = {
       slackTeamId: ctx.slackTeamId,
     });
 
-    // Map task types to Inngest event names
-    const eventMap: Record<string, string> = {
-      build: "slack/build.requested",
-      research: "slack/research.requested",
-      document: "slack/document.requested",
-      analytics: "slack/analytics.requested",
-      coordinated: "slack/coordinated.requested",
-    };
-
-    const eventName = eventMap[task_type];
-    if (!eventName) {
+    // Unified DAG Generation logic
+    let nodes: any[] = [];
+    if (task_type === "build") {
+      nodes = [
+        { id: "plan", agent: "pm", instruction: `Create a detailed technical spec for: ${enrichedInstructions}`, dependsOn: [] },
+        { id: "approval", agent: "approval", instruction: "Please review the technical specification before coding begins.", dependsOn: ["plan"] },
+        { id: "code", agent: "engineer", instruction: "Implement the approved specification.", dependsOn: ["approval"] },
+        { id: "test", agent: "qa", instruction: "Verify the implementation and fix any bugs.", dependsOn: ["code"] }
+      ];
+    } else if (task_type === "research") {
+      nodes = [{ id: "research", agent: "researcher", instruction: enrichedInstructions, dependsOn: [] }];
+    } else if (task_type === "document") {
+      nodes = [{ id: "write", agent: "documentor", instruction: enrichedInstructions, dependsOn: [] }];
+    } else if (task_type === "analytics") {
+      nodes = [{ id: "analyze", agent: "analyst", instruction: enrichedInstructions, dependsOn: [] }];
+    } else if (task_type === "coordinated") {
+      nodes = [
+        { id: "research", agent: "researcher", instruction: `Research background for: ${enrichedInstructions}`, dependsOn: [] },
+        { id: "build", agent: "engineer", instruction: `Implement based on research: ${enrichedInstructions}`, dependsOn: ["research"] }
+      ];
+    } else {
       return `Error: Unknown task_type '${task_type}'. Must be build, research, document, analytics, or coordinated.`;
     }
 
     try {
-      // For non-build task types that use the tasks table
-      if (task_type === "document" || task_type === "research" || task_type === "analytics") {
-        const [task] = await createTask({
-          slackUserId: ctx.slackUserId,
-          slackChannelId: ctx.slackChannelId,
-          slackThreadTs: ctx.slackThreadTs,
-          type: task_type as "document" | "research" | "analytics",
-          request: enrichedInstructions,
-          workspaceId: ctx.workspaceId,
-        });
-
-        await inngest.send({
-          name: eventName as any,
-          data: {
-            slackChannelId: ctx.slackChannelId,
-            slackThreadTs: ctx.slackThreadTs,
-            slackUserId: ctx.slackUserId,
-            messageText: enrichedInstructions,
-            taskId: task.id,
-            teamId: ctx.slackTeamId,
-          },
-        });
-
-        return `Successfully dispatched a ${task_type} task with ID ${task.id}. The specialized agent will reply in the thread shortly.`;
-      }
-
-      // For build and coordinated types that use the runs table
       const [run] = await createRun({
         slackUserId: ctx.slackUserId,
         slackChannelId: ctx.slackChannelId,
         slackThreadTs: ctx.slackThreadTs,
-        request: enrichedInstructions,
+        request: `Unified Task: ${task_type}`,
         workspaceId: ctx.workspaceId,
       });
 
       await inngest.send({
-        name: eventName as any,
+        name: "slack/dag.requested" as any,
         data: {
           slackChannelId: ctx.slackChannelId,
           slackThreadTs: ctx.slackThreadTs,
@@ -131,12 +114,13 @@ export const dispatchTaskTool: ToolDefinition = {
           messageText: enrichedInstructions,
           runId: run.id,
           teamId: ctx.slackTeamId,
+          nodes: nodes,
         },
       });
 
-      return `Successfully dispatched a ${task_type} task with ID ${run.id}. The specialized agent will reply in the thread shortly.`;
+      return `Successfully dispatched a ${task_type} workflow with ID ${run.id}. The agent squad will handle it and post updates in the thread.`;
     } catch (err) {
-      return `Failed to dispatch task: ${(err as Error).message}`;
+      return `Failed to dispatch unified task: ${(err as Error).message}`;
     }
   },
 };
