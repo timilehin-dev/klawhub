@@ -1,7 +1,7 @@
 import { llm } from "@/core/llm";
 import { tavily } from "@/core/tools/web-search";
 import { sandbox } from "@/core/tools/sandbox";
-import { dispatchTaskTool } from "@/core/tools/implementations/dispatch";
+import { dispatchTaskTool, dispatchWorkflowTool } from "@/core/tools/implementations/dispatch";
 import {
   saveMemory,
   readMemory,
@@ -1282,6 +1282,7 @@ export const generalAgentTools: ToolDefinition[] = [
   coordinateAgentsTool,
   // Agent dispatch (fallback for complex workflows)
   dispatchTaskTool,
+  dispatchWorkflowTool,
   // Scheduling tools
   scheduleCreateTool,
   scheduleListTool,

@@ -13,6 +13,7 @@ import { coordinatedTaskWorkflow } from "@/workflows/coordinated-task";
 import { morningBriefWorkflow } from "@/workflows/morning-brief";
 import { agentCheckInWorkflow } from "@/workflows/agent-check-in";
 import { workflowLearningWorkflow } from "@/workflows/workflow-learning";
+import { dynamicDagWorkflow } from "@/workflows/dynamic-dag";
 
 export const maxDuration = 300;
 
@@ -31,7 +32,8 @@ export const { GET, POST, PUT } = serve({
     taskMonitorWorkflow,
     morningBriefWorkflow,
     agentCheckInWorkflow,
-    workflowLearningWorkflow
+    workflowLearningWorkflow,
+    dynamicDagWorkflow
   ],
 });
 

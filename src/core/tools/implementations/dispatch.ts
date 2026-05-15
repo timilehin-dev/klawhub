@@ -140,3 +140,49 @@ export const dispatchTaskTool: ToolDefinition = {
     }
   },
 };
+
+export const dispatchWorkflowTool: ToolDefinition = {
+  name: "dispatch_workflow",
+  description:
+    "Dispatch a custom, dynamically generated multi-agent DAG (Directed Acyclic Graph) workflow. Use this for complex sequences that don't fit standard tasks. E.g., Research -> PM -> Approval -> Engineer.",
+  parameters: {
+    nodes: {
+      type: "string",
+      description: "JSON array of DAG nodes. Each node must have: id (string), agent ('pm'|'engineer'|'qa'|'researcher'|'analyst'|'general'|'approval'), instruction (string), and dependsOn (string array of node ids this node depends on).",
+      required: true,
+    },
+  },
+  async execute(params, ctx) {
+    if (!ctx.slackChannelId || !ctx.slackThreadTs || !ctx.slackUserId) {
+      return "Error: Cannot dispatch workflow without Slack channel/thread/user context.";
+    }
+
+    try {
+      const nodes = JSON.parse(params.nodes);
+      
+      const [run] = await createRun({
+        slackUserId: ctx.slackUserId,
+        slackChannelId: ctx.slackChannelId,
+        slackThreadTs: ctx.slackThreadTs,
+        request: "Dynamic Workflow Execution",
+        workspaceId: ctx.workspaceId,
+      });
+
+      await inngest.send({
+        name: "slack/dag.requested" as any,
+        data: {
+          slackChannelId: ctx.slackChannelId,
+          slackThreadTs: ctx.slackThreadTs,
+          slackUserId: ctx.slackUserId,
+          runId: run.id,
+          teamId: ctx.slackTeamId,
+          nodes: nodes,
+        },
+      });
+
+      return `Successfully dispatched custom DAG workflow (Run ID: ${run.id}). The agents will execute the nodes and post updates in the thread.`;
+    } catch (err) {
+      return `Failed to dispatch workflow: ${(err as Error).message}`;
+    }
+  },
+};
