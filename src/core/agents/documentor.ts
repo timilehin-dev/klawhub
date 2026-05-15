@@ -2,7 +2,7 @@ import { agentChat } from "@/core/llm";
 import { sandbox } from "@/core/tools/sandbox";
 import { COWORKER_VOICE_MODULE } from "./persona";
 
-const DOCSTRUCTURE_PROMPT = `You are the Document Agent of Klawhub. You structure content for professional documents.
+export const DOCSTRUCTURE_PROMPT = `You are the Document Agent of Klawhub. You structure content for professional documents.
 ${COWORKER_VOICE_MODULE}
 
 YOUR ROLE: Given a document request, produce a structured JSON object with the document content.

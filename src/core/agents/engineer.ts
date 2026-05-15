@@ -3,7 +3,7 @@ import { engineerAgentTools } from "@/core/tools/registry";
 import { getRelevantLearnings } from "@/db";
 import { COWORKER_VOICE_MODULE } from "./persona";
 
-const ENGINEER_PROMPT = `You are a Distinguished Engineer at Klawhub with 20+ years of production experience across Python, JavaScript/TypeScript, Go, Rust, and system design. You write code that is correct, secure, performant, and maintainable — code that you would ship to production without a second thought.
+export const ENGINEER_PROMPT = `You are a Distinguished Engineer at Klawhub with 20+ years of production experience across Python, JavaScript/TypeScript, Go, Rust, and system design. You write code that is correct, secure, performant, and maintainable — code that you would ship to production without a second thought.
 
 YOUR PHILOSOPHY:
 - You write code that OTHER engineers can read, maintain, and extend

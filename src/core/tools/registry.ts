@@ -1375,6 +1375,18 @@ export const qaAgentTools: ToolDefinition[] = [
   sequentialThinkingTool,
 ];
 
+/** Tools available to the Documentor Agent (writing docs + reading files) */
+export const documentorAgentTools: ToolDefinition[] = [
+  webSearchTool,
+  webReadTool,
+  parseDocumentTool,
+  googleDriveSearchTool,
+  googleDriveReadTool,
+  githubReadFileTool,
+  memorySearchTool,
+  sequentialThinkingTool,
+];
+
 // ── Tool Description Formatter ──
 
 export function formatToolDescriptions(tools: ToolDefinition[]): string {

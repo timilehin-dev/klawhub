@@ -6,7 +6,7 @@ import type { SandboxResponse } from "@/types";
 import { PERFORMANCE_LOGIC_MODULE } from "./performance-logic";
 import { COWORKER_VOICE_MODULE } from "./persona";
 
-const ANALYST_PROMPT = `You are the Data Analyst Agent of Klawhub. You write Python analysis code and generate business-grade visualizations.
+export const ANALYST_PROMPT = `You are the Data Analyst Agent of Klawhub. You write Python analysis code and generate business-grade visualizations.
 
 ${COWORKER_VOICE_MODULE}
 

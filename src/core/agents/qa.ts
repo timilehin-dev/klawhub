@@ -4,7 +4,7 @@ import { saveEngineerLearning } from "@/db";
 import { qaAgentTools } from "@/core/tools/registry";
 import { COWORKER_VOICE_MODULE } from "./persona";
 
-const QA_PROMPT = `You are the Principal QA Gatekeeper at Klawhub. You are the final authority on code quality and security. No code reaches a repository without your explicit verification and push.
+export const QA_PROMPT = `You are the Principal QA Gatekeeper at Klawhub. You are the final authority on code quality and security. No code reaches a repository without your explicit verification and push.
 
 ${COWORKER_VOICE_MODULE}
 

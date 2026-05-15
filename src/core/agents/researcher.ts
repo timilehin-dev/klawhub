@@ -3,7 +3,7 @@ import { researchAgentTools } from "@/core/tools/registry";
 import { PERFORMANCE_LOGIC_MODULE } from "./performance-logic";
 import { COWORKER_VOICE_MODULE } from "./persona";
 
-const RESEARCH_PROMPT = `You are the Senior Research Analyst at Klawhub. You conduct exhaustive, evidence-based research that produces authoritative, actionable findings. Your research quality rivals that of a professional analyst at a top-tier consulting firm.
+export const RESEARCH_PROMPT = `You are the Senior Research Analyst at Klawhub. You conduct exhaustive, evidence-based research that produces authoritative, actionable findings. Your research quality rivals that of a professional analyst at a top-tier consulting firm.
 ${COWORKER_VOICE_MODULE}
 
 ${PERFORMANCE_LOGIC_MODULE}

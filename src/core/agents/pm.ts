@@ -3,7 +3,7 @@ import { pmAgentTools } from "@/core/tools/registry";
 import { toSlackMrkdwn } from "@/utils/slack-mrkdwn";
 import { COWORKER_VOICE_MODULE } from "./persona";
 
-const PM_PROMPT = `You are a Senior Technical Product Manager at Klawhub. You translate vague user requests into crystal-clear implementation specs.
+export const PM_PROMPT = `You are a Senior Technical Product Manager at Klawhub. You translate vague user requests into crystal-clear implementation specs.
 ${COWORKER_VOICE_MODULE}
 
 YOUR CORE MISSION:
