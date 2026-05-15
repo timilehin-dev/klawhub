@@ -14,13 +14,13 @@ import { approvalBlocks } from "@/integrations/slack/blocks";
 import { mcpManager } from "@/core/tools/mcp-client";
 import { getMcpServers } from "@/db";
 
-// Import real personas to maintain intelligence quality
 import { PM_PROMPT } from "@/core/agents/pm";
 import { ENGINEER_PROMPT } from "@/core/agents/engineer";
 import { QA_PROMPT } from "@/core/agents/qa";
 import { RESEARCH_PROMPT } from "@/core/agents/researcher";
 import { ANALYST_PROMPT } from "@/core/agents/analyst";
 import { DOCSTRUCTURE_PROMPT } from "@/core/agents/documentor";
+import { ASSISTANT_PROMPT, assistantAgentTools } from "@/core/agents/assistant";
 
 export type DagNodeTaskType = "code" | "document" | "research" | "review" | "general";
 
@@ -71,6 +71,8 @@ const BASE_AGENT_MAP: Record<string, { tools: any[]; prompt: string }> = {
   researcher: { tools: researchAgentTools,   prompt: RESEARCH_PROMPT   || "You are a Research Agent."   },
   analyst:    { tools: analystAgentTools,    prompt: ANALYST_PROMPT    || "You are a Data Analyst."     },
   documentor: { tools: documentorAgentTools, prompt: DOCSTRUCTURE_PROMPT || "You are a Documentor."     },
+  // Lightweight agent for knowledge work (summarize, draft, advise, answer)
+  assistant:  { tools: assistantAgentTools,  prompt: ASSISTANT_PROMPT  || "You are a helpful assistant." },
 };
 
 /** Per-agent resource config — tuned for each role's workload */
@@ -204,7 +206,8 @@ export const dynamicDagWorkflow = inngest.createFunction(
             maxIterations: resourceConfig.maxIterations,
             temperature: resourceConfig.temperature,
             maxTokens: resourceConfig.maxTokens,
-            agentName: node.agent
+            agentName: node.agent,
+            traceId: runId,  // Propagate run ID as trace ID for correlated log lines
           });
         });
       }));

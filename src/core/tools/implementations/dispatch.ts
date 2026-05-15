@@ -5,6 +5,51 @@ import { getThreadHistory } from "@/utils/thread-context";
 import { getSessionSummary } from "@/core/memory/thread-summary";
 import { buildKnowledgeContext } from "@/db/knowledge";
 
+// ── Per-workspace in-flight DAG rate limiter ──────────────────────────────────
+// Prevents a single workspace from spamming dispatch_task and burning unbounded
+// LLM costs. Max 3 concurrent DAG runs per workspace.
+const WORKSPACE_DAG_LIMIT = 3;
+const activeRuns = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(workspaceId: string): { allowed: boolean; reason?: string } {
+  const now = Date.now();
+  const entry = activeRuns.get(workspaceId);
+
+  // Clear expired entry (10-min safety TTL in case of orphaned counts)
+  if (entry && now > entry.resetAt) {
+    activeRuns.delete(workspaceId);
+  }
+
+  const current = activeRuns.get(workspaceId);
+  if (current && current.count >= WORKSPACE_DAG_LIMIT) {
+    return { allowed: false, reason: `This workspace already has ${current.count} active workflows running. Please wait for one to complete before starting another.` };
+  }
+  return { allowed: true };
+}
+
+function incrementRateLimit(workspaceId: string) {
+  const now = Date.now();
+  const entry = activeRuns.get(workspaceId);
+  activeRuns.set(workspaceId, {
+    count: (entry?.count || 0) + 1,
+    resetAt: now + 10 * 60 * 1000, // 10-minute TTL
+  });
+}
+
+function decrementRateLimit(workspaceId: string) {
+  const entry = activeRuns.get(workspaceId);
+  if (entry) {
+    const next = entry.count - 1;
+    if (next <= 0) activeRuns.delete(workspaceId);
+    else activeRuns.set(workspaceId, { ...entry, count: next });
+  }
+}
+
+// ── Allowlisted DAG agent types ───────────────────────────────────────────────
+const VALID_AGENT_TYPES = new Set([
+  "pm", "engineer", "qa", "researcher", "analyst", "documentor", "approval", "general", "assistant"
+]);
+
 /**
  * Enrich task instructions with available context so sub-agents
  * (PM, Engineer, Researcher) see the full picture — not just raw text.
@@ -75,6 +120,10 @@ export const dispatchTaskTool: ToolDefinition = {
       return "Error: Cannot dispatch task without Slack channel/thread/user context.";
     }
 
+    const workspaceId = ctx.workspaceId || ctx.slackUserId;
+    const rateCheck = checkRateLimit(workspaceId);
+    if (!rateCheck.allowed) return `Rate limit: ${rateCheck.reason}`;
+
     const { task_type } = params;
 
     // Enrich instructions with thread and session context
@@ -102,8 +151,8 @@ export const dispatchTaskTool: ToolDefinition = {
     } else if (task_type === "analytics") {
       nodes = [{ id: "analyze", agent: "analyst", instruction: enrichedInstructions, dependsOn: [], taskType: "general" }];
     } else if (task_type === "assist") {
-      // Generic knowledge work — no code, no sandbox. A single general-purpose agent handles it.
-      nodes = [{ id: "assist", agent: "researcher", instruction: enrichedInstructions, dependsOn: [], taskType: "general" }];
+      // Generic knowledge work — lightweight assistant, no code, no sandbox, no research marathon.
+      nodes = [{ id: "assist", agent: "assistant", instruction: enrichedInstructions, dependsOn: [], taskType: "general" }];
     } else if (task_type === "coordinated") {
       // Full pipeline: Research → PM Spec → Approval → Engineer → QA
       nodes = [
@@ -126,18 +175,26 @@ export const dispatchTaskTool: ToolDefinition = {
         workspaceId: ctx.workspaceId,
       });
 
-      await inngest.send({
-        name: "slack/dag.requested" as any,
-        data: {
-          slackChannelId: ctx.slackChannelId,
-          slackThreadTs: ctx.slackThreadTs,
-          slackUserId: ctx.slackUserId,
-          messageText: enrichedInstructions,
-          runId: run.id,
-          teamId: ctx.slackTeamId,
-          nodes: nodes,
-        },
-      });
+      incrementRateLimit(workspaceId);
+      try {
+        await inngest.send({
+          name: "slack/dag.requested" as any,
+          data: {
+            slackChannelId: ctx.slackChannelId,
+            slackThreadTs: ctx.slackThreadTs,
+            slackUserId: ctx.slackUserId,
+            messageText: enrichedInstructions,
+            runId: run.id,
+            teamId: ctx.slackTeamId,
+            workspaceId,
+            nodes,
+          },
+        });
+        decrementRateLimit(workspaceId);
+      } catch (inngestErr) {
+        decrementRateLimit(workspaceId);
+        throw inngestErr;
+      }
 
       return `Successfully dispatched a ${task_type} workflow with ID ${run.id}. The agent squad will handle it and post updates in the thread.`;
     } catch (err) {
@@ -162,28 +219,62 @@ export const dispatchWorkflowTool: ToolDefinition = {
       return "Error: Cannot dispatch workflow without Slack channel/thread/user context.";
     }
 
+    const workspaceId = ctx.workspaceId || ctx.slackUserId;
+    const rateCheck = checkRateLimit(workspaceId);
+    if (!rateCheck.allowed) return `Rate limit: ${rateCheck.reason}`;
+
+    let nodes: any[];
     try {
-      const nodes = JSON.parse(params.nodes);
-      
+      nodes = JSON.parse(params.nodes);
+      if (!Array.isArray(nodes)) throw new Error("nodes must be a JSON array");
+    } catch (parseErr) {
+      return `Error: Invalid nodes JSON — ${(parseErr as Error).message}`;
+    }
+
+    // Validate each node against allowlist — prevents prompt-injection via crafted DAG
+    for (const node of nodes) {
+      if (typeof node.id !== "string" || !node.id.trim()) {
+        return `Error: Each DAG node must have a non-empty string 'id'. Got: ${JSON.stringify(node)}`;
+      }
+      if (!VALID_AGENT_TYPES.has(node.agent)) {
+        return `Error: Invalid agent type '${node.agent}' in node '${node.id}'. Allowed: ${[...VALID_AGENT_TYPES].join(", ")}`;
+      }
+      if (typeof node.instruction !== "string" || !node.instruction.trim()) {
+        return `Error: Node '${node.id}' must have a non-empty 'instruction' string.`;
+      }
+      if (!Array.isArray(node.dependsOn)) {
+        return `Error: Node '${node.id}' must have a 'dependsOn' array (can be empty []).`;
+      }
+    }
+
+    try {
       const [run] = await createRun({
         slackUserId: ctx.slackUserId,
         slackChannelId: ctx.slackChannelId,
         slackThreadTs: ctx.slackThreadTs,
         request: "Dynamic Workflow Execution",
-        workspaceId: ctx.workspaceId,
+        workspaceId,
       });
 
-      await inngest.send({
-        name: "slack/dag.requested" as any,
-        data: {
-          slackChannelId: ctx.slackChannelId,
-          slackThreadTs: ctx.slackThreadTs,
-          slackUserId: ctx.slackUserId,
-          runId: run.id,
-          teamId: ctx.slackTeamId,
-          nodes: nodes,
-        },
-      });
+      incrementRateLimit(workspaceId);
+      try {
+        await inngest.send({
+          name: "slack/dag.requested" as any,
+          data: {
+            slackChannelId: ctx.slackChannelId,
+            slackThreadTs: ctx.slackThreadTs,
+            slackUserId: ctx.slackUserId,
+            runId: run.id,
+            teamId: ctx.slackTeamId,
+            workspaceId,
+            nodes,
+          },
+        });
+        decrementRateLimit(workspaceId);
+      } catch (inngestErr) {
+        decrementRateLimit(workspaceId);
+        throw inngestErr;
+      }
 
       return `Successfully dispatched custom DAG workflow (Run ID: ${run.id}). The agents will execute the nodes and post updates in the thread.`;
     } catch (err) {

@@ -3,6 +3,8 @@ import { sandbox } from "@/core/tools/sandbox";
 import { saveEngineerLearning } from "@/db";
 import { qaAgentTools } from "@/core/tools/registry";
 import { COWORKER_VOICE_MODULE } from "./persona";
+// Static import avoids dynamic import() anti-pattern in the retry loop
+import { fixCode } from "@/core/agents/engineer";
 
 export const QA_PROMPT = `You are the Principal QA Gatekeeper at Klawhub. You are the final authority on code quality and security. No code reaches a repository without your explicit verification and push.
 
@@ -212,8 +214,6 @@ export async function runQACycle(
   meta?: { runId?: string; slackUserId?: string; dependencies?: string },
   onRetry?: (attempt: number, error: string) => void
 ): Promise<TestResult & { finalCode: string; finalDependencies?: string; attempts: number }> {
-  const { fixCode } = await import("@/core/agents/engineer");
-
   let code = initialCode;
   let dependencies = meta?.dependencies;
   let lastResult: TestResult | null = null;

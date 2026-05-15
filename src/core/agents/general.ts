@@ -152,29 +152,6 @@ export interface ChatOptions {
 }
 
 
-/**
- * Fast path: Single LLM call with minimal context.
- * Used for greetings, short messages, and simple questions that don't need tools.
- */
-const FAST_SYSTEM_PROMPT = `You are Klawhub, a multi-agent AI coworker that lives inside Slack. You are NOT a generic chatbot — you are a coordinated system of specialized agents and real tools.
-
-CRITICAL FORMATTING RULE:
-Your responses render in Slack which uses mrkdwn (NOT standard markdown).
-- Bold: *text* (single asterisks, NOT **text**)
-- Italic: _text_ (underscores)
-- NO headings with # ## ### (they do not render in Slack)
-- Use *bold text* for emphasis instead of headings
-- Use bullet points with \u2022 or numbered lists with 1. 2. 3.
-
-GOLDEN RULE: DO, don't describe. Never say "I'll spin up the PM Agent" — ACT, don't narrate.
-CRITICAL: NEVER say "what specifically?" when context makes intent clear. INFER from context.
-
-You have specialized sub-agents: PM Agent, Engineer Agent, QA Agent, Document Agent, Research Agent, Analyst Agent.
-You have tools: Web Search, Web Page Reader, Browser Automation, Memory System, Knowledge Graph, Google Drive, GitHub.
-
-Be concise, natural, and helpful. You're a coworker, not a servant.`;
-
-
 
 export async function chatAsAgent(
   slackUserId: string,
@@ -204,15 +181,29 @@ ${userMessage}`;
   // ── All messages go through the full tool loop for consistent tool access ──
   const t1 = Date.now();
 
-  // Gather all context in parallel
-  const [activeSkills, userSchedules, skillStats, memoryContext, knowledgeContext, sessionSummary] = await Promise.all([
-    getActiveSkills().catch(() => []),
-    getUserSchedules(slackUserId).catch(() => []),
-    getUserSkillStats(slackUserId).catch(() => []),
-    buildUserContext(slackUserId, userMessage, options?.workspaceId),
-    buildKnowledgeContext(slackUserId, userMessage, options?.workspaceId),
-    getSessionSummary(slackUserId),
-  ]);
+  // Gather all context in parallel with a 5s global timeout.
+  // If Supabase cold-starts or any fetch hangs, proceed with whatever completed.
+  const DB_CONTEXT_TIMEOUT_MS = 5_000;
+  const [activeSkills, userSchedules, skillStats, memoryContext, knowledgeContext, sessionSummary] =
+    await Promise.race([
+      Promise.all([
+        getActiveSkills().catch(() => []),
+        getUserSchedules(slackUserId).catch(() => []),
+        getUserSkillStats(slackUserId).catch(() => []),
+        buildUserContext(slackUserId, userMessage, options?.workspaceId).catch(() => ""),
+        buildKnowledgeContext(slackUserId, userMessage, options?.workspaceId).catch(() => ""),
+        getSessionSummary(slackUserId).catch(() => ""),
+      ]),
+      new Promise<[any[], any[], any[], string, string, string]>((resolve) =>
+        setTimeout(
+          () => {
+            console.warn(`[general][${slackUserId}] DB context fetch timed out after ${DB_CONTEXT_TIMEOUT_MS}ms — proceeding without context`);
+            resolve([[], [], [], "", "", ""]);
+          },
+          DB_CONTEXT_TIMEOUT_MS
+        )
+      ),
+    ]);
 
   // Build context blocks using Slack mrkdwn
   const contextBlocks: string[] = [];
@@ -281,6 +272,7 @@ ${userMessage}`;
     temperature: 0.7,
     maxTokens: 4096,
     agentName: "general",
+    traceId: slackUserId,  // Trace by user for correlated log lines
   });
 
   console.log(`[PERF] chatAsAgent TOOL path: ${Date.now() - t1}ms`);

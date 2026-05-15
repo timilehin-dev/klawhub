@@ -91,13 +91,24 @@ export class McpToolManager {
   private async createClient(serverUrl: string, authConfig?: any): Promise<Client> {
     const url = new URL(serverUrl);
 
+    // Build auth headers — NEVER put tokens in URL query params (visible in logs/proxies)
+    const authHeaders: Record<string, string> = {};
     if (authConfig?.token) {
-      url.searchParams.append("token", authConfig.token);
+      authHeaders["Authorization"] = `Bearer ${authConfig.token}`;
     } else if (authConfig?.apiKey) {
-      url.searchParams.append("apiKey", authConfig.apiKey);
+      authHeaders["X-Api-Key"] = authConfig.apiKey;
     }
 
-    const transport = new SSEClientTransport(url);
+    // Wrap global fetch to inject auth headers on every SSE request to this server
+    // This is the correct way to auth with SSEClientTransport in the MCP SDK
+    const authFetch: typeof fetch = (input, init = {}) => {
+      return fetch(input, {
+        ...init,
+        headers: { ...authHeaders, ...(init.headers as Record<string, string> || {}) },
+      });
+    };
+
+    const transport = new SSEClientTransport(url, { fetch: authFetch } as any);
     const client = new Client({ name: "Klawhub-OS", version: "2.0.0" }, { capabilities: {} });
 
     // Race connection against a timeout to prevent hanging DAG steps
