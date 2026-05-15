@@ -1,5 +1,5 @@
 import { getDb } from "./connection";
-import { knowledge } from "./schema";
+import { knowledge, documentChunks } from "./schema";
 import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 
 import { generateEmbedding } from "@/core/embeddings";
@@ -75,58 +75,50 @@ export function getKnowledge(
  * Semantic search using FastEmbed + pgvector, falling back to full-text search.
  */
 export async function searchKnowledge(slackUserId: string, query: string, workspaceId?: string) {
-  // Try semantic vector search first
+  const whereClause = workspaceId 
+    ? eq(knowledge.workspaceId, workspaceId) 
+    : eq(knowledge.slackUserId, slackUserId);
+
+  // 1. Try semantic vector search first
   try {
     const embedding = await generateEmbedding(query);
     if (embedding) {
       const results = await getDb()
         .select()
         .from(knowledge)
-        .where(
-          and(
-            eq(knowledge.slackUserId, slackUserId),
-            workspaceId ? eq(knowledge.workspaceId, workspaceId) : undefined
-          )
-        )
-        .orderBy(sql`embedding <=> ${JSON.stringify(embedding)}::vector`)
+        .where(whereClause)
+        .orderBy(sql`${knowledge.embedding} <=> ${JSON.stringify(embedding)}::vector`)
         .limit(20);
-
-      if (results.length > 0) {
-        return results;
-      }
+      
+      if (results.length > 0) return results;
     }
   } catch (err) {
-    console.warn("[EMBEDDING] Semantic knowledge search failed:", (err as Error).message);
+    console.warn("[EMBEDDING] Semantic knowledge search failed:", err);
   }
 
-  // Try tsvector search second
+  // 2. Fallback to tsvector search
   try {
-    const tsResults = await getDb()
+    const results = await getDb()
       .select()
       .from(knowledge)
       .where(
         and(
-          eq(knowledge.slackUserId, slackUserId),
+          whereClause,
           sql`search_vector @@ plainto_tsquery('english', ${query})`
         )
       )
       .limit(20);
+    if (results.length > 0) return results;
+  } catch {}
 
-    if (tsResults.length > 0) {
-      return tsResults;
-    }
-  } catch {
-    // search_vector column might not exist yet — fall through to ILIKE
-  }
-
-  // Fallback: ILIKE substring search
+  // 3. Fallback to ILIKE substring search
   const pattern = `%${query}%`;
   return getDb()
     .select()
     .from(knowledge)
     .where(
       and(
-        eq(knowledge.slackUserId, slackUserId),
+        whereClause,
         or(
           ilike(knowledge.entityName, pattern),
           ilike(knowledge.entityType, pattern)
@@ -135,6 +127,27 @@ export async function searchKnowledge(slackUserId: string, query: string, worksp
     )
     .limit(20);
 }
+
+/**
+ * Semantic search for granular document chunks.
+ */
+export async function searchDocumentChunks(workspaceId: string, query: string, limit: number = 5) {
+  try {
+    const embedding = await generateEmbedding(query);
+    if (!embedding) return [];
+
+    return getDb()
+      .select()
+      .from(documentChunks)
+      .where(eq(documentChunks.workspaceId, workspaceId))
+      .orderBy(sql`${documentChunks.embedding} <=> ${JSON.stringify(embedding)}::vector`)
+      .limit(limit);
+  } catch (err) {
+    console.error("[SEARCH] Document chunk search failed:", err);
+    return [];
+  }
+}
+
 
 export function deleteKnowledge(id: string) {
   return getDb().delete(knowledge).where(eq(knowledge.id, id));

@@ -16,6 +16,7 @@ import {
 } from "@/db";
 import {
   searchKnowledge,
+  searchDocumentChunks,
 } from "@/db/knowledge";
 import { slack, postToThread } from "@/integrations/slack/client";
 import { githubUpdateFile, githubCreatePullRequest } from "@/integrations/clients";
@@ -290,27 +291,73 @@ const memorySearchTool: ToolDefinition = {
 const knowledgeSearchTool: ToolDefinition = {
   name: "knowledge_search",
   description:
-    "Search the structured knowledge graph for entities (projects, people, events, standing items). Use this to recall factual information about the user's world.",
+    "Search the structured knowledge base. Use this to recall projects, people, and specific details from indexed documents or Slack threads.",
   parameters: {
     query: {
       type: "string",
-      description: "Entity name or keyword to search for",
+      description: "Search query or keyword",
       required: true,
     },
   },
   async execute(params, ctx) {
-    if (!ctx.slackUserId) return "Cannot search knowledge: no user context.";
-    const results = await searchKnowledge(ctx.slackUserId, params.query, ctx.workspaceId);
-    if (results.length === 0) return "No knowledge entries found matching your query.";
-    return results
-      .map((k: any) => {
-        const dataStr = Object.entries(k.data as Record<string, unknown>)
-          .filter(([, v]) => v !== null && v !== undefined)
-          .map(([key, val]) => `${key}: ${val}`)
-          .join(", ");
-        return `[${k.entityType}] ${k.entityName}: ${dataStr}`;
-      })
-      .join("\n");
+    if (!ctx.slackUserId || !ctx.workspaceId) return "Cannot search knowledge: missing context.";
+    
+    const [entities, chunks] = await Promise.all([
+        searchKnowledge(ctx.slackUserId, params.query, ctx.workspaceId),
+        searchDocumentChunks(ctx.workspaceId, params.query, 5)
+    ]);
+
+    let output = "";
+
+    if (entities.length > 0) {
+        output += "── Structured Knowledge ──\n";
+        output += entities.map((k: any) => {
+            const dataStr = Object.entries(k.data as Record<string, unknown>)
+              .filter(([, v]) => v !== null && v !== undefined)
+              .map(([key, val]) => `${key}: ${val}`)
+              .join(", ");
+            return `[${k.entityType}] ${k.entityName}: ${dataStr}`;
+          }).join("\n") + "\n\n";
+    }
+
+    if (chunks.length > 0) {
+        output += "── Relevant Document Excerpts ──\n";
+        output += chunks.map((c: any) => `[Source: ${c.sourceType}] ${c.content}`).join("\n\n");
+    }
+
+    return output || "No matching knowledge or document excerpts found.";
+  },
+};
+
+const knowledgeIndexResourceTool: ToolDefinition = {
+  name: "knowledge_index_resource",
+  description: "Index a Slack thread or Google Drive file into the knowledge base for long-term memory. Use this to explicitly 'save' a conversation or document.",
+  parameters: {
+    resource_id: { type: "string", description: "The ID of the resource (thread_ts for Slack, file_id for GDrive)", required: true },
+    resource_type: { type: "string", description: "Type: 'slack_thread' or 'gdrive_file'", required: true },
+    filename: { type: "string", description: "Optional filename for display" },
+    channel_id: { type: "string", description: "Slack channel ID (required if indexing a thread)" },
+  },
+  async execute(params, ctx) {
+    const wsId = requireWorkspace(ctx);
+    const { inngest } = await import("@/workflows/client");
+    
+    await inngest.send({
+      name: "knowledge/index.requested",
+      data: {
+        type: params.resource_type,
+        workspaceId: wsId,
+        resourceId: params.resource_id,
+        slackUserId: ctx.slackUserId,
+        teamId: ctx.slackTeamId,
+        metadata: {
+          channelId: params.channel_id || ctx.slackChannelId,
+          filename: params.filename,
+        }
+      }
+    });
+
+    return `Indexing job dispatched for ${params.resource_type}. This happens in the background. I'll remember this content shortly.`;
   },
 };
 
@@ -1091,6 +1138,7 @@ export const allTools: ToolDefinition[] = [
   memorySaveTool,
   memorySearchTool,
   knowledgeSearchTool,
+  knowledgeIndexResourceTool,
   // Integration tools
   googleDriveSearchTool,
   googleDriveReadTool,
@@ -1135,6 +1183,7 @@ export const generalAgentTools: ToolDefinition[] = [
   memorySaveTool,
   memorySearchTool,
   knowledgeSearchTool,
+  knowledgeIndexResourceTool,
   // Integration tools — the agent will handle "not connected" gracefully
   googleDriveSearchTool,
   googleDriveReadTool,
@@ -1185,6 +1234,7 @@ export const pmAgentTools: ToolDefinition[] = [
   githubIssuesTool,
   memorySearchTool,
   knowledgeSearchTool,
+  knowledgeIndexResourceTool,
   scheduleCreateTool,
   scheduleListTool,
   scheduleToggleTool,
@@ -1204,6 +1254,7 @@ export const researchAgentTools: ToolDefinition[] = [
   parseDocumentTool,
   memorySearchTool,
   knowledgeSearchTool,
+  knowledgeIndexResourceTool,
   googleDriveSearchTool,
   scheduleCreateTool,
   scheduleListTool,
@@ -1234,6 +1285,7 @@ export const engineerAgentTools: ToolDefinition[] = [
   parseDocumentTool,
   memorySearchTool,
   knowledgeSearchTool,
+  knowledgeIndexResourceTool,
   sequentialThinkingTool,
 ];
 
@@ -1258,6 +1310,7 @@ export const documentorAgentTools: ToolDefinition[] = [
   webReadTool,
   parseDocumentTool,
   googleDriveSearchTool,
+  knowledgeIndexResourceTool,
   googleDriveReadTool,
   githubReadFileTool,
   memorySearchTool,

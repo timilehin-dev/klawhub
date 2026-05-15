@@ -3,6 +3,7 @@ import { inngest } from "@/workflows/client";
 import { createRun, createTask } from "@/db";
 import { getThreadHistory } from "@/utils/thread-context";
 import { getSessionSummary } from "@/core/memory/thread-summary";
+import { buildKnowledgeContext } from "@/db/knowledge";
 
 /**
  * Enrich task instructions with available context so sub-agents
@@ -10,7 +11,7 @@ import { getSessionSummary } from "@/core/memory/thread-summary";
  */
 async function enrichInstructions(
   instructions: string,
-  ctx: { slackChannelId?: string; slackThreadTs?: string; slackUserId?: string; slackTeamId?: string }
+  ctx: { slackChannelId?: string; slackThreadTs?: string; slackUserId?: string; slackTeamId?: string; workspaceId?: string }
 ): Promise<string> {
   const parts: string[] = [instructions];
 
@@ -35,6 +36,18 @@ async function enrichInstructions(
       }
     } catch {
       // Non-critical — proceed without session context
+    }
+  }
+
+  // Fetch semantic knowledge (RAG)
+  if (ctx.slackUserId) {
+    try {
+      const knowledge = await buildKnowledgeContext(ctx.slackUserId, instructions, ctx.workspaceId);
+      if (knowledge && knowledge.length > 20) {
+        parts.push(`\n\n--- RELEVANT KNOWLEDGE (RAG) ---\n${knowledge}`);
+      }
+    } catch {
+      // Non-critical
     }
   }
 
@@ -70,6 +83,7 @@ export const dispatchTaskTool: ToolDefinition = {
       slackThreadTs: ctx.slackThreadTs,
       slackUserId: ctx.slackUserId,
       slackTeamId: ctx.slackTeamId,
+      workspaceId: ctx.workspaceId,
     });
 
     // Unified DAG Generation logic

@@ -54,7 +54,14 @@ export async function googleDriveRead(workspaceId: string, fileId: string) {
   );
 
   if (!resp.ok) throw new Error(`Google Drive read failed: ${resp.status}`);
-  return { content: await resp.text(), contentType: resp.headers.get("content-type") };
+  const contentType = resp.headers.get("content-type") || "";
+  
+  if (contentType.includes("application/json") || contentType.includes("text/")) {
+    return { content: await resp.text(), contentType };
+  } else {
+    const buffer = await resp.arrayBuffer();
+    return { content: Buffer.from(buffer).toString("base64"), contentType, isBase64: true };
+  }
 }
 
 export async function googleDriveExportDoc(workspaceId: string, fileId: string) {

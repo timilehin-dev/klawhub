@@ -167,6 +167,21 @@ export const knowledge = pgTable("knowledge", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+// ── Document Chunks: granular memory for RAG ──
+
+export const documentChunks = pgTable("document_chunks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
+  sourceId: text("source_id").notNull(),
+  sourceType: text("source_type").$type<"gdrive" | "slack" | "github" | "upload">().notNull(),
+  content: text("content").notNull(),
+  embedding: vector("embedding"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (t) => [
+  index("idx_chunks_workspace_source").on(t.workspaceId, t.sourceId),
+]);
+
 // ── Workspace Members: Slack users who have used Klawhub in a workspace ──
 
 export const workspaceMembers = pgTable("workspace_members", {

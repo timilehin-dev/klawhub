@@ -80,6 +80,18 @@ PRE_INSTALLED_PACKAGES = {
 }
 
 
+# ── Global Model Singletons ──
+# Instantiated once per container life to avoid re-loading latency
+_embedding_model = None
+
+def get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        from fastembed import TextEmbedding
+        _embedding_model = TextEmbedding()
+    return _embedding_model
+
+
 # ─────────────────────────────────────────────
 # Auth Middleware
 # ─────────────────────────────────────────────
@@ -94,8 +106,9 @@ def verify_request(request: Request) -> bool:
     provided = request.headers.get("X-Webhook-Secret", "")
 
     if not expected:
-        # Secret MUST be configured in production, fallback for testing
-        return True
+        # CRITICAL: Secret MUST be configured in production
+        print("WARNING: MODAL_WEBHOOK_SECRET is not configured. Denying all requests.")
+        return False
 
     if not provided:
         return False
@@ -107,7 +120,7 @@ def verify_request(request: Request) -> bool:
 # Code Execution (with Dynamic Dependencies)
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=600, volumes={"/root/.cache": pip_cache})
+@app.function(image=image, timeout=600, memory=4096, volumes={"/root/.cache": pip_cache})
 def execute_code(code: str, language: str = "python", dependencies: list[str] = None):
     if language not in ["python", "javascript"]:
         return {"success": False, "error": f"Unsupported language: {language}"}
@@ -341,7 +354,7 @@ def generate_document(data: dict):
 # Data Analytics
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=120, memory=2048, volumes={"/root/.cache": pip_cache}, secrets=[webhook_secret])
+@app.function(image=image, timeout=120, memory=4096, volumes={"/root/.cache": pip_cache}, secrets=[webhook_secret])
 def run_analytics(data: dict):
     code = data.get("code", "")
     dependencies = data.get("dependencies", [])
@@ -486,8 +499,7 @@ def parse_document(file_b64: str, filename: str):
 @app.function(image=image, timeout=30, secrets=[webhook_secret])
 def generate_embedding(text: str) -> dict:
     try:
-        from fastembed import TextEmbedding
-        model = TextEmbedding()
+        model = get_embedding_model()
         embeddings = list(model.embed([text]))
         if embeddings:
             return {"success": True, "embedding": embeddings[0].tolist()}

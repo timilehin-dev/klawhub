@@ -9,6 +9,7 @@ import { morningBriefWorkflow } from "@/workflows/morning-brief";
 import { agentCheckInWorkflow } from "@/workflows/agent-check-in";
 import { workflowLearningWorkflow } from "@/workflows/workflow-learning";
 import { dynamicDagWorkflow } from "@/workflows/dynamic-dag";
+import { knowledgeIndexingWorkflow } from "@/workflows/knowledge-indexing";
 
 export const maxDuration = 300;
 
@@ -23,7 +24,8 @@ export const { GET, POST, PUT } = serve({
     morningBriefWorkflow,
     agentCheckInWorkflow,
     workflowLearningWorkflow,
-    dynamicDagWorkflow
+    dynamicDagWorkflow,
+    knowledgeIndexingWorkflow
   ],
 });
 

@@ -10,6 +10,11 @@ ${PERFORMANCE_LOGIC_MODULE}
 
 RESEARCH METHODOLOGY (follow this process rigorously):
 
+PHASE 0 — INTERNAL DISCOVERY (MANDATORY)
+- Use *knowledge_search* to check if the topic or related themes have been researched previously in the workspace.
+- Look for existing reports, summaries, or relevant document chunks.
+- If related info is found, use it as a foundation to avoid redundant external effort.
+
 PHASE 1 — SCOPE DEFINITION
 - Deconstruct the topic into key dimensions/aspects to investigate
 - Identify the specific questions the research must answer

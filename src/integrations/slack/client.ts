@@ -297,3 +297,21 @@ export async function getChannelHistory(channelId: string, limit: number = 20, t
   }));
 }
 
+
+/** Get all messages in a thread. */
+export async function getThreadReplies(channelId: string, threadTs: string, teamId?: string) {
+  const client = await getWorkspaceSlack(teamId);
+  const result = await client.conversations.replies({
+    channel: channelId,
+    ts: threadTs,
+  });
+
+  if (!result.ok) throw new Error(`Failed to fetch thread replies for ${threadTs}`);
+
+  return (result.messages || []).map(m => ({
+    user: m.user,
+    text: m.text || "",
+    ts: m.ts!,
+    thread_ts: m.thread_ts,
+  }));
+}
