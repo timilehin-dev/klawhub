@@ -31,7 +31,6 @@ export async function GET(
     if (isComposio) {
       const { getComposioAuthUrl } = await import("@/integrations/composio");
       const { origin } = new URL(request.url);
-      // We encode workspaceId in the callback for the final bridge step
       const callbackUrl = `${origin}/api/integrations/composio/callback?workspaceId=${workspaceId}&providerId=${providerId}`;
       
       const authData = await getComposioAuthUrl(workspaceId, provider.composioApp || providerId, callbackUrl);
@@ -41,6 +40,8 @@ export async function GET(
           provider: provider.id, 
           providerName: provider.name 
         });
+      } else {
+        throw new Error("Composio could not generate an authorization URL. Ensure your COMPOSIO_API_KEY is correct.");
       }
     }
   } catch (err) {
