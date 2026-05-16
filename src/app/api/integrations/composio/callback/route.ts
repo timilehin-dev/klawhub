@@ -45,9 +45,7 @@ export async function GET(request: NextRequest) {
     // We use a special URL that the McpToolManager will recognize
     const mcpUrl = `composio://tool-router`;
     
-    await upsertMcpServer({
-      workspaceId,
-      name: `Composio: Managed Integrations`,
+    await upsertMcpServer(workspaceId, `Composio: Managed Integrations`, {
       url: mcpUrl,
       authConfig: {
         type: "composio_linked",
