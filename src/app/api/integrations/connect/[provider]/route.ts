@@ -26,10 +26,31 @@ export async function GET(
 
   try {
     const { getProviderCredentials } = await import("@/integrations/providers/registry");
-    getProviderCredentials(provider);
+    const { isComposio } = getProviderCredentials(provider);
+    
+    if (isComposio) {
+      const { getComposioAuthUrl } = await import("@/integrations/composio");
+      const { origin } = new URL(request.url);
+      // We encode workspaceId in the callback for the final bridge step
+      const callbackUrl = `${origin}/api/integrations/composio/callback?workspaceId=${workspaceId}&providerId=${providerId}`;
+      
+      const authData = await getComposioAuthUrl(workspaceId, provider.composioApp || providerId, callbackUrl);
+      if (authData?.redirectUrl) {
+        return NextResponse.json({ 
+          authUrl: authData.redirectUrl, 
+          provider: provider.id, 
+          providerName: provider.name 
+        });
+      }
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Provider not configured";
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error(`[OAuth Connect Error] ${providerId}: ${message}`);
+    return NextResponse.json({ 
+      error: message, 
+      code: "MISSING_CONFIG",
+      provider: providerId 
+    }, { status: 400 });
   }
 
   // HMAC-signed state with timestamp (prevents forgery + replay)

@@ -13,6 +13,8 @@ export interface OAuthProviderConfig {
   extraTokenParams?: Record<string, string>; // provider-specific token params
   acceptsJson?: boolean;                 // token endpoint accepts JSON (vs form-encoded)
   refreshTokenGrantType?: string;        // defaults to "refresh_token"
+  useComposio?: boolean;                 // whether to allow Composio for this provider
+  composioApp?: string;                  // Composio app name (defaults to id)
 }
 
 export const providers: Record<string, OAuthProviderConfig> = {
@@ -68,6 +70,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
       owner: "user",
       response_type: "code",
     },
+    useComposio: true,
   },
   salesforce: {
     id: "salesforce",
@@ -80,6 +83,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
     scopes: ["api", "refresh_token", "offline_access"],
     scopeSeparator: " ",
     acceptsJson: true,
+    useComposio: true,
   },
   hubspot: {
     id: "hubspot",
@@ -92,6 +96,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
     scopes: ["crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.deals.read"],
     scopeSeparator: " ",
     acceptsJson: true,
+    useComposio: true,
   },
   linear: {
     id: "linear",
@@ -104,6 +109,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
     scopes: ["read", "write"],
     scopeSeparator: " ",
     acceptsJson: true,
+    useComposio: true,
   },
   jira: {
     id: "jira",
@@ -120,6 +126,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
       audience: "api.atlassian.com",
       prompt: "consent",
     },
+    useComposio: true,
   },
 };
 
@@ -127,10 +134,19 @@ export function getProvider(providerId: string): OAuthProviderConfig | undefined
   return providers[providerId];
 }
 
-export function getProviderCredentials(provider: OAuthProviderConfig): { clientId: string; clientSecret: string } {
+export function getProviderCredentials(provider: OAuthProviderConfig): { clientId: string; clientSecret: string; isComposio?: boolean } {
   const clientId = process.env[provider.clientIdEnv] || process.env[`NEXT_PUBLIC_${provider.clientIdEnv}`];
   const clientSecret = process.env[provider.clientSecretEnv] || process.env[`NEXT_PUBLIC_${provider.clientSecretEnv}`];
-  if (!clientId) throw new Error(`${provider.clientIdEnv} is not set (checked both standard and NEXT_PUBLIC_ versions)`);
-  if (!clientSecret) throw new Error(`${provider.clientSecretEnv} is not set (checked both standard and NEXT_PUBLIC_ versions)`);
-  return { clientId, clientSecret };
+  
+  if (!clientId || !clientSecret) {
+    // Check if Composio is enabled as a fallback
+    if (process.env.COMPOSIO_API_KEY) {
+      return { clientId: "composio", clientSecret: "composio", isComposio: true };
+    }
+    
+    if (!clientId) throw new Error(`${provider.clientIdEnv} is not set`);
+    if (!clientSecret) throw new Error(`${provider.clientSecretEnv} is not set`);
+  }
+  
+  return { clientId: clientId!, clientSecret: clientSecret!, isComposio: false };
 }

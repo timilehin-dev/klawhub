@@ -218,6 +218,7 @@ export const integrations = pgTable("integrations", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 }, (t) => [
   index("idx_integrations_workspace_provider").on(t.workspaceId, t.provider),
+  unique("unique_workspace_provider").on(t.workspaceId, t.provider),
 ]);
 
 // ── Webhooks: custom integration targets ──

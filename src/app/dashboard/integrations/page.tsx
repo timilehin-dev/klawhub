@@ -23,6 +23,7 @@ import {
   Globe,
 } from "lucide-react";
 import { useState, useCallback } from "react";
+import Script from "next/script";
 import { McpConnectionModal } from "./McpConnectionModal";
 
 interface Integration {
@@ -304,11 +305,17 @@ export default function IntegrationsPage() {
         if (oauthProviders.includes(service.id)) {
           const res = await fetch(`/api/integrations/connect/${service.id}?workspaceId=${data?.workspace?.id}`);
           const json = await res.json();
+          
+          if (!res.ok) {
+            setError(json.error || `Failed to connect to ${service.name}`);
+            return;
+          }
+
           if (json.authUrl) {
             window.location.href = json.authUrl;
             return;
           } else {
-            setError(json.error || "Failed to start OAuth flow");
+            setError("No authorization URL returned from server");
           }
         } else {
           setSelectedMcpService(service);
@@ -406,7 +413,6 @@ export default function IntegrationsPage() {
 
   const integrations = data?.integrations || [];
   const mcpServers = (data as any)?.mcpServers || [];
-
   return (
     <div className="space-y-8">
       {/* Page Header */}
@@ -627,6 +633,18 @@ export default function IntegrationsPage() {
               <li>Set Authorization callback URL: <code className="text-xs bg-surface-200 px-1 rounded">{typeof window !== "undefined" ? `${window.location.origin}/api/integrations/callback/github` : "/api/integrations/callback/github"}</code></li>
               <li>Set <code className="text-xs bg-surface-200 px-1 rounded">GITHUB_CLIENT_ID</code> and <code className="text-xs bg-surface-200 px-1 rounded">GITHUB_CLIENT_SECRET</code> in Vercel env</li>
             </ol>
+          </div>
+          <div>
+            <h4 className="text-sm font-medium text-brand-600">Enterprise Tools (One-Key Mode)</h4>
+            <p className="mt-1 text-sm text-surface-600">
+              Klawhub uses <strong>Composio</strong> to provide a zero-config setup for enterprise tools like Notion, Salesforce, HubSpot, Linear, and Jira.
+            </p>
+            <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50/50 p-3">
+              <p className="text-xs text-brand-800 leading-relaxed">
+                <strong>How to setup:</strong> Just add <code className="text-[10px] bg-brand-100 px-1 rounded">COMPOSIO_API_KEY</code> to your environment. 
+                Once set, you can connect any of the featured services with a single click. Klawhub will automatically handle the OAuth flow and MCP tool bridge.
+              </p>
+            </div>
           </div>
         </div>
       </div>

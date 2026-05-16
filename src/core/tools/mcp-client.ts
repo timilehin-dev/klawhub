@@ -94,8 +94,20 @@ export class McpToolManager {
     // Build auth headers — NEVER put tokens in URL query params (visible in logs/proxies)
     const authHeaders: Record<string, string> = {};
 
-    // Resolve dynamic auth if linked to a Klawhub integration
-    if (authConfig?.type === "integration_linked" && authConfig.integrationId) {
+    // 1. Resolve dynamic auth if linked to a Klawhub integration
+    if (authConfig?.type === "composio_linked") {
+      try {
+        const { getComposioMcpConfig } = await import("@/integrations/composio");
+        // For Composio, the workspaceId is the session owner
+        const config = await getComposioMcpConfig(authConfig.workspaceId || "global");
+        if (config) {
+          serverUrl = config.url;
+          Object.assign(authHeaders, config.headers);
+        }
+      } catch (err) {
+        console.error(`[MCP] Failed to resolve Composio auth for ${serverUrl}:`, err);
+      }
+    } else if (authConfig?.type === "integration_linked" && authConfig.integrationId) {
       try {
         const { getIntegration, getValidAccessToken } = await import("@/integrations/store");
         const { getProvider } = await import("@/integrations/providers/registry");
@@ -103,7 +115,12 @@ export class McpToolManager {
         if (integration) {
           const provider = getProvider(authConfig.provider);
           if (provider) {
-            const token = await getValidAccessToken(integration as any, provider);
+            let token: string | null = null;
+            
+            // Replaced Nango with Composio logic elsewhere, 
+            // but keeping this block clean for other linked types
+            token = await getValidAccessToken(integration as any, provider);
+
             if (token) {
               authHeaders["Authorization"] = `Bearer ${token}`;
             }
@@ -116,6 +133,16 @@ export class McpToolManager {
       authHeaders["Authorization"] = `Bearer ${authConfig.token}`;
     } else if (authConfig?.apiKey) {
       authHeaders["X-Api-Key"] = authConfig.apiKey;
+    }
+
+    // 2. Fallback to composio if url is a protocol shortcut
+    if (serverUrl.startsWith("composio://")) {
+      const { getComposioMcpConfig } = await import("@/integrations/composio");
+      const config = await getComposioMcpConfig("global"); // fallback
+      if (config) {
+        serverUrl = config.url;
+        Object.assign(authHeaders, config.headers);
+      }
     }
 
     // Wrap global fetch to inject auth headers on every SSE request to this server
