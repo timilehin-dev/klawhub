@@ -33,7 +33,7 @@ export async function GET(
       const { origin } = new URL(request.url);
       const callbackUrl = `${origin}/api/integrations/composio/callback?workspaceId=${workspaceId}&providerId=${providerId}`;
       
-      const authData = await getComposioAuthUrl(workspaceId, provider.composioApp || providerId, callbackUrl);
+      const authData = await getComposioAuthUrl(workspaceId, provider.composioConfigId || providerId, callbackUrl);
       if (authData?.redirectUrl) {
         return NextResponse.json({ 
           authUrl: authData.redirectUrl, 

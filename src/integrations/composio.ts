@@ -4,8 +4,8 @@ export interface ComposioAuthResponse {
 }
 
 export async function getComposioAuthUrl(
-  userId: string,
-  app: string,
+  workspaceId: string,
+  authConfigId: string,
   callbackUrl: string
 ): Promise<ComposioAuthResponse | null> {
   const apiKey = process.env.COMPOSIO_API_KEY;
@@ -15,55 +15,32 @@ export async function getComposioAuthUrl(
   }
 
   try {
-    // 1. Create a session for the user
-    const sessionRes = await fetch("https://backend.composio.dev/api/v3.1/sessions", {
+    // We use the modern connected_accounts/link endpoint for managed auth
+    const res = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts/link", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         "x-api-key": apiKey,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        connectedAccount: {
-          userId: userId,
-        },
+        auth_config_id: authConfigId,
+        user_id: workspaceId,
+        redirect_url: callbackUrl,
       }),
     });
 
-    if (!sessionRes.ok) {
-      const error = await sessionRes.text();
-      console.error("[Composio] Failed to create session:", error);
+    if (!res.ok) {
+      const error = await res.text();
+      console.error("[Composio] Failed to get auth URL. Status:", res.status, "ConfigID:", authConfigId, "Error:", error);
       return null;
     }
 
-    const sessionData = await sessionRes.json();
-    const sessionId = sessionData.id;
-
-    // 2. Get the authorization URL
-    const authRes = await fetch(`https://backend.composio.dev/api/v3.1/sessions/${sessionId}/authorize`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        app: app,
-        callbackUrl: callbackUrl,
-      }),
-    });
-
-    if (!authRes.ok) {
-      const error = await authRes.text();
-      console.error("[Composio] Failed to get auth URL:", error);
-      return null;
-    }
-
-    const authData = await authRes.json();
+    const data = await res.json();
     return {
-      redirectUrl: authData.redirectUrl,
-      connectionId: authData.connectionId,
+      redirectUrl: data.redirectUrl || data.redirect_url,
     };
   } catch (err) {
-    console.error("[Composio] Error initiating connection:", err);
+    console.error("[Composio] Auth URL Fetch Error:", err);
     return null;
   }
 }
@@ -76,26 +53,28 @@ export async function getComposioMcpConfig(workspaceId: string): Promise<{ url: 
   if (!apiKey) return null;
 
   try {
-    // 1. Create a session for the user/workspace
-    const res = await fetch("https://backend.composio.dev/api/v3.1/sessions", {
+    // 1. Create a session for the user/workspace via the Tool Router API
+    const res = await fetch("https://backend.composio.dev/api/v3.1/tool_router/session", {
       method: "POST",
       headers: {
         "x-api-key": apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        connectedAccount: {
-          userId: workspaceId,
-        },
+        user_id: workspaceId,
       }),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error("[Composio] Failed to create tool router session:", await res.text());
+      return null;
+    }
     const data = await res.json();
+    const sessionId = data.id || data.session_id;
 
     // 2. Return the Tool Router URL with the session context
     return {
-      url: `https://mcp.composio.dev/tool-router/sse?sessionId=${data.id}`,
+      url: `https://mcp.composio.dev/tool-router/sse?sessionId=${sessionId}`,
       headers: {
         "x-api-key": apiKey,
       },

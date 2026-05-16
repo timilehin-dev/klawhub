@@ -14,7 +14,7 @@ export interface OAuthProviderConfig {
   acceptsJson?: boolean;                 // token endpoint accepts JSON (vs form-encoded)
   refreshTokenGrantType?: string;        // defaults to "refresh_token"
   useComposio?: boolean;                 // whether to allow Composio for this provider
-  composioApp?: string;                  // Composio app name (defaults to id)
+  composioConfigId?: string;             // Composio Auth Config ID (NanoID)
 }
 
 export const providers: Record<string, OAuthProviderConfig> = {
@@ -42,6 +42,8 @@ export const providers: Record<string, OAuthProviderConfig> = {
       response_type: "code",
     },
     acceptsJson: true,
+    useComposio: true,
+    composioConfigId: "ac_m4Hex1RtO6ja",
   },
 
   github: {
@@ -55,6 +57,8 @@ export const providers: Record<string, OAuthProviderConfig> = {
     scopes: ["repo", "read:org", "read:user", "issues", "pull_requests"],
     scopeSeparator: " ",
     acceptsJson: true,
+    useComposio: true,
+    composioConfigId: "ac_Q1V0hUWLBrAE",
   },
   notion: {
     id: "notion",
@@ -71,6 +75,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
       response_type: "code",
     },
     useComposio: true,
+    composioConfigId: "ac_Lym7Y2op39jF",
   },
   salesforce: {
     id: "salesforce",
@@ -84,6 +89,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
     scopeSeparator: " ",
     acceptsJson: true,
     useComposio: true,
+    composioConfigId: "ac_Kx7npfitil06",
   },
   hubspot: {
     id: "hubspot",
@@ -97,6 +103,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
     scopeSeparator: " ",
     acceptsJson: true,
     useComposio: true,
+    composioConfigId: "ac_EEVqj5RkFERO",
   },
   linear: {
     id: "linear",
@@ -110,6 +117,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
     scopeSeparator: " ",
     acceptsJson: true,
     useComposio: true,
+    composioConfigId: "ac_jkMpaU7Tnrfs",
   },
   jira: {
     id: "jira",
@@ -127,6 +135,7 @@ export const providers: Record<string, OAuthProviderConfig> = {
       prompt: "consent",
     },
     useComposio: true,
+    composioConfigId: "ac_SAWyHxqh07U3",
   },
 };
 
