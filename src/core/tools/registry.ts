@@ -1129,6 +1129,69 @@ const slackPostToChannelTool: ToolDefinition = {
   },
 };
 
+const taskCancelTool: ToolDefinition = {
+  name: "task_cancel",
+  description: "Cancel or stop a currently running or queued task (document, research, analytics) or build run in this channel or thread.",
+  parameters: {
+    task_id: { type: "string", description: "Optional UUID of the task to cancel/stop" },
+    run_id: { type: "string", description: "Optional UUID of the build run to cancel/stop" },
+  },
+  async execute(params, ctx) {
+    try {
+      const { updateTask, updateRun, getActiveTaskByThreadTs, getActiveRunByThreadTs } = await import("@/db");
+
+      let cancelledCount = 0;
+      let detail = "";
+
+      // 1. Cancel by specified task_id
+      if (params.task_id) {
+        await updateTask(params.task_id, { status: "error" });
+        cancelledCount++;
+        detail = `Task with ID ${params.task_id}`;
+      }
+
+      // 2. Cancel by specified run_id
+      if (params.run_id) {
+        await updateRun(params.run_id, { status: "error" });
+        cancelledCount++;
+        detail = `Build run with ID ${params.run_id}`;
+      }
+
+      // 3. Cancel active task/run in current thread if no ID was provided
+      if (!params.task_id && !params.run_id) {
+        if (!ctx.slackThreadTs) {
+          return "Error: No specific task_id or run_id was provided, and no thread context is available to find the active task.";
+        }
+
+        const [activeTasks, activeRuns] = await Promise.all([
+          getActiveTaskByThreadTs(ctx.slackThreadTs),
+          getActiveRunByThreadTs(ctx.slackThreadTs),
+        ]);
+
+        if (activeTasks && activeTasks.length > 0) {
+          await updateTask(activeTasks[0].id, { status: "error" });
+          cancelledCount++;
+          detail = `active task "${activeTasks[0].request.slice(0, 40)}..."`;
+        }
+
+        if (activeRuns && activeRuns.length > 0) {
+          await updateRun(activeRuns[0].id, { status: "error" });
+          cancelledCount++;
+          detail = `active build run "${activeRuns[0].request.slice(0, 40)}..."`;
+        }
+      }
+
+      if (cancelledCount === 0) {
+        return "No active tasks or build runs were found to cancel in this thread.";
+      }
+
+      return `Successfully cancelled ${detail}. The system will no longer monitor or execute it.`;
+    } catch (err) {
+      return `Failed to cancel task: ${(err as Error).message}`;
+    }
+  }
+};
+
 // ── Tool Registry ──
 
 
@@ -1166,6 +1229,7 @@ export const allTools: ToolDefinition[] = [
   scheduleListTool,
   scheduleDeleteTool,
   scheduleToggleTool,
+  taskCancelTool,
   scheduleListPresetsTool,
   slackListChannelsTool,
   sequentialThinkingTool,
@@ -1220,6 +1284,7 @@ export const generalAgentTools: ToolDefinition[] = [
   scheduleListTool,
   scheduleDeleteTool,
   scheduleToggleTool,
+  taskCancelTool,
   scheduleEditTool,
   scheduleListPresetsTool,
   // Channel awareness
@@ -1248,6 +1313,7 @@ export const pmAgentTools: ToolDefinition[] = [
   scheduleCreateTool,
   scheduleListTool,
   scheduleToggleTool,
+  taskCancelTool,
   scheduleEditTool,
   slackListChannelsTool,
   sequentialThinkingTool,
