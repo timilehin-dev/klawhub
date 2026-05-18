@@ -78,6 +78,13 @@ const SCHEDULE_PATTERNS = [
   /\b(set up|create|add)\s+(a\s+)?(schedul|remind|cron|alert)/i,
 ];
 
+function isComplexRequest(text: string): boolean {
+  const clean = text.trim();
+  if (clean.length > 120) return true;
+  if (clean.length > 60 && /(and|then|also|after|specifically|superior|outline|draft|email)\b/i.test(clean)) return true;
+  return false;
+}
+
 // ── Main Entry Point ──
 
 export async function processSlackEvent(input: ProcessEventInput): Promise<void> {
@@ -118,7 +125,7 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
     return;
   }
 
-  const matchedSkill = matchSkill(text);
+  const matchedSkill = isComplexRequest(text) ? null : matchSkill(text);
   if (matchedSkill) {
     console.log(`[EVENTS] Skill matched: ${matchedSkill.name} for text: "${text.slice(0, 50)}..."`);
   }
@@ -408,7 +415,7 @@ async function handleThreadReply(ctx: {
   }
 
   // ── 4. Fast-path Skill Routing ──
-  const matchedSkill = matchSkill(text);
+  const matchedSkill = isComplexRequest(text) ? null : matchSkill(text);
   if (matchedSkill) {
     try { await addReaction(channelId, messageTs, "zap", teamId); } catch { /* ok */ }
     await postToThread(channelId, messageTs, `*Executing Skill: ${matchedSkill.name}...*`, undefined, teamId);
@@ -548,7 +555,7 @@ Please analyze this document/message proactively as a human coworker would.
   }
 
   // Fast-path Skill Routing
-  const matchedSkill = matchSkill(text);
+  const matchedSkill = isComplexRequest(text) ? null : matchSkill(text);
   if (matchedSkill) {
     try { await addReaction(channelId, messageTs, "zap", teamId); } catch { /* ok */ }
     await postToThread(channelId, messageTs, `*Executing Skill: ${matchedSkill.name}...*`, undefined, teamId);

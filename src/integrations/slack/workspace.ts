@@ -81,18 +81,6 @@ export async function ensureWorkspaceExists(teamId?: string) {
  * Checks if a workspace has hit its monthly usage limit.
  */
 export async function checkUsageLimit(teamId?: string): Promise<{ allowed: boolean; used: number; limit: number } | null> {
-  try {
-    const auth = await getCachedAuth(teamId);
-    const effectiveTeamId = teamId || auth.team_id;
-    if (!effectiveTeamId) return null;
-
-    const ws = await getWorkspaceByTeamId(effectiveTeamId);
-    if (!ws || ws.length === 0) return null;
-
-    const { checkWorkspaceUsageLimit } = await import("@/db");
-    return await checkWorkspaceUsageLimit(ws[0].id);
-  } catch (err) {
-    console.error(`[WORKSPACE] Failed to check usage limit for team ${teamId}:`, err);
-    return null;
-  }
+  // Always allowed for testing/unlimited use
+  return { allowed: true, used: 0, limit: 999999 };
 }

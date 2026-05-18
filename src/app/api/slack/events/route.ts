@@ -39,13 +39,15 @@ export async function POST(req: NextRequest) {
 
   const event = payload.event;
 
-  // 4. Quick filters — skip bot messages, subtypes, empty text (~0ms)
+  // 4. Quick filters — skip bot messages, subtypes (except file_share), empty text (~0ms)
   // But allow reaction_added events through!
-  if (event.type !== "reaction_added" && (event.bot_id || event.subtype)) return NextResponse.json({ ok: true });
+  const isFileShare = event.subtype === "file_share";
+  if (event.type !== "reaction_added" && (event.bot_id || (event.subtype && !isFileShare))) return NextResponse.json({ ok: true });
 
-  if (event.type === "message") {
+  if (event.type === "message" && !isFileShare) {
     const text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
-    if (!text) return NextResponse.json({ ok: true });
+    const hasFiles = !!(event.files && event.files.length > 0);
+    if (!text && !hasFiles) return NextResponse.json({ ok: true });
   }
 
   // 5. Allow messages through for proactive analysis and passive listening.
