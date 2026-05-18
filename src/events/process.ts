@@ -219,7 +219,7 @@ export async function processSlackEvent(input: ProcessEventInput): Promise<void>
     // ══════════════════════════════════════════════════
     if (isThreadReply && !isMention) {
       await handleThreadReply({
-        userId, channelId, threadTs, messageTs, text, teamId, workspaceId,
+        userId, channelId, threadTs, messageTs, text, teamId, workspaceId, fileTextContext,
       });
       return;
     }
@@ -254,8 +254,9 @@ async function handleThreadReply(ctx: {
   text: string;
   teamId?: string;
   workspaceId?: string;
+  fileTextContext?: string;
 }): Promise<void> {
-  const { userId, channelId, threadTs, messageTs, text, teamId, workspaceId } = ctx;
+  const { userId, channelId, threadTs, messageTs, text, teamId, workspaceId, fileTextContext } = ctx;
 
   // ── 1. Approve/reject fast path — skip thread history fetch (saves 300-800ms) ──
   const isApproval = APPROVAL_PATTERNS.some((p) => p.test(text));
@@ -342,7 +343,8 @@ async function handleThreadReply(ctx: {
 
   if (classification.type === "chat" && !isControlSignal) {
     try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
-    const responseText = await chatAsAgent(userId, text, { workspaceId, threadHistory, slackChannelId: channelId, slackThreadTs: threadTs, slackTeamId: teamId });
+    const agentPrompt = fileTextContext ? `${text}\n\n${fileTextContext}` : text;
+    const responseText = await chatAsAgent(userId, agentPrompt, { workspaceId, threadHistory, slackChannelId: channelId, slackThreadTs: threadTs, slackTeamId: teamId });
     memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => { });
     extractAndStoreKnowledge(userId, text).catch(() => { });
     updateSessionSummary(userId, text, responseText).catch(() => { });
@@ -368,9 +370,10 @@ async function handleThreadReply(ctx: {
 
       await postToThread(channelId, messageTs, "*Build Squad re-activated!*\n_Reviewing previous context..._", undefined, teamId);
 
+      const agentPrompt = fileTextContext ? `${text}\n\n${fileTextContext}` : text;
       const fullRequest = threadHistory
-        ? `${text}\n\n[You are continuing a previous build. Here is the context:]\n${followupCtx}`
-        : `${text}\n\n[Context from previous build: ${run.request.slice(0, 500)}${run.pmSpec ? `\n\nPrevious spec:\n${run.pmSpec.slice(0, 500)}` : ""}${run.code ? `\n\nPrevious code:\n${run.code.slice(0, 500)}` : ""}]`;
+        ? `${agentPrompt}\n\n[You are continuing a previous build. Here is the context:]\n${followupCtx}`
+        : `${agentPrompt}\n\n[Context from previous build: ${run.request.slice(0, 500)}${run.pmSpec ? `\n\nPrevious spec:\n${run.pmSpec.slice(0, 500)}` : ""}${run.code ? `\n\nPrevious code:\n${run.code.slice(0, 500)}` : ""}]`;
 
       const [newRun] = await createRun({
         slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs,
@@ -379,7 +382,7 @@ async function handleThreadReply(ctx: {
 
       await inngest.send({
         name: "slack/build.requested",
-        data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, runId: newRun.id, teamId },
+        data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: agentPrompt, runId: newRun.id, teamId },
       });
 
       memoryWrite(userId, `Build follow-up: ${text.slice(0, 100)}`, "preference", workspaceId).catch(() => { });
@@ -395,9 +398,10 @@ async function handleThreadReply(ctx: {
       const taskEmojis: Record<string, string> = { document: "page_facing_up", research: "mag", analytics: "chart_with_upwards_trend" };
       try { await addReaction(channelId, messageTs, taskEmojis[task.type] || "speech_balloon", teamId); } catch { /* ok */ }
 
+      const agentPrompt = fileTextContext ? `${text}\n\n${fileTextContext}` : text;
       const fullRequest = threadHistory
-        ? `${text}\n\n[You are continuing a previous ${task.type} task. Thread conversation:\n${threadHistory}]`
-        : `${text}\n\n[Context from previous ${task.type} task: ${task.request.slice(0, 500)}]`;
+        ? `${agentPrompt}\n\n[You are continuing a previous ${task.type} task. Thread conversation:\n${threadHistory}]`
+        : `${agentPrompt}\n\n[Context from previous ${task.type} task: ${task.request.slice(0, 500)}]`;
 
       const [newTask] = await createTask({
         slackUserId: userId, slackChannelId: channelId, slackThreadTs: threadTs,
@@ -406,7 +410,7 @@ async function handleThreadReply(ctx: {
 
       await inngest.send({
         name: `slack/${task.type}.requested`,
-        data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: text, taskId: newTask.id, teamId },
+        data: { slackChannelId: channelId, slackThreadTs: threadTs, slackUserId: userId, messageText: agentPrompt, taskId: newTask.id, teamId },
       });
 
       memoryWrite(userId, `${task.type} follow-up: ${text.slice(0, 100)}`, "preference", workspaceId).catch(() => { });
@@ -585,7 +589,8 @@ Please analyze this document/message proactively as a human coworker would.
   if (classification.type === "chat") {
     try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
     const t0 = Date.now();
-    const responseText = await chatAsAgent(userId, text, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
+    const agentPrompt = fileTextContext ? `${text}\n\n${fileTextContext}` : text;
+    const responseText = await chatAsAgent(userId, agentPrompt, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
     const elapsed = Date.now() - t0;
     console.log(`[PERF] chatAsAgent completed in ${elapsed}ms`);
     memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => { });
@@ -598,14 +603,16 @@ Please analyze this document/message proactively as a human coworker would.
   // Previously UNCLEAR — now route to General Agent with tools instead of dead-ending
   if (classification.type === "unclear") {
     try { await addReaction(channelId, messageTs, "speech_balloon", teamId); } catch { /* ok */ }
-    const responseText = await chatAsAgent(userId, text, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
+    const agentPrompt = fileTextContext ? `${text}\n\n${fileTextContext}` : text;
+    const responseText = await chatAsAgent(userId, agentPrompt, { workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, slackTeamId: teamId });
     memoryWrite(userId, `Chat: ${text.slice(0, 100)}`, "interaction", workspaceId).catch(() => { });
     await postToThread(channelId, messageTs, responseText, undefined, teamId);
     return;
   }
 
   // ── Task dispatches ──
-  const requestText = classification.extractedRequest || text;
+  const cleanRequest = classification.extractedRequest || text;
+  const requestText = fileTextContext ? `${cleanRequest}\n\n${fileTextContext}` : cleanRequest;
 
   // Usage limit check
   const limitCheck = await checkUsageLimit(teamId);
@@ -643,7 +650,8 @@ Please analyze this document/message proactively as a human coworker would.
     );
     const statusTs = (statusMsg as any).ts;
 
-    const responseText = await chatAsAgent(userId, text, { 
+    const agentPrompt = fileTextContext ? `${text}\n\n${fileTextContext}` : text;
+    const responseText = await chatAsAgent(userId, agentPrompt, { 
       workspaceId, slackChannelId: channelId, slackThreadTs: messageTs, 
       slackTeamId: teamId, statusMessageTs: statusTs 
     });
