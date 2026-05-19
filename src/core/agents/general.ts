@@ -181,28 +181,36 @@ ${userMessage}`;
   // ── All messages go through the full tool loop for consistent tool access ──
   const t1 = Date.now();
 
-  // Gather all context in parallel with a 5s global timeout.
-  // If Supabase cold-starts or any fetch hangs, proceed with whatever completed.
+  // Gather all context in parallel with a 5s independent timeout per fetch.
+  // If Supabase cold-starts or any fetch hangs, we proceed with whatever completed,
+  // preventing a single slow query from discarding other successful context.
   const DB_CONTEXT_TIMEOUT_MS = 5_000;
+
+  async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+    let timeoutId: any;
+    const timeoutPromise = new Promise<T>((resolve) => {
+      timeoutId = setTimeout(() => {
+        console.warn(`[general][${slackUserId}] A DB query timed out after ${timeoutMs}ms — falling back`);
+        resolve(fallback);
+      }, timeoutMs);
+    });
+    return Promise.race([
+      promise.then((res) => {
+        clearTimeout(timeoutId);
+        return res;
+      }),
+      timeoutPromise
+    ]).catch(() => fallback);
+  }
+
   const [activeSkills, userSchedules, skillStats, memoryContext, knowledgeContext, sessionSummary] =
-    await Promise.race([
-      Promise.all([
-        getActiveSkills().catch(() => []),
-        getUserSchedules(slackUserId).catch(() => []),
-        getUserSkillStats(slackUserId).catch(() => []),
-        buildUserContext(slackUserId, userMessage, options?.workspaceId).catch(() => ""),
-        buildKnowledgeContext(slackUserId, userMessage, options?.workspaceId).catch(() => ""),
-        getSessionSummary(slackUserId).catch(() => ""),
-      ]),
-      new Promise<[any[], any[], any[], string, string, string]>((resolve) =>
-        setTimeout(
-          () => {
-            console.warn(`[general][${slackUserId}] DB context fetch timed out after ${DB_CONTEXT_TIMEOUT_MS}ms — proceeding without context`);
-            resolve([[], [], [], "", "", ""]);
-          },
-          DB_CONTEXT_TIMEOUT_MS
-        )
-      ),
+    await Promise.all([
+      withTimeout(getActiveSkills(), DB_CONTEXT_TIMEOUT_MS, []),
+      withTimeout(getUserSchedules(slackUserId), DB_CONTEXT_TIMEOUT_MS, []),
+      withTimeout(getUserSkillStats(slackUserId), DB_CONTEXT_TIMEOUT_MS, []),
+      withTimeout(buildUserContext(slackUserId, userMessage, options?.workspaceId), DB_CONTEXT_TIMEOUT_MS, ""),
+      withTimeout(buildKnowledgeContext(slackUserId, userMessage, options?.workspaceId), DB_CONTEXT_TIMEOUT_MS, ""),
+      withTimeout(getSessionSummary(slackUserId), DB_CONTEXT_TIMEOUT_MS, ""),
     ]);
 
   // Build context blocks using Slack mrkdwn
@@ -257,7 +265,18 @@ ${userMessage}`;
 
       if (activeServers.length > 0) {
         const mcpResults = await Promise.allSettled(
-          activeServers.map((srv) => mcpManager.connectAndFetchTools(srv.url, srv.name, srv.authConfig))
+          activeServers.map((srv) =>
+            mcpManager.connectAndFetchTools(
+              srv.url,
+              srv.name,
+              srv.authConfig,
+              srv.toolsSchema,
+              async (schema) => {
+                const { updateMcpServerToolsSchema } = await import("@/db");
+                await updateMcpServerToolsSchema(srv.id, schema);
+              }
+            )
+          )
         );
 
         for (const res of mcpResults) {

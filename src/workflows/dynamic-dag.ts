@@ -112,7 +112,16 @@ export const dynamicDagWorkflow = inngest.createFunction(
         const allMcpTools: any[] = [];
         for (const srv of servers) {
           if (srv.status === "active") {
-            const tools = await mcpManager.connectAndFetchTools(srv.url, srv.name, srv.authConfig);
+            const tools = await mcpManager.connectAndFetchTools(
+              srv.url,
+              srv.name,
+              srv.authConfig,
+              srv.toolsSchema,
+              async (schema) => {
+                const { updateMcpServerToolsSchema } = await import("@/db");
+                await updateMcpServerToolsSchema(srv.id, schema);
+              }
+            );
             allMcpTools.push(...tools);
           }
         }
@@ -154,9 +163,11 @@ export const dynamicDagWorkflow = inngest.createFunction(
         throw new Error("Deadlock detected in DAG: no nodes have all dependencies met.");
       }
 
-      const results = await Promise.all(readyNodes.map(async (node) => {
+      for (const node of readyNodes) {
         const safeNodeId = node.id.replace(/[^a-zA-Z0-9_-]/g, '_');
         const taskType: DagNodeTaskType = node.taskType || "general";
+
+        let nodeResult = "";
 
         if (node.agent === "approval") {
           await step.run(`post-approval-${safeNodeId}`, async () => {
@@ -181,41 +192,39 @@ export const dynamicDagWorkflow = inngest.createFunction(
              throw new Error(`Approval rejected for ${node.id}`);
           }
 
-          return `Approved. Feedback: ${decision.data.feedback || "No feedback provided."}`;
+          nodeResult = `Approved. Feedback: ${decision.data.feedback || "No feedback provided."}`;
+        } else {
+          const agentConfig = AGENT_MAP[node.agent] || { tools: generalAgentTools, prompt: "You are an agent." };
+          const resourceConfig = getAgentConfig(node.agent, taskType);
+
+          nodeResult = await step.run(`exec-${safeNodeId}`, async () => {
+            let context = `You are executing step '${node.id}' in a multi-step workflow.\n\n`;
+            if (node.dependsOn.length > 0) {
+              context += `--- OUTPUTS FROM PREVIOUS STEPS ---\n`;
+              node.dependsOn.forEach(dep => {
+                const output = nodeOutputs[dep] || "No output from dependency.";
+                const truncated = smartTruncate(output, 6000);
+                context += `[Step: ${dep}]\n${truncated}\n\n`;
+              });
+            }
+            context += `--- YOUR INSTRUCTION ---\n${node.instruction}`;
+
+            return await runToolUseLoop(context, {
+              systemPrompt: `${agentConfig.prompt}\n\nCOORDINATION CONTEXT:\n${context}`,
+              tools: agentConfig.tools,
+              context: { slackUserId, slackChannelId, slackThreadTs, runId, workspaceId },
+              maxIterations: resourceConfig.maxIterations,
+              temperature: resourceConfig.temperature,
+              maxTokens: resourceConfig.maxTokens,
+              agentName: node.agent,
+              traceId: runId,  // Propagate run ID as trace ID for correlated log lines
+            });
+          });
         }
 
-        const agentConfig = AGENT_MAP[node.agent] || { tools: generalAgentTools, prompt: "You are an agent." };
-        const resourceConfig = getAgentConfig(node.agent, taskType);
-
-        return await step.run(`exec-${safeNodeId}`, async () => {
-          let context = `You are executing step '${node.id}' in a multi-step workflow.\n\n`;
-          if (node.dependsOn.length > 0) {
-            context += `--- OUTPUTS FROM PREVIOUS STEPS ---\n`;
-            node.dependsOn.forEach(dep => {
-              const output = nodeOutputs[dep] || "No output from dependency.";
-              const truncated = smartTruncate(output, 6000);
-              context += `[Step: ${dep}]\n${truncated}\n\n`;
-            });
-          }
-          context += `--- YOUR INSTRUCTION ---\n${node.instruction}`;
-
-          return await runToolUseLoop(context, {
-            systemPrompt: `${agentConfig.prompt}\n\nCOORDINATION CONTEXT:\n${context}`,
-            tools: agentConfig.tools,
-            context: { slackUserId, slackChannelId, slackThreadTs, runId, workspaceId },
-            maxIterations: resourceConfig.maxIterations,
-            temperature: resourceConfig.temperature,
-            maxTokens: resourceConfig.maxTokens,
-            agentName: node.agent,
-            traceId: runId,  // Propagate run ID as trace ID for correlated log lines
-          });
-        });
-      }));
-
-      readyNodes.forEach((node, index) => {
-        nodeOutputs[node.id] = results[index];
+        nodeOutputs[node.id] = nodeResult;
         completedNodes.add(node.id);
-      });
+      }
 
       remainingNodes = remainingNodes.filter(n => !completedNodes.has(n.id));
 

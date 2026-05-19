@@ -18,8 +18,6 @@ import { agentChat } from "@/core/llm";
  * - Rate-limited to max 1 post per workspace per heartbeat cycle
  */
 
-// In-memory cache of last update timestamps (survives within a single serverless invocation)
-const lastUpdateCache = new Map<string, number>();
 const CACHE_TTL = 12 * 60 * 1000; // 12 minutes — heartbeat runs every 15 min
 
 export const heartbeatWorkflow = inngest.createFunction(
@@ -205,7 +203,13 @@ Rules:
         await step.run(`notify-${workspace.id.slice(0, 8)}`, async () => {
           try {
             // Dedup check: skip if we already posted for this workspace recently
-            const lastPost = lastUpdateCache.get(workspace.id);
+            const wsRows = await getDb()
+              .select({ lastHeartbeatBriefingAt: workspaces.lastHeartbeatBriefingAt })
+              .from(workspaces)
+              .where(eq(workspaces.id, workspace.id))
+              .limit(1);
+
+            const lastPost = wsRows[0]?.lastHeartbeatBriefingAt ? new Date(wsRows[0].lastHeartbeatBriefingAt).getTime() : 0;
             if (lastPost && Date.now() - lastPost < CACHE_TTL) {
               return;
             }
@@ -234,7 +238,12 @@ Rules:
               text: message,
             });
 
-            // On success: Update integration metadata in DB to persist watermarks
+            // On success: Update integration metadata and lastHeartbeatBriefingAt in DB to persist watermarks
+            await getDb()
+              .update(workspaces)
+              .set({ lastHeartbeatBriefingAt: new Date(), updatedAt: new Date() })
+              .where(eq(workspaces.id, workspace.id));
+
             for (const item of checkResult.metadataUpdates) {
               await getDb()
                 .update(integrations)
@@ -242,8 +251,6 @@ Rules:
                 .where(eq(integrations.id, item.integrationId));
             }
 
-            // Mark as posted in ephemeral cache
-            lastUpdateCache.set(workspace.id, Date.now());
             totalUpdates += checkResult.updates.length;
           } catch (err) {
             console.error(`[HEARTBEAT] Failed to post message for workspace ${workspace.id}:`, err);

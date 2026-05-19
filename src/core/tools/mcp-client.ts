@@ -12,7 +12,13 @@ export class McpToolManager {
    * Note: No in-memory tool cache — each DAG step runs in a fresh serverless context so caching
    * would never be shared. Connections are cached per-invocation only.
    */
-  async connectAndFetchTools(serverUrl: string, serverName: string, authConfig?: any): Promise<ToolDefinition[]> {
+  async connectAndFetchTools(
+    serverUrl: string,
+    serverName: string,
+    authConfig?: any,
+    cachedToolsSchema?: any,
+    onSchemaFetched?: (toolsSchema: any) => Promise<void>
+  ): Promise<ToolDefinition[]> {
     // Basic SSRF Prevention: reject localhost and private/metadata IPs
     const forbiddenPatterns = [
       /^https?:\/\/localhost/i,
@@ -26,53 +32,66 @@ export class McpToolManager {
       return [];
     }
 
+    const mapMcpTool = (mcpTool: any) => {
+      const params: Record<string, any> = {};
+      const required = (mcpTool.inputSchema as any)?.required || [];
+      const properties = (mcpTool.inputSchema as any)?.properties || {};
+
+      for (const [key, val] of Object.entries(properties)) {
+        params[key] = {
+          type: (val as any).type === "integer" ? "number" : (val as any).type,
+          description: (val as any).description || "",
+          required: required.includes(key),
+        };
+      }
+
+      return {
+        name: `mcp_${serverName}_${mcpTool.name}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
+        description: `(MCP: ${serverName}) ${mcpTool.description}`,
+        parameters: params,
+        execute: async (args: Record<string, any>, _ctx: any) => {
+          try {
+            // Lazy connection on tool execution
+            const client = await this.getOrCreateClient(serverUrl, authConfig);
+            let res;
+            try {
+              res = await client.callTool({ name: mcpTool.name, arguments: args });
+            } catch (callErr) {
+              console.warn(`[MCP] Tool call failed on ${serverName}.${mcpTool.name}, attempting reconnect...`);
+              const freshClient = await this.reconnect(serverUrl, serverName, authConfig);
+              res = await freshClient.callTool({ name: mcpTool.name, arguments: args });
+            }
+
+            if (res.isError) {
+              return `Error from MCP ${serverName}: ${JSON.stringify(res.content)}`;
+            }
+            const contentArray = res.content as any[];
+            return contentArray.map(c => c.type === 'text' ? c.text : JSON.stringify(c)).join("\n");
+          } catch (err) {
+            return `MCP Tool Execution Error (${serverName}.${mcpTool.name}): ${(err as Error).message}`;
+          }
+        }
+      };
+    };
+
+    // If schema is cached, map it instantly to avoid HTTP connections during load
+    if (cachedToolsSchema && Array.isArray(cachedToolsSchema) && cachedToolsSchema.length > 0) {
+      console.log(`[MCP] Using cached tools schema for ${serverName} (${cachedToolsSchema.length} tools)`);
+      return cachedToolsSchema.map(mapMcpTool);
+    }
+
     try {
+      console.log(`[MCP] Connecting to ${serverName} to fetch fresh tool schema...`);
       const client = await this.getOrCreateClient(serverUrl, authConfig);
       const toolsRes = await client.listTools();
 
-      const mappedTools = toolsRes.tools.map(mcpTool => {
-        const params: Record<string, any> = {};
-        const required = (mcpTool.inputSchema as any)?.required || [];
-        const properties = (mcpTool.inputSchema as any)?.properties || {};
+      if (onSchemaFetched && toolsRes.tools) {
+        onSchemaFetched(toolsRes.tools).catch((e) => {
+          console.error(`[MCP] Failed to save tools schema for ${serverName}:`, e);
+        });
+      }
 
-        for (const [key, val] of Object.entries(properties)) {
-          params[key] = {
-            type: (val as any).type === "integer" ? "number" : (val as any).type,
-            description: (val as any).description || "",
-            required: required.includes(key),
-          };
-        }
-
-        return {
-          name: `mcp_${serverName}_${mcpTool.name}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
-          description: `(MCP: ${serverName}) ${mcpTool.description}`,
-          parameters: params,
-          execute: async (args: Record<string, any>, _ctx: any) => {
-            try {
-              // Attempt the tool call — reconnect once on failure
-              let res;
-              try {
-                res = await client.callTool({ name: mcpTool.name, arguments: args });
-              } catch (callErr) {
-                console.warn(`[MCP] Tool call failed on ${serverName}.${mcpTool.name}, attempting reconnect...`);
-                const freshClient = await this.reconnect(serverUrl, serverName, authConfig);
-                res = await freshClient.callTool({ name: mcpTool.name, arguments: args });
-              }
-
-              if (res.isError) {
-                return `Error from MCP ${serverName}: ${JSON.stringify(res.content)}`;
-              }
-              const contentArray = res.content as any[];
-              return contentArray.map(c => c.type === 'text' ? c.text : JSON.stringify(c)).join("\n");
-            } catch (err) {
-              return `MCP Tool Execution Error (${serverName}.${mcpTool.name}): ${(err as Error).message}`;
-            }
-          }
-        };
-      });
-
-      return mappedTools;
-
+      return toolsRes.tools.map(mapMcpTool);
     } catch (error) {
       console.error(`[MCP] Failed to connect to ${serverName} at ${serverUrl}:`, (error as Error).message);
       return [];

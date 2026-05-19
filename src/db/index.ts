@@ -25,7 +25,7 @@ export {
   incrementFailCount,
   deleteSchedule,
 } from "./schedules";
-export { addMcpServer, getMcpServers, deleteMcpServer } from "./mcp";
+export { addMcpServer, getMcpServers, deleteMcpServer, updateMcpServerToolsSchema } from "./mcp";
 export {
   upsertKnowledge,
   searchKnowledge,

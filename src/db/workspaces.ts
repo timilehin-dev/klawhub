@@ -30,7 +30,7 @@ export function updateWorkspace(id: string, updates: Partial<typeof workspaces.$
 }
 
 export function getAllWorkspaces() {
-  return getDb().select().from(workspaces);
+  return getDb().select().from(workspaces).where(eq(workspaces.isActive, true));
 }
 
 // ── Workspace Members ──

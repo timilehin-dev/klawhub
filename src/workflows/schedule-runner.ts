@@ -97,11 +97,13 @@ export const scheduleRunnerWorkflow = inngest.createFunction(
           const requestText = classification.extractedRequest || schedule.action;
           const userId = schedule.slackUserId;
 
-          let workspaceId: string | undefined = undefined;
-          if (targetTeamId) {
+          let workspaceId: string | undefined = (schedule as any).workspaceId || undefined;
+          if (!workspaceId && targetTeamId) {
             const ws = await getWorkspaceByTeamId(targetTeamId);
             if (ws && ws.length > 0) {
               workspaceId = ws[0].id;
+              // Save it to the database for future executions to bypass lookup!
+              await updateSchedule(schedule.id, { workspaceId } as any);
             }
           }
 

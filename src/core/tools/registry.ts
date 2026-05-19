@@ -810,6 +810,7 @@ const scheduleCreateTool: ToolDefinition = {
       }
 
       const [schedule] = await createSchedule({
+        workspaceId: ctx.workspaceId,
         slackUserId: ctx.slackUserId || "system",
         slackTeamId: ctx.slackTeamId,
         name: params.name,

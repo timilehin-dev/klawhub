@@ -42,6 +42,7 @@ export const workspaces = pgTable("workspaces", {
   agentPersonality: text("agent_personality"),
   enabledSkills: jsonb("enabled_skills").$type<string[]>().default(["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator"]).notNull(),
   installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow(),
+  lastHeartbeatBriefingAt: timestamp("last_heartbeat_briefing_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -133,6 +134,7 @@ export const skillUsage = pgTable("skill_usage", {
 
 export const schedules = pgTable("schedules", {
   id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
   slackUserId: text("slack_user_id").notNull(),
   slackTeamId: text("slack_team_id"),
   name: text("name").notNull(),
@@ -302,6 +304,8 @@ export const workflowLearnings = pgTable("workflow_learnings", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
   slackUserId: text("slack_user_id").notNull(),
+  messageTs: text("message_ts"),
+  reaction: text("reaction"),
   category: text("category").default("general").notNull(),
   triggerPrompt: text("trigger_prompt").notNull(),
   feedback: text("feedback").notNull(),
@@ -309,7 +313,9 @@ export const workflowLearnings = pgTable("workflow_learnings", {
   rating: integer("rating").default(1).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  unique("unique_workflow_learning").on(t.workspaceId, t.slackUserId, t.messageTs, t.reaction)
+]);
 
 // ── Pending Actions: stores tool calls that require human approval (HITL) ──
 
@@ -333,6 +339,7 @@ export const mcpServers = pgTable("mcp_servers", {
   url: text("url").notNull(),
   status: text("status").$type<"active" | "error" | "disabled">().default("active").notNull(),
   authConfig: jsonb("auth_config"), // optional API keys or headers for the MCP server
+  toolsSchema: jsonb("tools_schema"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

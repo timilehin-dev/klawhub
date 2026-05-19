@@ -40,3 +40,10 @@ export async function upsertMcpServer(workspaceId: string, name: string, data: P
       .returning();
   }
 }
+
+export async function updateMcpServerToolsSchema(id: string, toolsSchema: any) {
+  return getDb()
+    .update(mcpServers)
+    .set({ toolsSchema, updatedAt: new Date() })
+    .where(eq(mcpServers.id, id));
+}

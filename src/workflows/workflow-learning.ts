@@ -42,6 +42,9 @@ export const workflowLearningWorkflow = inngest.createFunction(
 
     if (!workspace) return;
 
+    // Filter out bot's own reactions
+    if (reactionUser === workspace.slackBotUserId) return;
+
     // 4. Fetch the message context from Slack
     const context = await step.run("get-message-context", async () => {
       const resp = await slack.conversations.replies({
@@ -53,6 +56,10 @@ export const workflowLearningWorkflow = inngest.createFunction(
       const msg = resp.messages?.[0];
       if (!msg) return null;
 
+      // Only save reactions added to bot-generated messages
+      const isBotMessage = msg.bot_id || msg.user === workspace.slackBotUserId;
+      if (!isBotMessage) return null;
+
       return {
         text: msg.text,
         botId: msg.bot_id,
@@ -63,21 +70,46 @@ export const workflowLearningWorkflow = inngest.createFunction(
 
     if (!context) return;
 
+    // Avoid sentiment conflation: skip thumbsdown if text contains error/failure/status keywords
+    if (reaction === "thumbsdown" && context.text) {
+      const lowerText = context.text.toLowerCase();
+      const conflationKeywords = ["error", "failed", "failure", "exception", "stuck", "warning", "stale", "reminder", "limit exceeded"];
+      if (conflationKeywords.some(keyword => lowerText.includes(keyword))) {
+        console.log(`Skipping thumbsdown sentiment capture to avoid conflating error notification feedback. Message: ${context.text}`);
+        return;
+      }
+    }
+
     // 5. Save to workflow_learnings
     await step.run("save-learning", async () => {
       const db = getDb();
       const rating = reaction === "thumbsup" ? 1 : 
                      reaction === "thumbsdown" ? -1 : 0;
       
-      await db.insert(workflowLearnings).values({
-        workspaceId: workspace.id,
-        slackUserId: reactionUser,
-        category: "general",
-        triggerPrompt: context.text || "No message text",
-        feedback: `Reaction :${reaction}: added by user`,
-        correction: `Manual feedback: ${reaction}`,
-        rating: rating,
-      });
+      try {
+        const result = await db.insert(workflowLearnings).values({
+          workspaceId: workspace.id,
+          slackUserId: reactionUser,
+          messageTs: messageTs,
+          reaction: reaction,
+          category: "general",
+          triggerPrompt: context.text || "No message text",
+          feedback: `Reaction :${reaction}: added by user`,
+          correction: `Manual feedback: ${reaction}`,
+          rating: rating,
+        }).returning();
+
+        if (!result || result.length === 0) {
+          throw new Error("Failed to insert workflow learning record - empty result");
+        }
+      } catch (err: any) {
+        // Handle duplicate constraint violations gracefully
+        if (err.code === "23505" || err.message?.includes("unique_workflow_learning")) {
+          console.log(`Workflow learning record already exists for messageTs: ${messageTs}, reaction: ${reaction}`);
+          return;
+        }
+        throw err;
+      }
     });
 
     // 6. Visual feedback (optional)
