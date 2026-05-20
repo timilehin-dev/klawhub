@@ -275,6 +275,7 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
     async def run_agent() -> dict:
         from src.core.agents.graph import coworker_app
         config = {
+            "recursion_limit": 10,
             "configurable": {
                 "workspace_id": str(workspace.id),
                 "thread_id": thread_ts
@@ -286,11 +287,16 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
             "user_query": user_query
         }
         
-        final_state = await coworker_app.ainvoke(state, config)
-        
-        # Extract worker output and check for errors
-        worker_output = final_state.get("worker_output", "")
-        errors = final_state.get("errors", [])
+        try:
+            final_state = await coworker_app.ainvoke(state, config)
+            
+            # Extract worker output and check for errors
+            worker_output = final_state.get("worker_output", "")
+            errors = final_state.get("errors", [])
+        except Exception as e:
+            logger.error(f"Coworker graph execution failed: {e}", exc_info=True)
+            worker_output = ""
+            errors = [f"Coworker execution failed or timed out: {str(e)}"]
         
         return {
             "worker_output": worker_output,
@@ -513,6 +519,7 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
         try:
             # Execute coworker app StateGraph
             config = {
+                "recursion_limit": 10,
                 "configurable": {
                     "workspace_id": str(workspace_id),
                     "thread_id": thread_ts or str(uuid.uuid4())
@@ -525,10 +532,15 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
             }
             
             from src.core.agents.graph import coworker_app
-            final_state = await coworker_app.ainvoke(state, config)
-            
-            worker_output = final_state.get("worker_output", "")
-            errors = final_state.get("errors", [])
+            try:
+                final_state = await coworker_app.ainvoke(state, config)
+                
+                worker_output = final_state.get("worker_output", "")
+                errors = final_state.get("errors", [])
+            except Exception as e:
+                logger.error(f"Coworker cron graph execution failed: {e}", exc_info=True)
+                worker_output = ""
+                errors = [f"Coworker execution failed or timed out: {str(e)}"]
             
             if errors:
                 raise RuntimeError("\n".join(errors))

@@ -91,7 +91,7 @@ class LLMClient:
         user_query: str,
         mode: str = "STANDARD_CHAT",
         temperature: float = 0.2,
-        max_retries: int = 3
+        max_retries: int = 1
     ) -> Dict[str, Any]:
         """Executes a chat completion request with auto-failover, backoff, and rotator tracking."""
         compiled_messages = ContextTokenBudgeter.compile_prompt(system_prompt, history, user_query, mode)
@@ -123,7 +123,7 @@ class LLMClient:
                 # Lazy import inside completion loop to optimize serverless cold starts
                 import httpx
                 
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.post(
                         f"{url.rstrip('/')}/chat/completions",
                         json=payload,
