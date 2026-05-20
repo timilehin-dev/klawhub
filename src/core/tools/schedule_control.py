@@ -48,7 +48,6 @@ class ScheduleControl:
         async with get_db_session() as session:
             session.add(new_schedule)
             await session.commit()
-            await session.refresh(new_schedule)
             
             logger.info(f"Successfully created schedule {new_schedule.id} for workspace {workspace_id}")
             return {
@@ -195,7 +194,6 @@ class ScheduleControl:
                 
             schedule.updated_at = datetime.utcnow()
             await session.commit()
-            await session.refresh(schedule)
             
             logger.info(f"Successfully updated schedule {schedule_id}")
             return {

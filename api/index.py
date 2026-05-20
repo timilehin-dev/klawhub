@@ -229,7 +229,6 @@ async def slack_oauth(code: str, request: Request, response: Response):
             session.add(workspace)
 
         await session.commit()
-        await session.refresh(workspace)
         workspace_id = workspace.id
 
     # Securely encrypt the workspace database UUID to set as session cookie
@@ -364,7 +363,6 @@ async def update_dashboard_settings(data: SettingsUpdateSchema, request: Request
 
         session.add(workspace)
         await session.commit()
-        await session.refresh(workspace)
 
     return {"status": "success", "message": "Settings updated successfully"}
 
@@ -919,7 +917,6 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                 )
                 session.add(new_task)
                 await session.commit()
-                await session.refresh(new_task)
                 
             confirm_text = (
                 f"💾 *Action Item successfully converted to Workspace Task!*\n"
