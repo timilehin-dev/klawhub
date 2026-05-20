@@ -93,9 +93,11 @@ async def _handle_conversational(
 
         logger.info("Worker completed conversational response successfully.")
 
-        # Mark milestone as completed
+        # Mark ALL milestones as completed for conversational queries
+        # so the orchestrator routes directly to END
         updated_milestones = list(milestones)
-        updated_milestones[active_index]["status"] = "completed"
+        for m in updated_milestones:
+            m["status"] = "completed"
 
         return {
             "worker_output": content,
