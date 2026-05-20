@@ -14,6 +14,58 @@ from src.integrations.providers.slack.client import SlackClient
 
 logger = logging.getLogger("klawhub.workflows.message_handler")
 
+async def extract_text_from_slack_file(file_info: dict, slack_token: str) -> str:
+    """Downloads a file from Slack and extracts its text contents, supporting PDFs and plain text."""
+    url = file_info.get("url_private")
+    name = file_info.get("name", "file")
+    mimetype = file_info.get("mimetype", "")
+    
+    if not url:
+        return ""
+        
+    logger.info(f"Extracting text from Slack file '{name}' ({mimetype})")
+    
+    import httpx
+    headers = {"Authorization": f"Bearer {slack_token}"}
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, follow_redirects=True)
+            if response.status_code != 200:
+                logger.error(f"Failed to download Slack file '{name}': HTTP {response.status_code}")
+                return f"[Failed to download file '{name}' from Slack]"
+                
+            file_bytes = response.content
+    except Exception as e:
+        logger.error(f"HTTP error downloading Slack file '{name}': {e}")
+        return f"[Error downloading file '{name}': {str(e)}]"
+
+    # If it is a PDF, parse pages
+    if mimetype == "application/pdf" or name.lower().endswith(".pdf"):
+        try:
+            import io
+            from pypdf import PdfReader
+            pdf_file = io.BytesIO(file_bytes)
+            reader = PdfReader(pdf_file)
+            pages_text = []
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text:
+                    pages_text.append(text)
+            logger.info(f"Successfully extracted {len(pages_text)} pages from PDF '{name}'")
+            return "\n".join(pages_text)
+        except Exception as e:
+            logger.error(f"Failed to parse PDF file '{name}': {e}", exc_info=True)
+            return f"[Error parsing PDF file '{name}': {str(e)}]"
+            
+    # Standard text/JSON/CSV decoding
+    try:
+        return file_bytes.decode("utf-8", errors="ignore")
+    except Exception as e:
+        logger.error(f"Failed to decode text file '{name}': {e}")
+        return f"[Error decoding text file '{name}': {str(e)}]"
+
+
 @inngest_client.create_function(
     fn_id="slack-message-handler",
     trigger=inngest.TriggerEvent(event="slack/event.received"),
@@ -223,17 +275,19 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
         await ctx.step.run("post-proactive-suggestion", post_proactive_suggestion)
         return
 
-    # Detect if user asks to summarize a thread
-    is_summary_request = any(kw in user_query.lower() for kw in ["summarize", "action items", "transcript", "summary"])
+    # Fetch thread transcript and files if this message is in a thread
     has_thread = slack_event.get("thread_ts") is not None
     compiled_transcript = ""
+    thread_files = []
 
     if has_thread:
-        async def fetch_thread() -> str:
+        async def fetch_thread_data() -> dict:
             try:
                 replies = await slack_client.get_thread_replies(channel_id, slack_event.get("thread_ts"))
                 transcript_lines = []
+                files = []
                 for msg in replies:
+                    # Form transcript entry
                     if msg.get("bot_id") or msg.get("user") == workspace.slack_bot_user_id:
                         user_label = workspace.agent_name or "Klawhub"
                     else:
@@ -241,26 +295,72 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
                         user_label = f"<@{user}>"
                     text = msg.get("text", "")
                     transcript_lines.append(f"{user_label}: {text}")
-                return "\n".join(transcript_lines)
+                    
+                    # Accumulate any files uploaded inside the thread replies
+                    msg_files = msg.get("files", [])
+                    if msg_files:
+                        files.extend(msg_files)
+                return {
+                    "transcript": "\n".join(transcript_lines),
+                    "files": files
+                }
             except Exception as e:
                 logger.error(f"Failed to fetch thread replies: {e}")
-                return ""
+                return {"transcript": "", "files": []}
                 
-        compiled_transcript = await ctx.step.run("fetch-thread-replies", fetch_thread)
-        
-        if compiled_transcript:
-            if is_summary_request:
-                user_query = (
-                    f"Here is the conversational thread transcript from Slack:\n"
-                    f"```\n{compiled_transcript}\n```\n"
-                    f"Please summarize this thread, extract the key decisions, and list the concrete action items."
-                )
-            else:
-                user_query = (
-                    f"Here is the conversational thread transcript from Slack for context:\n"
-                    f"```\n{compiled_transcript}\n```\n"
-                    f"User's latest message: {user_query}"
-                )
+        thread_data = await ctx.step.run("fetch-thread-data", fetch_thread_data)
+        compiled_transcript = thread_data.get("transcript", "")
+        thread_files = thread_data.get("files", [])
+
+    # Process any attached files (PDF, CSV, TXT, etc.)
+    attached_files_content = []
+    slack_files = list(slack_event.get("files", []))
+    
+    # Merge thread files to avoid missing files uploaded earlier in the thread context
+    for f in thread_files:
+        if f.get("id") not in [sf.get("id") for sf in slack_files]:
+            slack_files.append(f)
+
+    if slack_files:
+        async def process_slack_files() -> list:
+            # Force load credentials first to populate slack_client.access_token
+            await slack_client.get_sdk_client()
+            token = slack_client.access_token
+            
+            results = []
+            for file_info in slack_files:
+                name = file_info.get("name", "file")
+                content = await extract_text_from_slack_file(file_info, token)
+                if content:
+                    results.append(f"Content of attached file '{name}':\n\n{content}")
+            return results
+
+        attached_files_content = await ctx.step.run("process-attached-files", process_slack_files)
+
+    # Detect if user asks to summarize the conversation thread itself
+    # If they are mentioning a "file", "document", "pdf", etc., or have uploaded files,
+    # it is a file-summary/analysis request, NOT a Slack thread transcript summary request!
+    has_attached_files = len(slack_files) > 0 or len(attached_files_content) > 0
+    mentions_file = any(kw in user_query.lower() for kw in ["file", "document", "pdf", "attachment", "doc", "script", "pitch", "slide"])
+    
+    is_summary_request = (
+        any(kw in user_query.lower() for kw in ["summarize", "action items", "transcript", "summary"]) 
+        and not (has_attached_files or mentions_file)
+    )
+
+    if compiled_transcript:
+        if is_summary_request:
+            user_query = (
+                f"Here is the conversational thread transcript from Slack:\n"
+                f"```\n{compiled_transcript}\n```\n"
+                f"Please summarize this thread, extract the key decisions, and list the concrete action items."
+            )
+        else:
+            user_query = (
+                f"Here is the conversational thread transcript from Slack for context:\n"
+                f"```\n{compiled_transcript}\n```\n"
+                f"User's latest message: {user_query}"
+            )
 
     # Step 1: Add "eyes" reaction for instant visual acknowledgement
     async def add_eyes() -> None:
@@ -284,7 +384,8 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
         state = {
             "workspace_id": str(workspace.id),
             "thread_id": thread_ts,
-            "user_query": user_query
+            "user_query": user_query,
+            "context_data": attached_files_content
         }
         
         try:

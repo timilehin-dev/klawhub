@@ -160,6 +160,9 @@ async def test_slash_command_configure(workspace: Workspace):
             resp = await client.post("/api/slack/commands", content=body, headers=headers)
             assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
             
+            # Yield to event loop to allow background modal opening task to run
+            await asyncio.sleep(0.1)
+            
             # Assert open_view was called
             open_view_mock.assert_called_once()
             called_trig_id, called_view = open_view_mock.call_args[0]

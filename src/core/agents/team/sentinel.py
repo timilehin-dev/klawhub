@@ -71,6 +71,6 @@ async def sentinel_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "is_high_value_trigger": is_high_value,
         "milestones": milestones,
         "active_milestone_index": 0,
-        "context_data": [],
+        "context_data": state.get("context_data", []),
         "errors": []
     }

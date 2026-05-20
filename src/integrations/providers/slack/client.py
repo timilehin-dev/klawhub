@@ -17,10 +17,13 @@ def convert_markdown_to_slack(text: str) -> str:
     if not text:
         return text
 
-    # 1. Convert headers (# Header) to bold (*Header*)
+    # 1. Convert standard markdown bullets (* or -) to unicode bullets (•)
+    text = re.sub(r'^\s*[-*]\s+', r'• ', text, flags=re.MULTILINE)
+
+    # 2. Convert headers (# Header) to bold (*Header*)
     text = re.sub(r'^(?:#{1,6})\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
 
-    # 2. Hide code blocks & inline codes to protect standard markdown within them
+    # 3. Hide code blocks & inline codes to protect standard markdown within them
     code_blocks = []
     def hide_code_block(match):
         code_blocks.append(match.group(0))
@@ -34,10 +37,10 @@ def convert_markdown_to_slack(text: str) -> str:
     text = re.sub(r'```.*?```', hide_code_block, text, flags=re.DOTALL)
     text = re.sub(r'`[^`\n]+`', hide_inline_code, text)
 
-    # 3. Convert standard markdown bold (**text**) to Slack bold (*text*)
+    # 4. Convert standard markdown bold (**text**) to Slack bold (*text*)
     text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
 
-    # 4. Convert standard markdown italic (*text*) to Slack italic (_text_)
+    # 5. Convert standard markdown italic (*text*) to Slack italic (_text_)
     text = re.sub(r'\*(?!\s)(.*?)(?<!\s)\*', r'_\1_', text)
 
     # Restore placeholders in reverse order
