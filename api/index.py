@@ -133,6 +133,18 @@ async def serve_dashboard(request: Request):
 # Slack Installation & OAuth Flow
 # ─────────────────────────────────────────────
 
+def get_redirect_uri(request: Request) -> str:
+    """Constructs the absolute Slack OAuth redirect URI with proper HTTPS scheme in production."""
+    proto = request.headers.get("x-forwarded-proto", "http")
+    host = request.headers.get("x-forwarded-host") or request.url.netloc
+    
+    # Force https for any production deployment to avoid HTTP vs HTTPS mismatch in Slack
+    if "localhost" not in host and "127.0.0.1" not in host:
+        proto = "https"
+        
+    return f"{proto}://{host}/api/slack/oauth"
+
+
 @app.get("/api/slack/install")
 async def slack_install(request: Request):
     """Generates the Slack OAuth V2 installation link with clean scopes."""
@@ -140,7 +152,7 @@ async def slack_install(request: Request):
     if not client_id:
         raise HTTPException(status_code=500, detail="Slack Client ID is not configured in env.")
         
-    redirect_uri = f"{request.base_url}api/slack/oauth"
+    redirect_uri = get_redirect_uri(request)
     
     scopes = [
         "app_mentions:read",
@@ -174,6 +186,7 @@ async def slack_oauth(code: str, request: Request, response: Response):
         raise HTTPException(status_code=500, detail="Slack Client configuration missing.")
 
     logger.info("Exchanging Slack authorization code for access token...")
+    redirect_uri = get_redirect_uri(request)
     async with httpx.AsyncClient() as client:
         res = await client.post(
             "https://slack.com/api/oauth.v2.access",
@@ -181,7 +194,7 @@ async def slack_oauth(code: str, request: Request, response: Response):
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "code": code,
-                "redirect_uri": f"{request.base_url}api/slack/oauth"
+                "redirect_uri": redirect_uri
             }
         )
         payload = res.json()

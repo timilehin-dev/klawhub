@@ -8,8 +8,23 @@ from src.config import settings
 
 logger = logging.getLogger("klawhub.db")
 
+import urllib.parse
+
 # Automatically translate postgres:// to postgresql+asyncpg:// for asyncpg driver support
 db_url = settings.database_url
+
+# Parse and remove 'pgbouncer' parameter from query string if present (causes asyncpg connection crash)
+if "sqlite" not in db_url:
+    try:
+        parsed_url = urllib.parse.urlparse(db_url)
+        query_params = urllib.parse.parse_qsl(parsed_url.query)
+        filtered_params = [p for p in query_params if p[0] != "pgbouncer"]
+        new_query = urllib.parse.urlencode(filtered_params)
+        parsed_url = parsed_url._replace(query=new_query)
+        db_url = urllib.parse.urlunparse(parsed_url)
+    except Exception as e:
+        logger.warning(f"Failed to filter pgbouncer parameter from DATABASE_URL: {e}")
+
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
 elif db_url.startswith("postgresql://"):
