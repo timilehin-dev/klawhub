@@ -67,11 +67,11 @@ class BaseAPIClient(ABC):
             
             # Update expiry timestamp using timedelta
             if expires_in_seconds is not None:
-                integration.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds)
+                integration.expires_at = datetime.utcnow() + timedelta(seconds=expires_in_seconds)
             else:
                 integration.expires_at = None
                 
-            integration.updated_at = datetime.now(timezone.utc)
+            integration.updated_at = datetime.utcnow()
             
             session.add(integration)
             await session.commit()

@@ -363,16 +363,16 @@ class HMACCheckpointSaver(BaseCheckpointSaver):
                     workspace_id=workspace_id,
                     agent_name=agent_name,
                     state=secure_state,
-                    last_active_at=datetime.now(timezone.utc),
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc)
+                    last_active_at=datetime.utcnow(),
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
                 )
                 session.add(record)
             else:
                 # Update existing checkpoint
                 record.state = secure_state
-                record.last_active_at = datetime.now(timezone.utc)
-                record.updated_at = datetime.now(timezone.utc)
+                record.last_active_at = datetime.utcnow()
+                record.updated_at = datetime.utcnow()
                 session.add(record)
 
             # Commit is handled by get_db_session context manager
