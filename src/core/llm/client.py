@@ -1,4 +1,5 @@
 import logging
+import os
 import httpx
 from typing import List, Dict, Any, Optional, Tuple
 from src.core.llm.rotators import ResilientOllamaRotator
@@ -76,9 +77,10 @@ class ContextTokenBudgeter:
 
 
 class LLMClient:
-    """Resilient, multi-tenant conscious client that executes LLM requests via rotating endpoints.
+    """Resilient, multi-tenant conscious client that executes LLM requests via the Ollama native API.
     
     Includes automatic failover retries and captures usage statistics.
+    Uses the native Ollama /api/chat endpoint format.
     """
 
     def __init__(self):
@@ -110,37 +112,43 @@ class LLMClient:
             if key:
                 headers["Authorization"] = f"Bearer {key}"
 
+            # Native Ollama /api/chat request format
             payload = {
                 "model": model,
                 "messages": compiled_messages,
-                "temperature": temperature,
-                "stream": False
+                "stream": False,
+                "options": {
+                    "temperature": temperature
+                }
             }
 
-            logger.info(f"Issuing chat completion to host: {url} (Attempt {attempt + 1}/{max_retries})")
+            api_url = f"{url.rstrip('/')}/api/chat"
+            logger.info(f"Issuing chat completion to: {api_url} (Attempt {attempt + 1}/{max_retries})")
             
             try:
-                # Lazy import inside completion loop to optimize serverless cold starts
-                import httpx
-                
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.post(
-                        f"{url.rstrip('/')}/chat/completions",
+                        api_url,
                         json=payload,
                         headers=headers
                     )
                     
                     if response.status_code == 200:
                         data = response.json()
-                        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                        usage = data.get("usage", {})
+                        
+                        # Native Ollama response format: data["message"]["content"]
+                        content = data.get("message", {}).get("content", "")
+                        
+                        # Extract usage stats from Ollama native response
+                        prompt_eval_count = data.get("prompt_eval_count", 0)
+                        eval_count = data.get("eval_count", 0)
                         
                         return {
                             "content": content,
                             "usage": {
-                                "prompt_tokens": usage.get("prompt_tokens", 0),
-                                "completion_tokens": usage.get("completion_tokens", 0),
-                                "total_tokens": usage.get("total_tokens", 0)
+                                "prompt_tokens": prompt_eval_count,
+                                "completion_tokens": eval_count,
+                                "total_tokens": prompt_eval_count + eval_count
                             },
                             "host": url
                         }
@@ -152,6 +160,3 @@ class LLMClient:
                 self.rotator.mark_failed(url)
 
         raise RuntimeError("All configured Ollama endpoints failed to respond to the request.")
-
-# Quick access global import helper to keep imports clean
-import os

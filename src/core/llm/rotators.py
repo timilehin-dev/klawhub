@@ -19,7 +19,7 @@ class ResilientOllamaRotator:
 
     def __init__(self):
         # Allow multi-host clustering by parsing comma-separated URLs
-        raw_urls = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
+        raw_urls = os.getenv("OLLAMA_BASE_URL", "https://ollama.com")
         self.hosts = [url.strip().rstrip("/") for url in raw_urls.split(",") if url.strip()]
         
         # Load keys from settings (loaded from environment vars)
