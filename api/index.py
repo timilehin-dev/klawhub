@@ -1,4 +1,9 @@
 import os
+import sys
+
+# Dynamic root path inject for Vercel Serverless environment
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import uuid
 import logging
 import httpx
