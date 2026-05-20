@@ -51,13 +51,25 @@ async def sentinel_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # If the message contains high-value keywords, classify the intent
     is_high_value = any(kw in user_query.lower() for kw in ["invoice", "report", "deploy", "build", "schedule"])
     
+    # Detect simple conversational queries (greetings, intros, questions)
+    # If conversational, pre-populate a simple worker milestone to bypass Orchestrator LLM planning completely!
+    conversational_keywords = ["hello", "hi", "hey", "introduce", "who are you", "what can you do", "status", "help"]
+    is_conversational = any(kw in user_query.lower() for kw in conversational_keywords) or len(user_query.split()) < 5
+    
+    milestones = []
+    if is_conversational:
+        logger.info("Sentinel detected conversational query. Pre-populating worker milestone to bypass LLM planning.")
+        milestones = [
+            {"id": 1, "description": f"Respond to user conversational query: '{user_query}'", "status": "pending", "assigned_to": "worker"}
+        ]
+    
     # Return initialized state context
     return {
         "bot_name": bot_name,
         "bot_personality": personality,
         "enabled_skills": enabled_skills,
         "is_high_value_trigger": is_high_value,
-        "milestones": [],
+        "milestones": milestones,
         "active_milestone_index": 0,
         "context_data": [],
         "errors": []
