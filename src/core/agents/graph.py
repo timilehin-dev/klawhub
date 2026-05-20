@@ -12,9 +12,12 @@ from src.core.agents.team.critic import critic_node
 from src.core.agents.team.auditor import auditor_node
 
 # Import multi-tenant secure checkpointer
-from src.core.agents.state import HMACCheckpointSaver
+# Using MemorySaver as each serverless invocation is isolated;
+# the custom HMACCheckpointSaver lacks the aput_writes method required by newer LangGraph
+from langgraph.checkpoint.memory import MemorySaver
 
 logger = logging.getLogger("klawhub.core.agents.graph")
+
 
 class AgentState(TypedDict):
     """The unified cognitive state schema for Klawhub's multi-agent system."""
@@ -166,6 +169,6 @@ def create_coworker_graph() -> StateGraph:
     return workflow
 
 
-# Compile the production-ready runnable graph backed by the cryptographic HMAC checkpointer
-checkpointer = HMACCheckpointSaver()
+# Compile the production-ready runnable graph backed by in-memory checkpointer
+checkpointer = MemorySaver()
 coworker_app = create_coworker_graph().compile(checkpointer=checkpointer)
