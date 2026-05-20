@@ -92,8 +92,157 @@ class SandboxClient:
                         async with get_db_session() as session:
                             stmt = select(Skill).where(Skill.workspace_id == normalized_workspace_id, Skill.is_active == True)
                             db_skills = (await session.execute(stmt)).scalars().all()
-                            
                             skills_map = {s.name.lower().strip(): s for s in db_skills}
+                            
+                            # --- Dynamic First-Time Skill Installation Blocker ---
+                            imported_lowered = [mod.lower().strip() for mod in imported]
+                            if "document_generator" in imported_lowered and "document_generator" not in skills_map:
+                                logger.info("document_generator skill requested for the first time in this workspace. Installing from GitHub...")
+                                from src.core.evolution.acquisition import SkillAcquisitionEngine
+                                
+                                repo_url = "https://github.com/timilehin-dev/klawhub-standard-skills"
+                                success = await SkillAcquisitionEngine.clone_and_register_github_skill(
+                                    workspace_id=normalized_workspace_id,
+                                    repo_url=repo_url,
+                                    file_path="document_generator.py",
+                                    skill_name="document_generator",
+                                    description="Industry standard professional document generator (PDF, DOCX, XLSX, PPTX)"
+                                )
+                                
+                                # Highly resilient fallback: if GitHub fetch fails, register the standard implementation directly
+                                if not success:
+                                    logger.warning("GitHub fetch failed or repository not found. Activating failsafe high-fidelity local cache...")
+                                    
+                                    fallback_code = """# Dynamic Document Generator Skill for Klawhub
+# Provides high-fidelity generation of PDF, DOCX, XLSX, and PPTX documents inside the isolated sandbox.
+import os
+import sys
+
+def generate_pdf(html_content: str, filename: str) -> str:
+    \"\"\"Generates a professional PDF from HTML using WeasyPrint.\"\"\"
+    import weasyprint
+    weasyprint.HTML(string=html_content).write_pdf(filename)
+    return os.path.abspath(filename)
+
+def generate_docx(markdown_content: str, filename: str) -> str:
+    \"\"\"Generates a professional DOCX from Markdown using pypandoc/python-docx.\"\"\"
+    import pypandoc
+    try:
+        pypandoc.convert_text(markdown_content, 'docx', format='md', outputfile=filename)
+    except Exception as e:
+        import docx
+        doc = docx.Document()
+        for line in markdown_content.splitlines():
+            if line.startswith("# "):
+                doc.add_heading(line[2:], level=1)
+            elif line.startswith("## "):
+                doc.add_heading(line[3:], level=2)
+            elif line.startswith("* ") or line.startswith("- "):
+                doc.add_paragraph(line[2:], style='List Bullet')
+            else:
+                doc.add_paragraph(line)
+        doc.save(filename)
+    return os.path.abspath(filename)
+
+def generate_xlsx(data_matrix: list, filename: str, headers: list = None) -> str:
+    \"\"\"Generates a professional Excel spreadsheet with styled tables using openpyxl.\"\"\"
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Exported Data"
+    
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    center_align = Alignment(horizontal="center", vertical="center")
+    border_side = Side(border_style="thin", color="D9D9D9")
+    thin_border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
+    
+    current_row = 1
+    if headers:
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=current_row, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = thin_border
+        ws.row_dimensions[current_row].height = 25
+        current_row += 1
+        
+    for row_data in data_matrix:
+        for col_idx, val in enumerate(row_data, 1):
+            cell = ws.cell(row=current_row, column=col_idx, value=val)
+            cell.border = thin_border
+            if isinstance(val, (int, float)):
+                cell.number_format = '#,##0.00' if isinstance(val, float) else '#,##0'
+        ws.row_dimensions[current_row].height = 18
+        current_row += 1
+        
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+        
+    wb.save(filename)
+    return os.path.abspath(filename)
+
+def generate_pptx(slides_data: list, filename: str) -> str:
+    \"\"\"Generates a PowerPoint presentation using python-pptx.\"\"\"
+    import pptx
+    prs = pptx.Presentation()
+    title_layout = prs.slide_layouts[0]
+    content_layout = prs.slide_layouts[1]
+    
+    for slide_info in slides_data:
+        title = slide_info.get("title", "")
+        content = slide_info.get("content", [])
+        is_title_slide = slide_info.get("is_title", False)
+        
+        if is_title_slide:
+            slide = prs.slides.add_slide(title_layout)
+            slide.shapes.title.text = title
+            if content:
+                slide.placeholders[1].text = "\\n".join(content) if isinstance(content, list) else content
+        else:
+            slide = prs.slides.add_slide(content_layout)
+            slide.shapes.title.text = title
+            tf = slide.placeholders[1].text_frame
+            tf.clear()
+            if isinstance(content, list):
+                for idx, bullet in enumerate(content):
+                    if idx == 0:
+                        tf.paragraphs[0].text = bullet
+                    else:
+                        p = tf.add_paragraph()
+                        p.text = bullet
+                        p.level = 0
+            else:
+                tf.paragraphs[0].text = content
+                
+    prs.save(filename)
+    return os.path.abspath(filename)
+"""
+                                    new_skill = Skill(
+                                        workspace_id=normalized_workspace_id,
+                                        name="document_generator",
+                                        description="Industry standard professional document generator (PDF, DOCX, XLSX, PPTX)",
+                                        category="custom",
+                                        repo_url=repo_url,
+                                        file_path="document_generator.py",
+                                        entrypoint="generate_pdf",
+                                        source_code=fallback_code,
+                                        dependencies="weasyprint,pypandoc,openpyxl,python-docx,python-pptx",
+                                        is_active=True
+                                    )
+                                    session.add(new_skill)
+                                    await session.commit()
+                                    logger.info("Successfully registered failsafe document_generator skill inside database.")
+                                    
+                                # Reload database skills map
+                                stmt = select(Skill).where(Skill.workspace_id == normalized_workspace_id, Skill.is_active == True)
+                                db_skills = (await session.execute(stmt)).scalars().all()
+                                skills_map = {s.name.lower().strip(): s for s in db_skills}
                             
                             for mod in list(imported):
                                 normalized_mod = mod.lower().strip()
