@@ -37,6 +37,8 @@ os.environ["MODAL_FUNCTION_URL"] = "https://mock-modal.run"
 os.environ["MODAL_WEBHOOK_SECRET"] = "mock_modal_secret"
 os.environ["INTEGRATION_ENCRYPTION_KEY"] = "mock_integration_encryption_key_32_bytes!!"
 os.environ["STATE_SIGNING_KEY"] = "test_state_signing_key_secure_12345"
+os.environ["INNGEST_SIGNING_KEY"] = "mock_inngest_signing_key"
+os.environ["INNGEST_DEV_MODE"] = "true"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("verify_settings_sync")

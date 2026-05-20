@@ -38,6 +38,15 @@ os.makedirs("api/templates", exist_ok=True)
 
 app = FastAPI(title="Klawhub API", description="Serverless Python Gateway for Klawhub AI Coworkers")
 
+@app.on_event("startup")
+async def startup_event():
+    from src.db.pool import init_db_models
+    try:
+        logger.info("Running database schema evolution on FastAPI startup...")
+        await init_db_models()
+    except Exception as e:
+        logger.error(f"Startup database migration failed: {e}", exc_info=True)
+
 # Mount Static Files
 app.mount("/static", StaticFiles(directory="api/static"), name="static")
 
