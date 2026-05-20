@@ -45,6 +45,9 @@ class AgentState(TypedDict):
     
     # Self-healing and error routing
     errors: List[str]
+    
+    # Sandbox generated files
+    generated_files: Optional[List[Dict[str, Any]]]
 
 
 # --- Transition Routers ---

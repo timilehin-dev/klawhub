@@ -25,6 +25,7 @@ class SandboxClient:
         return {
             "X-Webhook-Timestamp": timestamp,
             "X-Webhook-Signature": signature,
+            "X-Webhook-Secret": self.webhook_secret.decode('utf-8'),
             "Content-Type": "application/json"
         }
 
@@ -175,14 +176,16 @@ class SandboxClient:
                     }
                 
                 result = response.json()
-                logger.info(f"Sandbox run completed successfully with exit code: {result.get('exit_code', 0)}")
+                success = result.get("success") if "success" in result else (result.get("exit_code", -1) == 0)
+                logger.info(f"Sandbox run completed successfully: {success}")
                 return {
-                    "success": result.get("exit_code", -1) == 0,
-                    "exit_code": result.get("exit_code", -1),
+                    "success": success,
+                    "exit_code": result.get("exit_code", 0 if success else -1),
                     "stdout": result.get("stdout", ""),
                     "stderr": result.get("stderr", ""),
                     "duration_ms": result.get("duration_ms", 0),
-                    "error": result.get("error", None)
+                    "error": result.get("error", None),
+                    "generated_files": result.get("generated_files", [])
                 }
                 
             except httpx.RequestError as e:

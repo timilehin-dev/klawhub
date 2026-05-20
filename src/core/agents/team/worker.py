@@ -176,7 +176,8 @@ async def _handle_code_execution(
             return {
                 "worker_output": stdout,
                 "milestones": updated_milestones,
-                "errors": []
+                "errors": [],
+                "generated_files": result.get("generated_files", [])
             }
         else:
             stderr = result.get("stderr", "").strip()

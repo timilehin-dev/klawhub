@@ -188,21 +188,28 @@ class SlackClient(BaseAPIClient):
     async def upload_file(
         self, 
         channel_id: str, 
-        content: str, 
+        content: Any, 
         filename: str, 
         title: Optional[str] = None,
         thread_ts: Optional[str] = None
     ) -> Dict[str, Any]:
         """Uploads dynamic content or reports as a file to a channel/thread."""
         client = await self.get_sdk_client()
+        
         # Using newer files_upload_v2 Slack method for resilience
-        response = await client.files_upload_v2(
-            channel=channel_id,
-            content=content,
-            filename=filename,
-            title=title or filename,
-            thread_ts=thread_ts
-        )
+        kwargs = {
+            "channel": channel_id,
+            "filename": filename,
+            "title": title or filename,
+            "thread_ts": thread_ts
+        }
+        
+        if isinstance(content, bytes):
+            kwargs["file"] = content
+        else:
+            kwargs["content"] = content
+            
+        response = await client.files_upload_v2(**kwargs)
         return response.data
 
     async def open_view(self, trigger_id: str, view: Dict[str, Any]) -> Dict[str, Any]:

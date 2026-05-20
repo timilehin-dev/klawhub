@@ -15,7 +15,7 @@ from src.integrations.providers.slack.client import SlackClient
 logger = logging.getLogger("klawhub.workflows.message_handler")
 
 async def extract_text_from_slack_file(file_info: dict, slack_token: str) -> str:
-    """Downloads a file from Slack and extracts its text contents, supporting PDFs and plain text."""
+    """Downloads a file from Slack and extracts its text contents, delegating PDFs/Docs to Modal Sandbox."""
     url = file_info.get("url_private")
     name = file_info.get("name", "file")
     mimetype = file_info.get("mimetype", "")
@@ -40,23 +40,51 @@ async def extract_text_from_slack_file(file_info: dict, slack_token: str) -> str
         logger.error(f"HTTP error downloading Slack file '{name}': {e}")
         return f"[Error downloading file '{name}': {str(e)}]"
 
-    # If it is a PDF, parse pages
-    if mimetype == "application/pdf" or name.lower().endswith(".pdf"):
+    # Delegate heavy PDF, DOCX, XLSX document parsing to the Modal Sandbox's high-fidelity parse_document endpoint
+    import os
+    ext = os.path.splitext(name)[1].lower()
+    if mimetype == "application/pdf" or ext in [".pdf", ".docx", ".xlsx", ".xls"]:
         try:
-            import io
-            from pypdf import PdfReader
-            pdf_file = io.BytesIO(file_bytes)
-            reader = PdfReader(pdf_file)
-            pages_text = []
-            for i, page in enumerate(reader.pages):
-                text = page.extract_text()
-                if text:
-                    pages_text.append(text)
-            logger.info(f"Successfully extracted {len(pages_text)} pages from PDF '{name}'")
-            return "\n".join(pages_text)
+            import base64
+            from src.config import settings
+            
+            file_b64 = base64.b64encode(file_bytes).decode('utf-8')
+            
+            payload = {
+                "type": "parse_document",
+                "file": file_b64,
+                "filename": name
+            }
+            
+            # Authenticate with Modal using expected webhook secret header
+            sandbox_headers = {
+                "X-Webhook-Secret": settings.modal_webhook_secret,
+                "Content-Type": "application/json"
+            }
+            
+            logger.info(f"Delegating high-fidelity parsing of '{name}' to Modal sandbox...")
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                resp = await client.post(
+                    settings.modal_function_url,
+                    json=payload,
+                    headers=sandbox_headers
+                )
+                
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if res_json.get("success"):
+                    logger.info(f"Successfully parsed document '{name}' remotely via sandbox.")
+                    return res_json.get("text", "")
+                else:
+                    err_msg = res_json.get("error", "Unknown sandbox error")
+                    logger.error(f"Sandbox failed to parse document '{name}': {err_msg}")
+                    return f"[Error parsing document '{name}' inside sandbox: {err_msg}]"
+            else:
+                logger.error(f"Sandbox HTTP error {resp.status_code} parsing document '{name}': {resp.text}")
+                return f"[Error parsing document '{name}': Sandbox returned HTTP {resp.status_code}]"
         except Exception as e:
-            logger.error(f"Failed to parse PDF file '{name}': {e}", exc_info=True)
-            return f"[Error parsing PDF file '{name}': {str(e)}]"
+            logger.error(f"Exception delegating document parsing for '{name}': {e}", exc_info=True)
+            return f"[Error delegating document parsing for '{name}': {str(e)}]"
             
     # Standard text/JSON/CSV decoding
     try:
@@ -394,19 +422,23 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
             # Extract worker output and check for errors
             worker_output = final_state.get("worker_output", "")
             errors = final_state.get("errors", [])
+            generated_files = final_state.get("generated_files", [])
         except Exception as e:
             logger.error(f"Coworker graph execution failed: {e}", exc_info=True)
             worker_output = ""
             errors = [f"Coworker execution failed or timed out: {str(e)}"]
+            generated_files = []
         
         return {
             "worker_output": worker_output,
-            "errors": errors
+            "errors": errors,
+            "generated_files": generated_files
         }
 
     agent_result = await ctx.step.run("process-message", run_agent)
     worker_output = agent_result.get("worker_output", "")
     errors = agent_result.get("errors", [])
+    generated_files = agent_result.get("generated_files", [])
 
     # Step 3: Format and publish the audited/scrubbed result back to Slack, and remove the eyes reaction
     async def post_and_cleanup() -> None:
@@ -469,8 +501,29 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
                     text=output_text,
                     thread_ts=thread_ts
                 )
+                
+            # Automatically upload any generated document/data assets returned by the sandbox
+            if generated_files and not errors:
+                import base64
+                for file_info in generated_files:
+                    name = file_info.get("name", "document")
+                    data_b64 = file_info.get("data_b64", "")
+                    if data_b64:
+                        try:
+                            logger.info(f"Decoding and uploading generated file '{name}' to Slack channel/thread...")
+                            file_bytes = base64.b64decode(data_b64)
+                            await slack_client.upload_file(
+                                channel_id=channel_id,
+                                content=file_bytes,
+                                filename=name,
+                                title=name,
+                                thread_ts=thread_ts
+                            )
+                        except Exception as upload_err:
+                            logger.error(f"Failed to upload generated file '{name}' to Slack: {upload_err}")
+
         except Exception as e:
-            logger.error(f"Failed to post message to Slack channel {channel_id}: {e}")
+            logger.error(f"Failed to post message or upload generated files to Slack channel {channel_id}: {e}")
             
         try:
             await slack_client.remove_reaction(channel_id, message_ts, "eyes")
@@ -638,10 +691,12 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                 
                 worker_output = final_state.get("worker_output", "")
                 errors = final_state.get("errors", [])
+                generated_files = final_state.get("generated_files", [])
             except Exception as e:
                 logger.error(f"Coworker cron graph execution failed: {e}", exc_info=True)
                 worker_output = ""
                 errors = [f"Coworker execution failed or timed out: {str(e)}"]
+                generated_files = []
             
             if errors:
                 raise RuntimeError("\n".join(errors))
@@ -656,6 +711,26 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                     text=worker_output,
                     thread_ts=thread_ts
                 )
+                
+                # Automatically upload any generated document/data assets returned by the sandbox
+                if generated_files and not errors:
+                    import base64
+                    for file_info in generated_files:
+                        name = file_info.get("name", "document")
+                        data_b64 = file_info.get("data_b64", "")
+                        if data_b64:
+                            try:
+                                logger.info(f"Decoding and uploading generated file '{name}' to Slack channel/thread...")
+                                file_bytes = base64.b64decode(data_b64)
+                                await slack_client.upload_file(
+                                    channel_id=channel_id,
+                                    content=file_bytes,
+                                    filename=name,
+                                    title=name,
+                                    thread_ts=thread_ts
+                                )
+                            except Exception as upload_err:
+                                logger.error(f"Failed to upload generated file '{name}' to Slack: {upload_err}")
                 
             # Update database status to success
             async with get_db_session() as session:

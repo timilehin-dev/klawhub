@@ -208,12 +208,46 @@ def _execute_code_impl(code: str, language: str = "python", dependencies: list[s
                 env=env,
                 preexec_fn=set_resource_limits
             )
+            # Crawl for newly generated files inside the isolated execution directory
+            generated_files = []
+            excluded_names = {"script.py", "script.js"}
+            if mounted_skills:
+                for skill_name in mounted_skills.keys():
+                    excluded_names.add(f"{skill_name}.py")
             
+            for root, dirs, files in os.walk(env_dir):
+                # Safely ignore dependencies and package manager directories to avoid heavy/invalid file captures
+                if any(pkg_dir in root for pkg_dir in ["user_packages", "node_modules", ".git"]):
+                    continue
+                for file in files:
+                    if file in excluded_names:
+                        continue
+                    file_path = os.path.join(root, file)
+                    if not os.path.isfile(file_path):
+                        continue
+                    try:
+                        file_size = os.path.getsize(file_path)
+                        # Set a safe limit of 20MB per file to avoid webhook payloads bloating
+                        if file_size > 20 * 1024 * 1024:
+                            continue
+                        with open(file_path, "rb") as f:
+                            file_data = f.read()
+                        
+                        rel_path = os.path.relpath(file_path, env_dir)
+                        generated_files.append({
+                            "name": rel_path,
+                            "data_b64": base64.b64encode(file_data).decode('utf-8'),
+                            "size": file_size
+                        })
+                    except Exception as e:
+                        print(f"Error reading generated file {file_path} inside sandbox: {e}")
+
             return {
                 "success": result.returncode == 0,
                 "stdout": result.stdout.decode('utf-8', errors='replace')[:10000],
                 "stderr": result.stderr.decode('utf-8', errors='replace')[:5000],
                 "error": None if result.returncode == 0 else f"Exit code {result.returncode}",
+                "generated_files": generated_files
             }
 
         except subprocess.TimeoutExpired:
