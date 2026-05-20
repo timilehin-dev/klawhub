@@ -32,6 +32,7 @@ class BaseAPIClient(ABC):
 
     async def _load_credentials(self) -> None:
         """Fetches the integration credentials from the database and decrypts them in-memory."""
+        integration = None
         async with get_db_session() as session:
             statement = select(Integration).where(
                 Integration.workspace_id == self.workspace_id,
@@ -40,12 +41,12 @@ class BaseAPIClient(ABC):
             result = await session.execute(statement)
             integration = result.scalar_one_or_none()
             
-            if not integration:
-                raise ValueError(f"No integration record found for workspace {self.workspace_id} and provider {self.provider}")
+        if not integration:
+            raise ValueError(f"No integration record found for workspace {self.workspace_id} and provider {self.provider}")
             
-            self.access_token = decrypt_token(integration.access_token_encrypted)
-            self.refresh_token = decrypt_token(integration.refresh_token_encrypted) if integration.refresh_token_encrypted else None
-            self.expires_at = integration.expires_at
+        self.access_token = decrypt_token(integration.access_token_encrypted)
+        self.refresh_token = decrypt_token(integration.refresh_token_encrypted) if integration.refresh_token_encrypted else None
+        self.expires_at = integration.expires_at
 
     async def _update_stored_credentials(self, new_access_token: str, new_refresh_token: Optional[str], expires_in_seconds: Optional[int]) -> None:
         """Encrypts and commits newly refreshed OAuth tokens to the database."""

@@ -662,15 +662,18 @@ async def slack_commands(request: Request, body_bytes: bytes = Depends(verify_sl
         
         from src.integrations.providers.slack.client import SlackClient
         slack_client = SlackClient(workspace.id)
-        try:
-            await slack_client.open_view(trigger_id, modal_view)
-            return Response(content="", media_type="text/plain")
-        except Exception as e:
-            logger.error(f"Failed to open configure modal: {e}")
-            return JSONResponse({
-                "response_type": "ephemeral",
-                "text": f":warning: Failed to open configuration modal: {str(e)}"
-            })
+        
+        # Open the view in the background to return HTTP 200 within Slack's 3-second limit
+        async def _open_modal_bg():
+            try:
+                await slack_client.open_view(trigger_id, modal_view)
+                logger.info("Successfully opened configuration modal in background task.")
+            except Exception as e:
+                logger.error(f"Failed to open configure modal in background: {e}")
+                
+        import asyncio
+        asyncio.create_task(_open_modal_bg())
+        return Response(content="", media_type="text/plain")
 
     elif text_args in ["help", ""]:
         blocks = [

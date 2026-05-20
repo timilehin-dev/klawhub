@@ -10,6 +10,44 @@ from src.integrations.crypto import decrypt_token
 if TYPE_CHECKING:
     from slack_sdk.web.async_client import AsyncWebClient
 
+import re
+
+def convert_markdown_to_slack(text: str) -> str:
+    """Converts standard markdown syntax to Slack-compatible mrkdwn."""
+    if not text:
+        return text
+
+    # 1. Convert headers (# Header) to bold (*Header*)
+    text = re.sub(r'^(?:#{1,6})\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
+
+    # 2. Hide code blocks & inline codes to protect standard markdown within them
+    code_blocks = []
+    def hide_code_block(match):
+        code_blocks.append(match.group(0))
+        return f"__CODE_BLOCK_PLACEHOLDER_{len(code_blocks)-1}__"
+    
+    inline_codes = []
+    def hide_inline_code(match):
+        inline_codes.append(match.group(0))
+        return f"__INLINE_CODE_PLACEHOLDER_{len(inline_codes)-1}__"
+
+    text = re.sub(r'```.*?```', hide_code_block, text, flags=re.DOTALL)
+    text = re.sub(r'`[^`\n]+`', hide_inline_code, text)
+
+    # 3. Convert standard markdown bold (**text**) to Slack bold (*text*)
+    text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
+
+    # 4. Convert standard markdown italic (*text*) to Slack italic (_text_)
+    text = re.sub(r'\*(?!\s)(.*?)(?<!\s)\*', r'_\1_', text)
+
+    # Restore placeholders in reverse order
+    for i, ic in enumerate(inline_codes):
+        text = text.replace(f"__INLINE_CODE_PLACEHOLDER_{i}__", ic)
+    for i, cb in enumerate(code_blocks):
+        text = text.replace(f"__CODE_BLOCK_PLACEHOLDER_{i}__", cb)
+
+    return text
+
 logger = logging.getLogger("klawhub.integrations.providers.slack")
 
 @ProviderRegistry.register("slack")
@@ -82,10 +120,26 @@ class SlackClient(BaseAPIClient):
     ) -> Dict[str, Any]:
         """Posts a message with rich block attachments to a specified channel or thread."""
         client = await self.get_sdk_client()
+        
+        # Convert standard markdown to Slack mrkdwn
+        formatted_text = convert_markdown_to_slack(text)
+        
+        formatted_blocks = None
+        if blocks:
+            formatted_blocks = []
+            for block in blocks:
+                new_block = dict(block)
+                if new_block.get("type") == "section" and new_block.get("text"):
+                    section_text = dict(new_block["text"])
+                    if section_text.get("type") == "mrkdwn" and section_text.get("text"):
+                        section_text["text"] = convert_markdown_to_slack(section_text["text"])
+                    new_block["text"] = section_text
+                formatted_blocks.append(new_block)
+                
         response = await client.chat_postMessage(
             channel=channel_id,
-            text=text,
-            blocks=blocks,
+            text=formatted_text,
+            blocks=formatted_blocks or blocks,
             thread_ts=thread_ts
         )
         return response.data
