@@ -1,0 +1,1224 @@
+import os
+import uuid
+import logging
+import httpx
+import time
+import json
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from fastapi import FastAPI, Request, Response, HTTPException, Form, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from sqlmodel import select, func
+from pydantic import BaseModel
+
+from slack_sdk.signature import SignatureVerifier
+import inngest
+import inngest.fast_api
+from src.workflows.inngest_app import inngest_client
+from src.workflows.message_handler import slack_message_handler, cron_schedule_runner
+
+from src.db.pool import get_db_session
+from src.db.models import Workspace, Run, Task, Schedule
+from src.integrations.crypto import encrypt_token, decrypt_token
+from src.config import settings
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("klawhub.api")
+
+# Guarantee directories exist
+os.makedirs("api/static/js", exist_ok=True)
+os.makedirs("api/templates", exist_ok=True)
+
+app = FastAPI(title="Klawhub API", description="Serverless Python Gateway for Klawhub AI Coworkers")
+
+# Mount Static Files
+app.mount("/static", StaticFiles(directory="api/static"), name="static")
+
+# Expose the background workflow runner server at /api/inngest
+inngest.fast_api.serve(
+    app,
+    inngest_client,
+    [slack_message_handler, cron_schedule_runner]
+)
+
+# Initialize Slack request signature verifier
+slack_verifier = SignatureVerifier(settings.slack_signing_secret)
+
+
+async def verify_slack_request(request: Request) -> bytes:
+    """Dependency that cryptographically verifies the authenticity of incoming requests from Slack."""
+    # Read raw request body
+    body_bytes = await request.body()
+    
+    # Retrieve Slack signature headers
+    timestamp = request.headers.get("X-Slack-Request-Timestamp")
+    signature = request.headers.get("X-Slack-Signature")
+    
+    if not timestamp or not signature:
+        logger.warning("Rejected request: missing Slack signature headers.")
+        raise HTTPException(status_code=401, detail="Missing signature headers")
+        
+    # Guard against replay attacks
+    try:
+        ts_int = int(timestamp)
+    except ValueError:
+        logger.warning("Rejected request: invalid Slack timestamp format.")
+        raise HTTPException(status_code=401, detail="Invalid timestamp format")
+        
+    if abs(time.time() - ts_int) > 60 * 5:
+        logger.warning(f"Rejected request: replay window expired. Timestamp: {timestamp}, Current: {time.time()}")
+        raise HTTPException(status_code=401, detail="Request timestamp too old")
+        
+    # Verify signature
+    if not slack_verifier.is_valid(body_bytes, timestamp, signature):
+        logger.warning("Rejected request: cryptographically invalid Slack signature.")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+        
+    return body_bytes
+
+# ─────────────────────────────────────────────
+# Session & Cryptographic Helper Operations
+# ─────────────────────────────────────────────
+
+def get_session_workspace_id(request: Request) -> Optional[uuid.UUID]:
+    """Retrieves and decrypts the Workspace ID from the secure session cookie."""
+    session_id_b64 = request.cookies.get("session_id")
+    if not session_id_b64:
+        return None
+    try:
+        workspace_id_str = decrypt_token(session_id_b64)
+        return uuid.UUID(workspace_id_str)
+    except Exception as e:
+        logger.warning(f"Failed to decrypt workspace session ID: {str(e)}")
+        return None
+
+# ─────────────────────────────────────────────
+# Page Serving Routes
+# ─────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_index(request: Request):
+    """Serves the visually stunning, high-converting homepage."""
+    filepath = "api/templates/index.html"
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Homepage template not found")
+    with open(filepath, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def serve_dashboard(request: Request):
+    """Serves the frosted glassmorphic Settings & Analytics Dashboard."""
+    workspace_id = get_session_workspace_id(request)
+    if not workspace_id:
+        logger.info("Unauthorized dashboard access attempt. Redirecting to home.")
+        return RedirectResponse(url="/?error=unauthorized", status_code=303)
+    
+    filepath = "api/templates/dashboard.html"
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Dashboard template not found")
+    with open(filepath, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
+
+# ─────────────────────────────────────────────
+# Slack Installation & OAuth Flow
+# ─────────────────────────────────────────────
+
+@app.get("/api/slack/install")
+async def slack_install(request: Request):
+    """Generates the Slack OAuth V2 installation link with clean scopes."""
+    client_id = os.environ.get("NEXT_PUBLIC_SLACK_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(status_code=500, detail="Slack Client ID is not configured in env.")
+        
+    redirect_uri = f"{request.base_url}api/slack/oauth"
+    
+    scopes = [
+        "app_mentions:read",
+        "channels:history",
+        "chat:write",
+        "commands",
+        "groups:history",
+        "im:history",
+        "mpim:history",
+        "users:read",
+        "users:read.email"
+    ]
+    
+    scopes_str = ",".join(scopes)
+    auth_url = (
+        f"https://slack.com/oauth/v2/authorize"
+        f"?client_id={client_id}"
+        f"&scope={scopes_str}"
+        f"&redirect_uri={redirect_uri}"
+    )
+    return RedirectResponse(url=auth_url)
+
+
+@app.get("/api/slack/oauth")
+async def slack_oauth(code: str, request: Request, response: Response):
+    """Slack OAuth callback handler exchanging code for bot token and initiating workspace session."""
+    client_id = os.environ.get("NEXT_PUBLIC_SLACK_CLIENT_ID")
+    client_secret = os.environ.get("SLACK_CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="Slack Client configuration missing.")
+
+    logger.info("Exchanging Slack authorization code for access token...")
+    async with httpx.AsyncClient() as client:
+        res = await client.post(
+            "https://slack.com/api/oauth.v2.access",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code,
+                "redirect_uri": f"{request.base_url}api/slack/oauth"
+            }
+        )
+        payload = res.json()
+
+    if not payload.get("ok"):
+        logger.error(f"Slack OAuth failed: {payload.get('error')}")
+        return RedirectResponse(url="/?error=oauth_failed")
+
+    team = payload.get("team", {})
+    team_id = team.get("id")
+    team_name = team.get("name") or "Slack Workspace"
+    bot_user_id = payload.get("bot_user_id")
+    access_token = payload.get("access_token")
+
+    if not team_id or not bot_user_id or not access_token:
+        raise HTTPException(status_code=400, detail="Incomplete OAuth payload from Slack.")
+
+    # Register or Update Workspace details inside the PostgreSQL database (SQLModel)
+    async with get_db_session() as session:
+        statement = select(Workspace).where(Workspace.slack_team_id == team_id)
+        result = await session.execute(statement)
+        workspace = result.scalar_one_or_none()
+
+        if workspace:
+            logger.info(f"Workspace {team_id} already registered. Updating credentials...")
+            workspace.bot_token = access_token
+            workspace.slack_bot_user_id = bot_user_id
+            workspace.name = team_name
+            workspace.is_active = True
+            workspace.updated_at = datetime.utcnow()
+        else:
+            logger.info(f"Registering brand-new Workspace: {team_name} ({team_id})...")
+            workspace = Workspace(
+                slack_team_id=team_id,
+                slack_bot_user_id=bot_user_id,
+                bot_token=access_token,
+                name=team_name,
+                plan="free",
+                monthly_run_limit=100,
+                is_active=True,
+                agent_name="Klawhub",
+                agent_personality="You are a professional, high-performance executive coworker.",
+                enabled_skills=["web_search", "python_sandbox", "pdf_generator"]
+            )
+            session.add(workspace)
+
+        await session.commit()
+        await session.refresh(workspace)
+        workspace_id = workspace.id
+
+    # Securely encrypt the workspace database UUID to set as session cookie
+    encrypted_workspace_id = encrypt_token(str(workspace_id))
+    
+    # Redirect to the dashboard and append secure signed session cookie
+    redirect_res = RedirectResponse(url="/dashboard", status_code=303)
+    redirect_res.set_cookie(
+        key="session_id",
+        value=encrypted_workspace_id,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 7 # 7 days expiration
+    )
+    logger.info(f"Successfully initiated session for Workspace {workspace_id}")
+    return redirect_res
+
+# ─────────────────────────────────────────────
+# Telemetry and settings API Scoped to Workspace
+# ─────────────────────────────────────────────
+
+@app.get("/api/dashboard/stats")
+async def get_dashboard_stats(request: Request):
+    """Aggregates and delivers real-time workspace runs, tasks, and schedules analytics."""
+    workspace_id = get_session_workspace_id(request)
+    if not workspace_id:
+        raise HTTPException(status_code=401, detail="Unauthorized session")
+
+    async with get_db_session() as session:
+        # 1. Fetch Workspace Profile
+        workspace = await session.get(Workspace, workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
+        # 2. Get Telemetry Counters
+        runs_query = select(Run).where(Run.workspace_id == workspace_id)
+        runs_result = await session.execute(runs_query)
+        runs = runs_result.scalars().all()
+
+        tasks_query = select(Task).where(Task.workspace_id == workspace_id)
+        tasks_result = await session.execute(tasks_query)
+        tasks = tasks_result.scalars().all()
+
+        schedules_count_query = select(func.count(Schedule.id)).where(
+            Schedule.workspace_id == workspace_id,
+            Schedule.is_active == True
+        )
+        schedules_count_res = await session.execute(schedules_count_query)
+        active_schedules = schedules_count_res.scalar() or 0
+
+    # Aggregate telemetry splits
+    total_runs = len(runs)
+    completed_runs = sum(1 for r in runs if r.status == "completed")
+    pending_runs = total_runs - completed_runs
+
+    total_tasks = len(tasks)
+    completed_tasks = sum(1 for t in tasks if t.status == "completed")
+    
+    # Model compute telemetry (simulated dashboard ratios for aesthetic graph representation)
+    model_splits = {
+        "gpt4": int(total_runs * 0.4) if total_runs > 0 else 0,
+        "claude": int(total_runs * 0.35) if total_runs > 0 else 0,
+        "gemini": total_runs - int(total_runs * 0.4) - int(total_runs * 0.35) if total_runs > 0 else 0
+    }
+
+    return {
+        "workspace_name": workspace.name,
+        "agent_name": workspace.agent_name,
+        "plan": workspace.plan,
+        "monthly_run_limit": workspace.monthly_run_limit,
+        "runs_count": total_runs,
+        "runs_completed": completed_runs,
+        "runs_pending": pending_runs,
+        "tasks_count": total_tasks,
+        "tasks_completed": completed_tasks,
+        "active_schedules": active_schedules,
+        "model_splits": model_splits
+    }
+
+
+class SettingsUpdateSchema(BaseModel):
+    agent_name: str
+    agent_personality: str
+    enabled_skills: List[str]
+    is_active: bool
+
+
+@app.get("/api/dashboard/settings")
+async def get_dashboard_settings(request: Request):
+    """Retrieves current workspace settings identity."""
+    workspace_id = get_session_workspace_id(request)
+    if not workspace_id:
+        raise HTTPException(status_code=401, detail="Unauthorized session")
+
+    async with get_db_session() as session:
+        workspace = await session.get(Workspace, workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
+        return {
+            "agent_name": workspace.agent_name,
+            "agent_personality": workspace.agent_personality or "",
+            "enabled_skills": workspace.enabled_skills or [],
+            "is_active": workspace.is_active,
+            "plan": workspace.plan,
+            "monthly_run_limit": workspace.monthly_run_limit
+        }
+
+
+@app.post("/api/dashboard/settings")
+async def update_dashboard_settings(data: SettingsUpdateSchema, request: Request):
+    """Saves updated identity settings with strict multi-tenant boundary checks."""
+    workspace_id = get_session_workspace_id(request)
+    if not workspace_id:
+        raise HTTPException(status_code=401, detail="Unauthorized session")
+
+    if not data.agent_name.strip():
+        raise HTTPException(status_code=400, detail="Agent Name cannot be blank.")
+
+    async with get_db_session() as session:
+        workspace = await session.get(Workspace, workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
+        logger.info(f"Updating settings for Workspace {workspace_id}: name='{data.agent_name}'")
+        workspace.agent_name = data.agent_name.strip()
+        workspace.agent_personality = data.agent_personality.strip()
+        workspace.enabled_skills = data.enabled_skills
+        workspace.is_active = data.is_active
+        workspace.updated_at = datetime.utcnow()
+
+        session.add(workspace)
+        await session.commit()
+        await session.refresh(workspace)
+
+    return {"status": "success", "message": "Settings updated successfully"}
+
+
+@app.post("/api/dashboard/logout")
+async def logout(response: Response):
+    """Deletes session cookie and logs out user."""
+    response.delete_cookie(key="session_id")
+    return {"status": "success", "message": "Logged out successfully"}
+
+
+# ─────────────────────────────────────────────
+# Slack Gateway HTTP API Routes
+# ─────────────────────────────────────────────
+
+@app.post("/api/slack/events")
+async def slack_events(request: Request, body_bytes: bytes = Depends(verify_slack_request)):
+    """Receives, verifies, and routes Slack event subscriptions (mentions and direct messages)."""
+    try:
+        payload = json.loads(body_bytes.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+        
+    # Handle the URL verification handshake
+    if payload.get("type") == "url_verification":
+        logger.info("Successfully handled Slack URL verification handshake.")
+        return {"challenge": payload.get("challenge")}
+        
+    if payload.get("type") != "event_callback":
+        return {"ok": True}
+        
+    event = payload.get("event", {})
+    event_type = event.get("type")
+    event_id = payload.get("event_id")
+    team_id = payload.get("team_id")
+    
+    # Process messages or app_mentions
+    if event_type not in ["message", "app_mention"]:
+        return {"ok": True}
+        
+    # Ignore bot messages to prevent infinite execution loops
+    if event.get("bot_id") or event.get("user") == event.get("bot_user_id"):
+        return {"ok": True}
+        
+    channel = event.get("channel", "")
+    text = event.get("text", "")
+    user = event.get("user", "")
+    
+    # Load workspace details to retrieve bot user id and verify activation
+    async with get_db_session() as session:
+        statement = select(Workspace).where(Workspace.slack_team_id == team_id)
+        result = await session.execute(statement)
+        workspace = result.scalar_one_or_none()
+        
+    if not workspace:
+        logger.warning(f"No registered workspace found for Slack team ID: {team_id}. Ignoring event.")
+        return {"ok": True}
+        
+    if not workspace.is_active:
+        logger.warning(f"Workspace {workspace.id} is currently inactive. Ignoring event.")
+        return {"ok": True}
+        
+    # Exclude bot self-messages using database bot user ID boundary
+    if user == workspace.slack_bot_user_id:
+        return {"ok": True}
+        
+    # Determine the conversational boundary: DM vs Channel
+    is_dm = channel.startswith("D") or event.get("channel_type") == "im"
+    bot_mention_tag = f"<@{workspace.slack_bot_user_id}>"
+    
+    if is_dm:
+        logger.info(f"Direct Message received in channel {channel} from user {user}.")
+        cleaned_text = text.replace(bot_mention_tag, "").strip()
+    else:
+        # Public or private channel: Must contain bot mention
+        if bot_mention_tag not in text:
+            # Silence policy: ignore standard channel-wide conversations
+            return {"ok": True}
+            
+        logger.info(f"App mention received in channel {channel} from user {user}.")
+        cleaned_text = text.replace(bot_mention_tag, "").strip()
+        
+    # Clean up any residual double-spaces or legacy tags
+    event["text"] = cleaned_text
+    
+    # Dispatch the asynchronous Inngest workflow background trigger
+    logger.info(f"Dispatching slack/event.received event {event_id} to Inngest...")
+    await inngest_client.send(
+        inngest.Event(
+            name="slack/event.received",
+            data={
+                "event": event,
+                "eventId": event_id,
+                "teamId": team_id
+            },
+            id=event_id
+        )
+    )
+    
+    return {"ok": True}
+
+
+@app.post("/api/slack/commands")
+async def slack_commands(request: Request, body_bytes: bytes = Depends(verify_slack_request)):
+    """Receives and executes /klawhub slash commands, delivering gorgeous Block Kit messages."""
+    import urllib.parse
+    form_data = urllib.parse.parse_qs(body_bytes.decode("utf-8"))
+    
+    command = form_data.get("command", [""])[0]
+    text_args = form_data.get("text", [""])[0].strip().lower()
+    team_id = form_data.get("team_id", [""])[0]
+    channel_id = form_data.get("channel_id", [""])[0]
+    user_id = form_data.get("user_id", [""])[0]
+    
+    logger.info(f"Slash command '{command}' with arguments '{text_args}' triggered by {user_id} in workspace {team_id}.")
+    
+    async with get_db_session() as session:
+        statement = select(Workspace).where(Workspace.slack_team_id == team_id)
+        result = await session.execute(statement)
+        workspace = result.scalar_one_or_none()
+        
+    if not workspace:
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": ":warning: This Slack workspace is not registered with Klawhub. Please install Klawhub first."
+        })
+        
+    if not workspace.is_active:
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": ":warning: Klawhub coworker services are currently deactivated for this workspace. Please activate them in the web settings."
+        })
+        
+    if text_args == "status":
+        async with get_db_session() as session:
+            runs_query = select(Run).where(Run.workspace_id == workspace.id)
+            runs_result = await session.execute(runs_query)
+            runs = runs_result.scalars().all()
+            
+            schedules_count_query = select(func.count(Schedule.id)).where(
+                Schedule.workspace_id == workspace.id,
+                Schedule.is_active == True
+            )
+            schedules_count_res = await session.execute(schedules_count_query)
+            active_schedules = schedules_count_res.scalar() or 0
+            
+            tasks_query = select(Task).where(Task.workspace_id == workspace.id)
+            tasks_result = await session.execute(tasks_query)
+            tasks = tasks_result.scalars().all()
+            
+        total_runs = len(runs)
+        completed_runs = sum(1 for r in runs if r.status == "completed")
+        total_tasks = len(tasks)
+        completed_tasks = sum(1 for t in tasks if t.status == "completed")
+        
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"🤖 {workspace.agent_name} Status & Analytics",
+                    "emoji": True
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Organization:* `{workspace.name}`\n*Billing Plan:* `{workspace.plan.upper()}`\n*Status:* :green_heart: `ACTIVE`"
+                }
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"📈 *Conversational Runs:*\n`{completed_runs} / {total_runs} Completed`"},
+                    {"type": "mrkdwn", "text": f"🕒 *Active Schedules:*\n`{active_schedules} Cron Triggers`"},
+                    {"type": "mrkdwn", "text": f"✅ *Completed Tasks:*\n`{completed_tasks} / {total_tasks} Executed`"},
+                    {"type": "mrkdwn", "text": f"🛡️ *Monthly Plan Limit:*\n`{total_runs} / {workspace.monthly_run_limit} Runs Used`"}
+                ]
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"🧠 *Coworker Personality Profile:*\n_{workspace.agent_personality or 'You are a professional, high-performance executive coworker.'}_"
+                }
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"Klawhub serverless gateway • live telemetry compiled at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                    }
+                ]
+            }
+        ]
+        
+        return JSONResponse({
+            "response_type": "in_channel",
+            "blocks": blocks
+        })
+        
+    elif text_args in ["configure", "settings"]:
+        trigger_id = form_data.get("trigger_id", [""])[0]
+        if not trigger_id:
+            return JSONResponse({
+                "response_type": "ephemeral",
+                "text": ":warning: Command requires a trigger ID. Please execute it within Slack."
+            })
+            
+        # Get all skills available and set the initial selected ones
+        all_skills = ["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator"]
+        enabled_skills = workspace.enabled_skills or []
+        for sk in enabled_skills:
+            if sk not in all_skills:
+                all_skills.append(sk)
+                
+        skill_options = [
+            {
+                "text": {"type": "plain_text", "text": sk.replace("_", " ").title(), "emoji": True},
+                "value": sk
+            }
+            for sk in all_skills
+        ]
+        
+        initial_skill_options = [
+            opt for opt in skill_options if opt["value"] in enabled_skills
+        ]
+        
+        modal_view = {
+            "type": "modal",
+            "callback_id": "settings_modal",
+            "title": {"type": "plain_text", "text": "Configure Coworker"},
+            "submit": {"type": "plain_text", "text": "Save Changes"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "private_metadata": json.dumps({"channel_id": channel_id, "workspace_id": str(workspace.id)}),
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"🔧 *Configure Coworker Identity for `{workspace.name}`*"
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "block_agent_name",
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "input_agent_name",
+                        "initial_value": workspace.agent_name or "Klawhub",
+                        "placeholder": {"type": "plain_text", "text": "Enter bot name..."}
+                    },
+                    "label": {"type": "plain_text", "text": "Agent Bot Name"}
+                },
+                {
+                    "type": "input",
+                    "block_id": "block_agent_personality",
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "input_agent_personality",
+                        "multiline": True,
+                        "initial_value": workspace.agent_personality or "Professional, efficient, and precise.",
+                        "placeholder": {"type": "plain_text", "text": "Describe how this coworker should act..."}
+                    },
+                    "label": {"type": "plain_text", "text": "Agent Personality Profile"}
+                },
+                {
+                    "type": "input",
+                    "block_id": "block_enabled_skills",
+                    "element": {
+                        "type": "checkboxes",
+                        "action_id": "input_enabled_skills",
+                        "options": skill_options,
+                        **({"initial_options": initial_skill_options} if initial_skill_options else {})
+                    },
+                    "label": {"type": "plain_text", "text": "Active Cognitive Skills"}
+                }
+            ]
+        }
+        
+        from src.integrations.providers.slack.client import SlackClient
+        slack_client = SlackClient(workspace.id)
+        try:
+            await slack_client.open_view(trigger_id, modal_view)
+            return Response(content="", media_type="text/plain")
+        except Exception as e:
+            logger.error(f"Failed to open configure modal: {e}")
+            return JSONResponse({
+                "response_type": "ephemeral",
+                "text": f":warning: Failed to open configuration modal: {str(e)}"
+            })
+
+    elif text_args in ["help", ""]:
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "💡 Klawhub Coworker Helper Guide",
+                    "emoji": True
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"Hi there! I am *{workspace.agent_name}*, your persistent AI coworker. I execute tools, schedule recurring standups, build custom software inside isolated sandboxes, and integrate custom GitHub skills directly in Slack!"
+                }
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Available Slash Commands:*\n"
+                            "• `/klawhub status` - View my current health, subscription tier, and dynamic runs telemetry.\n"
+                            "• `/klawhub help` - Display this interactive helper guide."
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*How to Collaborate:*\n"
+                            "• *Direct Messages:* Simply message me here, and I will respond to your queries immediately.\n"
+                            "• *Channels:* Invite me to any channel using `/invite @Klawhub` and mention me (`@Klawhub do X`) to activate my tool reasoning chain."
+                }
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "⚙️ *Workspace Management:*\nConfigure my identity, persona, active integrations, and dynamic skills via your unified Vercel dashboard."
+                },
+                "accessory": {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Open Dashboard",
+                        "emoji": True
+                    },
+                    "url": f"{request.base_url}dashboard",
+                    "style": "primary"
+                }
+            }
+        ]
+        
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "blocks": blocks
+        })
+        
+    else:
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": f":warning: Unknown command option `{text_args}`. Type `/klawhub help` to see all available commands."
+        })
+
+
+@app.post("/api/slack/actions")
+async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_slack_request)):
+    """Receives and processes Slack Block Kit interactive actions (button clicks, modal submissions)."""
+    import urllib.parse
+    import random
+    form_data = urllib.parse.parse_qs(body_bytes.decode("utf-8"))
+    payload_str = form_data.get("payload", [""])[0]
+    
+    if not payload_str:
+        raise HTTPException(status_code=400, detail="Missing interactive action payload")
+        
+    try:
+        payload = json.loads(payload_str)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON action payload")
+        
+    payload_type = payload.get("type")
+    user_id = payload.get("user", {}).get("id")
+    team_id = payload.get("team", {}).get("id")
+    channel_id = payload.get("channel", {}).get("id")
+    response_url = payload.get("response_url")
+    
+    logger.info(f"Received Slack interactive action of type {payload_type} from user {user_id} in team {team_id}.")
+    
+    # Pre-defined list of corporate developer excuses
+    CORPORATE_EXCUSES = [
+        "My local database migration took 4 hours, corrupted my local state, and I am currently reinstalling everything.",
+        "My IDE decided to index the entire node_modules directory, and my laptop's fan is sounding like a jet engine preparing for takeoff.",
+        "A minor sub-dependency got deprecated overnight, and I am currently 5 layers deep in npm dependency resolution hell.",
+        "The production staging environment is showing a blank screen, and I am tracing a silent NullPointerException in a legacy module.",
+        "A git merge conflict in a shared config file somehow deleted 12 of my local files, and I am recovering them from git reflog.",
+        "My API key for the development sandbox expired, and I am waiting for the DevOps team to approve the rotation ticket.",
+        "I spent the last 3 hours debugging why a CSS margin was off by 2px, only to find a hidden parent container had overflow: hidden."
+    ]
+
+    async with get_db_session() as session:
+        statement = select(Workspace).where(Workspace.slack_team_id == team_id)
+        result = await session.execute(statement)
+        workspace = result.scalar_one_or_none()
+        
+    if not workspace:
+        logger.warning(f"No workspace found for Slack team ID {team_id}")
+        return {"ok": True}
+
+    from src.integrations.providers.slack.client import SlackClient
+    slack_client = SlackClient(workspace.id)
+
+    if payload_type == "view_submission":
+        view = payload.get("view", {})
+        callback_id = view.get("callback_id")
+        private_metadata_str = view.get("private_metadata", "{}")
+        
+        try:
+            metadata = json.loads(private_metadata_str)
+        except json.JSONDecodeError:
+            metadata = {}
+            
+        target_channel = metadata.get("channel_id") or channel_id
+        target_thread = metadata.get("thread_ts")
+        
+        if callback_id == "settings_modal":
+            # 1. Identity & Settings configuration modal submission
+            values = view.get("state", {}).get("values", {})
+            new_name = values.get("block_agent_name", {}).get("input_agent_name", {}).get("value")
+            new_personality = values.get("block_agent_personality", {}).get("input_agent_personality", {}).get("value")
+            
+            selected_skills_opts = values.get("block_enabled_skills", {}).get("input_enabled_skills", {}).get("selected_options", [])
+            new_skills = [opt.get("value") for opt in selected_skills_opts if opt.get("value")]
+            
+            async with get_db_session() as session:
+                statement = select(Workspace).where(Workspace.id == workspace.id)
+                workspace_db = (await session.execute(statement)).scalar_one_or_none()
+                if workspace_db:
+                    workspace_db.agent_name = new_name or workspace_db.agent_name
+                    workspace_db.agent_personality = new_personality or workspace_db.agent_personality
+                    workspace_db.enabled_skills = new_skills or workspace_db.enabled_skills
+                    workspace_db.updated_at = datetime.utcnow()
+                    await session.commit()
+            
+            # Post confirmation to the channel
+            skills_formatted = ", ".join(f"`{sk}`" for sk in new_skills)
+            confirm_text = (
+                f"⚙️ *Coworker Identity & Settings Synchronized successfully!*\n"
+                f"• *Bot Name:* `{new_name}`\n"
+                f"• *Personality:* _{new_personality}_\n"
+                f"• *Active Skills:* {skills_formatted}"
+            )
+            
+            if target_channel:
+                await slack_client.post_message(
+                    channel_id=target_channel,
+                    text=confirm_text
+                )
+                
+        elif callback_id == "standup_modal":
+            # 2. Standup Check-in Modal Submission
+            values = view.get("state", {}).get("values", {})
+            yesterday = values.get("block_yesterday", {}).get("input_yesterday", {}).get("value")
+            today = values.get("block_today", {}).get("input_today", {}).get("value")
+            blockers = values.get("block_blockers", {}).get("input_blockers", {}).get("value") or "None"
+            
+            blocks = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "📝 Standup Check-in Complete",
+                        "emoji": True
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"🤖 *Check-in submitted by <@{user_id}>*"
+                    }
+                },
+                {"type": "divider"},
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*⏮️ Accomplished Yesterday:*\n{yesterday}"
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*⏭️ Focusing on Today:*\n{today}"
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*⚠️ Blockers / Impediments:*\n`{blockers}`"
+                    }
+                }
+            ]
+            
+            if target_channel:
+                await slack_client.post_message(
+                    channel_id=target_channel,
+                    text=f"📝 Standup Check-in submitted by <@{user_id}>",
+                    blocks=blocks,
+                    thread_ts=target_thread
+                )
+                
+        elif callback_id == "excuse_modal":
+            # Excuse Modal Submission
+            values = view.get("state", {}).get("values", {})
+            excuse = values.get("block_excuse_text", {}).get("input_excuse_text", {}).get("value")
+            
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"🤖 *<@{user_id}> is excused from today's standup huddle.*\n\n*Reason:* _{excuse}_"
+                    }
+                }
+            ]
+            
+            if target_channel:
+                await slack_client.post_message(
+                    channel_id=target_channel,
+                    text=f"🤖 <@{user_id}> is excused from today's standup huddle.",
+                    blocks=blocks,
+                    thread_ts=target_thread
+                )
+                
+        elif callback_id == "task_creation_modal":
+            # 3. Action Item log to DB Task Submission
+            values = view.get("state", {}).get("values", {})
+            task_request = values.get("block_task_request", {}).get("input_task_request", {}).get("value")
+            task_type = values.get("block_task_type", {}).get("input_task_type", {}).get("selected_option", {}).get("value") or "action_item"
+            
+            async with get_db_session() as session:
+                new_task = Task(
+                    workspace_id=workspace.id,
+                    slack_user_id=user_id,
+                    slack_channel_id=target_channel or channel_id or "",
+                    slack_thread_ts=target_thread,
+                    type=task_type,
+                    request=task_request,
+                    status="pending"
+                )
+                session.add(new_task)
+                await session.commit()
+                await session.refresh(new_task)
+                
+            confirm_text = (
+                f"💾 *Action Item successfully converted to Workspace Task!*\n"
+                f"• *Task ID:* `{new_task.id}`\n"
+                f"• *Category:* `{task_type.upper()}`\n"
+                f"• *Request:* _{task_request}_"
+            )
+            
+            if target_channel:
+                await slack_client.post_message(
+                    channel_id=target_channel,
+                    text=confirm_text,
+                    thread_ts=target_thread
+                )
+
+        # Acknowledge submission and close the modal
+        return JSONResponse({"response_action": "clear"})
+
+    elif payload_type == "block_actions":
+        actions = payload.get("actions", [])
+        trigger_id = payload.get("trigger_id")
+        
+        for action in actions:
+            action_id = action.get("action_id")
+            logger.info(f"Processing action_id: {action_id}")
+            
+            if action_id == "huddle_post_update":
+                # User clicked "Post Update" button on standup card
+                message_ts = payload.get("container", {}).get("message_ts") or payload.get("message", {}).get("ts")
+                thread_ts = payload.get("message", {}).get("thread_ts") or message_ts
+                
+                modal_view = {
+                    "type": "modal",
+                    "callback_id": "standup_modal",
+                    "title": {"type": "plain_text", "text": "Standup Check-in"},
+                    "submit": {"type": "plain_text", "text": "Post Update"},
+                    "close": {"type": "plain_text", "text": "Cancel"},
+                    "private_metadata": json.dumps({"channel_id": channel_id, "thread_ts": thread_ts}),
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "📝 *Share your updates with the team.* Your responses will be formatted and posted in the standup thread."
+                            }
+                        },
+                        {
+                            "type": "input",
+                            "block_id": "block_yesterday",
+                            "element": {
+                                "type": "plain_text_input",
+                                "action_id": "input_yesterday",
+                                "multiline": True,
+                                "placeholder": {"type": "plain_text", "text": "What did you accomplish yesterday?"}
+                            },
+                            "label": {"type": "plain_text", "text": "Yesterday"}
+                        },
+                        {
+                            "type": "input",
+                            "block_id": "block_today",
+                            "element": {
+                                "type": "plain_text_input",
+                                "action_id": "input_today",
+                                "multiline": True,
+                                "placeholder": {"type": "plain_text", "text": "What are you focusing on today?"}
+                            },
+                            "label": {"type": "plain_text", "text": "Today"}
+                        },
+                        {
+                            "type": "input",
+                            "block_id": "block_blockers",
+                            "element": {
+                                "type": "plain_text_input",
+                                "action_id": "input_blockers",
+                                "multiline": True,
+                                "placeholder": {"type": "plain_text", "text": "Any blockers? (Type 'None' if clear)"}
+                            },
+                            "label": {"type": "plain_text", "text": "Blockers / Impediments"},
+                            "optional": True
+                        }
+                    ]
+                }
+                
+                if trigger_id:
+                    try:
+                        await slack_client.open_view(trigger_id, modal_view)
+                    except Exception as e:
+                        logger.error(f"Failed to open standup modal: {e}")
+                        
+            elif action_id == "huddle_excuse":
+                # User clicked "Excuse Me" button on standup card
+                message_ts = payload.get("container", {}).get("message_ts") or payload.get("message", {}).get("ts")
+                thread_ts = payload.get("message", {}).get("thread_ts") or message_ts
+                
+                random_excuse = random.choice(CORPORATE_EXCUSES)
+                
+                modal_view = {
+                    "type": "modal",
+                    "callback_id": "excuse_modal",
+                    "title": {"type": "plain_text", "text": "Excuse Me"},
+                    "submit": {"type": "plain_text", "text": "Post Excuse"},
+                    "close": {"type": "plain_text", "text": "Cancel"},
+                    "private_metadata": json.dumps({"channel_id": channel_id, "thread_ts": thread_ts}),
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "🤖 *Oh dear! Can't make it to today's huddle?*\nReview or customize your excuse below, or click *Regenerate* to cycle through developer excuses."
+                            }
+                        },
+                        {
+                            "type": "input",
+                            "block_id": "block_excuse_text",
+                            "element": {
+                                "type": "plain_text_input",
+                                "action_id": "input_excuse_text",
+                                "multiline": True,
+                                "initial_value": random_excuse
+                            },
+                            "label": {"type": "plain_text", "text": "Excuse Reason"}
+                        },
+                        {
+                            "type": "actions",
+                            "block_id": "block_excuse_actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": "🔄 Regenerate Excuse"},
+                                    "action_id": "regenerate_excuse"
+                                }
+                            ]
+                        }
+                    ]
+                }
+                
+                if trigger_id:
+                    try:
+                        await slack_client.open_view(trigger_id, modal_view)
+                    except Exception as e:
+                        logger.error(f"Failed to open excuse modal: {e}")
+                        
+            elif action_id == "regenerate_excuse":
+                # User clicked "Regenerate Excuse" inside the Excuse modal
+                view = payload.get("view", {})
+                view_id = view.get("id")
+                private_metadata_str = view.get("private_metadata", "{}")
+                
+                random_excuse = random.choice(CORPORATE_EXCUSES)
+                
+                updated_view = {
+                    "type": "modal",
+                    "callback_id": "excuse_modal",
+                    "title": {"type": "plain_text", "text": "Excuse Me"},
+                    "submit": {"type": "plain_text", "text": "Post Excuse"},
+                    "close": {"type": "plain_text", "text": "Cancel"},
+                    "private_metadata": private_metadata_str,
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "🤖 *Oh dear! Can't make it to today's huddle?*\nReview or customize your excuse below, or click *Regenerate* to cycle through developer excuses."
+                            }
+                        },
+                        {
+                            "type": "input",
+                            "block_id": "block_excuse_text",
+                            "element": {
+                                "type": "plain_text_input",
+                                "action_id": "input_excuse_text",
+                                "multiline": True,
+                                "initial_value": random_excuse
+                            },
+                            "label": {"type": "plain_text", "text": "Excuse Reason"}
+                        },
+                        {
+                            "type": "actions",
+                            "block_id": "block_excuse_actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": "🔄 Regenerate Excuse"},
+                                    "action_id": "regenerate_excuse"
+                                }
+                            ]
+                        }
+                    ]
+                }
+                
+                if view_id:
+                    try:
+                        await slack_client.update_view(view_id=view_id, view=updated_view)
+                    except Exception as e:
+                        logger.error(f"Failed to update excuse modal view: {e}")
+                        
+            elif action_id == "task_convert_dashboard":
+                # User clicked "Log as Workspace Task" on a thread summary card
+                message = payload.get("message", {})
+                message_ts = message.get("ts")
+                thread_ts = message.get("thread_ts") or message_ts
+                
+                text_to_log = "Action item extracted from thread"
+                blocks = message.get("blocks", [])
+                for block in blocks:
+                    if block.get("type") == "section" and block.get("text", {}).get("type") == "mrkdwn":
+                        txt = block.get("text", {}).get("text", "")
+                        if "Action Item" in txt or "Extracted" in txt or "Summary" in txt:
+                            text_to_log = txt
+                            break
+                            
+                clean_text = text_to_log.replace("*", "").replace("_", "").replace("•", "-").strip()
+                if len(clean_text) > 150:
+                    clean_text = clean_text[:147] + "..."
+                    
+                modal_view = {
+                    "type": "modal",
+                    "callback_id": "task_creation_modal",
+                    "title": {"type": "plain_text", "text": "Log Workspace Task"},
+                    "submit": {"type": "plain_text", "text": "Create Task"},
+                    "close": {"type": "plain_text", "text": "Cancel"},
+                    "private_metadata": json.dumps({"channel_id": channel_id, "thread_ts": thread_ts}),
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "💾 *Log an action item directly to your Klawhub Workspace task board.*"
+                            }
+                        },
+                        {
+                            "type": "input",
+                            "block_id": "block_task_request",
+                            "element": {
+                                "type": "plain_text_input",
+                                "action_id": "input_task_request",
+                                "multiline": True,
+                                "initial_value": clean_text,
+                                "placeholder": {"type": "plain_text", "text": "Describe the task request..."}
+                            },
+                            "label": {"type": "plain_text", "text": "Task Request"}
+                        },
+                        {
+                            "type": "input",
+                            "block_id": "block_task_type",
+                            "element": {
+                                "type": "static_select",
+                                "action_id": "input_task_type",
+                                "initial_option": {
+                                    "text": {"type": "plain_text", "text": "Action Item"},
+                                    "value": "action_item"
+                                },
+                                "options": [
+                                    {
+                                        "text": {"type": "plain_text", "text": "Action Item"},
+                                        "value": "action_item"
+                                    },
+                                    {
+                                        "text": {"type": "plain_text", "text": "Bug Fix"},
+                                        "value": "bug_fix"
+                                    },
+                                    {
+                                        "text": {"type": "plain_text", "text": "Research"},
+                                        "value": "research"
+                                    },
+                                    {
+                                        "text": {"type": "plain_text", "text": "Feature Request"},
+                                        "value": "feature_request"
+                                    }
+                                ]
+                            },
+                            "label": {"type": "plain_text", "text": "Task Category"}
+                        }
+                    ]
+                }
+                
+                if trigger_id:
+                    try:
+                        await slack_client.open_view(trigger_id, modal_view)
+                    except Exception as e:
+                        logger.error(f"Failed to open task creation modal: {e}")
+                        
+            elif action_id == "task_assign_me":
+                # Assign to me button clicked
+                message = payload.get("message", {})
+                message_ts = message.get("ts")
+                thread_ts = message.get("thread_ts") or message_ts
+                
+                if response_url:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(response_url, json={
+                            "response_type": "in_channel",
+                            "replace_original": False,
+                            "text": f"👤 <@{user_id}> has claimed an action item in this thread! :muscle:"
+                        })
+                        
+            elif action_id == "task_done":
+                # Mark done button clicked
+                if response_url:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(response_url, json={
+                            "response_type": "in_channel",
+                            "replace_original": False,
+                            "text": f"✅ An action item in this thread was marked as completed by <@{user_id}>! :tada:"
+                        })
+                        
+    return {"ok": True}

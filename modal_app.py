@@ -116,8 +116,7 @@ def verify_request(request: Request) -> bool:
 # Code Execution (with Dynamic Dependencies)
 # ─────────────────────────────────────────────
 
-@app.function(image=image, timeout=600, memory=4096, volumes={"/root/.pip_cache": pip_cache})
-def execute_code(code: str, language: str = "python", dependencies: list[str] = None):
+def _execute_code_impl(code: str, language: str = "python", dependencies: list[str] = None, max_memory_mb: int = 4096, mounted_skills: dict = None):
     if language not in ["python", "javascript"]:
         return {"success": False, "error": f"Unsupported language: {language}"}
 
@@ -130,6 +129,19 @@ def execute_code(code: str, language: str = "python", dependencies: list[str] = 
             cmd = []
             filepath = os.path.join(env_dir, f"script.{'py' if language == 'python' else 'js'}")
             
+            # Mount custom dynamic skills BEFORE dependencies check
+            if mounted_skills and language == "python":
+                for skill_name, skill_data in mounted_skills.items():
+                    skill_filepath = os.path.join(env_dir, f"{skill_name}.py")
+                    with open(skill_filepath, "w") as sf:
+                        sf.write(skill_data.get("code", ""))
+                    
+                    # Merge dynamic dependencies
+                    skill_deps = skill_data.get("dependencies", [])
+                    for dep in skill_deps:
+                        if dep and dep not in dependencies:
+                            dependencies.append(dep)
+
             with open(filepath, "w") as f:
                 f.write(code)
 
@@ -177,9 +189,9 @@ def execute_code(code: str, language: str = "python", dependencies: list[str] = 
             def set_resource_limits():
                 if resource is None:
                     return
-                # Limit memory to 8GB (for heavy ML and data processing)
+                # Limit memory dynamically to max_memory_mb
                 try:
-                    resource.setrlimit(resource.RLIMIT_AS, (8192 * 1024 * 1024, 8192 * 1024 * 1024))
+                    resource.setrlimit(resource.RLIMIT_AS, (max_memory_mb * 1024 * 1024, max_memory_mb * 1024 * 1024))
                 except ValueError:
                     pass
                 # Limit CPU to 120 seconds (matches subprocess timeout)
@@ -208,6 +220,16 @@ def execute_code(code: str, language: str = "python", dependencies: list[str] = 
             return {"success": False, "error": "Code execution timed out (120s)"}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+
+@app.function(image=image, timeout=600, memory=4096, volumes={"/root/.pip_cache": pip_cache})
+def execute_code(code: str, language: str = "python", dependencies: list[str] = None, mounted_skills: dict = None):
+    return _execute_code_impl(code, language, dependencies, max_memory_mb=3584, mounted_skills=mounted_skills)
+
+
+@app.function(image=image, timeout=600, memory=16384, volumes={"/root/.pip_cache": pip_cache})
+def execute_code_heavy(code: str, language: str = "python", dependencies: list[str] = None, mounted_skills: dict = None):
+    return _execute_code_impl(code, language, dependencies, max_memory_mb=14336, mounted_skills=mounted_skills)
 
 
 
@@ -518,11 +540,29 @@ async def execute(request: Request):
     task_type = payload.get("type", "code")
 
     if task_type == "code":
-        return await execute_code.remote.aio(
-            payload["code"],
-            payload.get("language", "python"),
-            payload.get("dependencies", [])
-        )
+        memory_tier = payload.get("memory_tier", "standard")
+        deps = payload.get("dependencies", [])
+        mounted_skills = payload.get("mounted_skills", {})
+        
+        # Auto-promote to heavy if any heavy packages are requested
+        heavy_packages = {"torch", "tensorflow", "transformers", "scipy", "fastembed", "spacy", "crawl4ai", "weasyprint", "playwright", "polars"}
+        if any(d.split("==")[0].strip().lower() in heavy_packages for d in deps):
+            memory_tier = "heavy"
+            
+        if memory_tier == "heavy":
+            return await execute_code_heavy.remote.aio(
+                payload["code"],
+                payload.get("language", "python"),
+                deps,
+                mounted_skills
+            )
+        else:
+            return await execute_code.remote.aio(
+                payload["code"],
+                payload.get("language", "python"),
+                deps,
+                mounted_skills
+            )
     elif task_type == "web_read":
         return await read_web_page.remote.aio(payload["url"], payload.get("engine", "lightpanda"))
     elif task_type == "document":

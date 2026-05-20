@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klawhub | Hire Your Persistent AI Coworker</title>
+    
+    <!-- Meta tags for premium SEO optimization -->
+    <meta name="description" content="Klawhub is a persistent, tool-competent, workspace-isolated AI employee that performs development, documents generation, headless scraping, and analytical data science on autopilot.">
+    <meta name="keywords" content="AI Coworker, LangGraph, Modal Sandbox, Slack Agent, Lightpanda Scraping, WeasyPrint PDF, Data Science Agent">
+    <meta name="author" content="Klawhub Development Group">
+    
+    <!-- Premium Google Fonts: Geist Sans and Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #070708;
+            --primary: #818cf8;
+            --primary-glow: rgba(129, 140, 248, 0.15);
+            --accent-pink: #f43f5e;
+            --accent-emerald: #10b981;
+            --text-main: #f3f4f6;
+            --text-muted: #a3a3a3;
+            --glass-bg: rgba(255, 255, 255, 0.015);
+            --glass-border: rgba(255, 255, 255, 0.04);
+            --glass-border-hover: rgba(255, 255, 255, 0.09);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(129, 140, 248, 0.06) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(244, 63, 94, 0.03) 0px, transparent 50%),
+                linear-gradient(rgba(255, 255, 255, 0.006) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.006) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+            color: var(--text-main);
+            overflow-x: hidden;
+            line-height: 1.6;
+        }
+
+        /* Core layout sections */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 40px;
+        }
+
+        /* Minimalist Header */
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            background-color: rgba(7, 7, 8, 0.75);
+            border-bottom: 1px solid var(--glass-border);
+            z-index: 100;
+        }
+
+        .logo {
+            font-family: 'Geist', sans-serif;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo-symbol {
+            width: 10px;
+            height: 10px;
+            background-color: var(--primary);
+            border-radius: 2px;
+            box-shadow: 0 0 10px var(--primary);
+            transform: rotate(45deg);
+        }
+
+        .cta-group {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .nav-link {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        .nav-link:hover {
+            color: #fff;
+        }
+
+        /* Sleek Button deck */
+        .btn-header {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .btn-glass {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            color: #fff;
+        }
+        .btn-glass:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--glass-border-hover);
+            transform: translateY(-1px);
+        }
+
+        /* Hero Section */
+        .hero {
+            padding: 240px 0 120px;
+            text-align: center;
+            position: relative;
+        }
+
+        .alert-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(129, 140, 248, 0.06);
+            border: 1px solid rgba(129, 140, 248, 0.12);
+            padding: 6px 14px;
+            border-radius: 99px;
+            margin-bottom: 32px;
+            animation: fade-in-up 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .alert-pill span {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--primary);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .alert-pill .pulse-indicator {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            box-shadow: 0 0 8px var(--primary);
+        }
+
+        h1 {
+            font-family: 'Geist', sans-serif;
+            font-size: 72px;
+            font-weight: 800;
+            line-height: 1.05;
+            letter-spacing: -3.5px;
+            margin-bottom: 28px;
+            background: linear-gradient(180deg, #ffffff 40%, #a3a3a3 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-desc {
+            max-width: 640px;
+            margin: 0 auto 48px;
+            font-size: 20px;
+            color: var(--text-muted);
+            font-weight: 400;
+            line-height: 1.5;
+            letter-spacing: -0.2px;
+        }
+
+        .hero-ctas {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: #ffffff;
+            color: #070708;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+        .btn-primary:hover {
+            background: #e5e5e5;
+            transform: translateY(-1px);
+            box-shadow: 0 10px 20px rgba(255, 255, 255, 0.05);
+        }
+
+        .btn-secondary {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--glass-bg);
+            color: #fff;
+            border: 1px solid var(--glass-border);
+            border-top-color: rgba(255,255,255,0.08);
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: var(--glass-border-hover);
+            transform: translateY(-1px);
+        }
+
+        /* Features Section & Bento Grid */
+        .features {
+            padding: 80px 0 120px;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 64px;
+        }
+
+        h2 {
+            font-family: 'Geist', sans-serif;
+            font-size: 40px;
+            font-weight: 700;
+            letter-spacing: -1.8px;
+            margin-bottom: 16px;
+            color: #fff;
+        }
+
+        .section-desc {
+            color: var(--text-muted);
+            font-size: 16px;
+            max-width: 580px;
+            margin: 0 auto;
+            font-weight: 400;
+            line-height: 1.6;
+        }
+
+        /* Bento Grid Architecture */
+        .bento-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+
+        .bento-card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 36px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 400px;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bento-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(800px circle at var(--x, 0) var(--y, 0), rgba(255,255,255,0.035), transparent 40%);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .bento-card:hover {
+            border-color: rgba(255, 255, 255, 0.08);
+            border-top-color: rgba(255, 255, 255, 0.18);
+            transform: translateY(-3px);
+            background: rgba(255, 255, 255, 0.025);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .span-2 {
+            grid-column: span 2;
+        }
+
+        .card-meta {
+            margin-bottom: 24px;
+        }
+
+        .card-icon {
+            font-size: 20px;
+            color: var(--primary);
+            margin-bottom: 16px;
+            display: inline-block;
+        }
+
+        .card-title {
+            font-family: 'Geist', sans-serif;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+
+        .card-desc {
+            color: var(--text-muted);
+            font-size: 14px;
+            line-height: 1.6;
+            font-weight: 400;
+        }
+
+        /* Bento Inner Elements */
+        /* Code execution terminal mockup */
+        .mock-terminal {
+            background: #030304;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-family: 'Geist Mono', monospace;
+            font-size: 13px;
+            color: #a3a3a3;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            margin-top: 24px;
+            width: 100%;
+        }
+        .terminal-header {
+            background: rgba(255, 255, 255, 0.02);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .terminal-dots {
+            display: flex;
+            gap: 6px;
+        }
+        .t-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .t-red { background: #ff5f56; }
+        .t-yellow { background: #ffbd2e; }
+        .t-green { background: #27c93f; }
+        .terminal-title {
+            margin-left: 16px;
+            font-size: 11px;
+            color: #666;
+        }
+        .terminal-body {
+            padding: 16px;
+            text-align: left;
+        }
+        .t-line {
+            margin-bottom: 6px;
+            line-height: 1.5;
+        }
+        .t-prompt {
+            color: var(--primary);
+        }
+        .t-muted { color: #525252; }
+        .t-cyan { color: #38bdf8; }
+        .t-success { color: #34d399; }
+
+        /* Crawler speed comparison bar chart */
+        .crawler-comparison {
+            background: #030304;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 18px;
+            margin-top: auto;
+            text-align: left;
+        }
+        .comparison-row {
+            margin-bottom: 14px;
+        }
+        .row-label {
+            font-size: 11px;
+            color: #737373;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+        .row-bar-container {
+            width: 100%;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+        .row-bar {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            padding-left: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: 'Geist Mono', monospace;
+        }
+        .row-bar.slow {
+            background: rgba(244, 63, 94, 0.12);
+            border-right: 2px solid var(--accent-pink);
+            color: var(--accent-pink);
+        }
+        .row-bar.fast {
+            background: rgba(16, 185, 129, 0.12);
+            border-right: 2px solid var(--accent-emerald);
+            color: var(--accent-emerald);
+        }
+        .comparison-meta {
+            font-size: 10px;
+            color: #525252;
+            text-align: right;
+            font-weight: 500;
+        }
+
+        /* Invoice mock component */
+        .invoice-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: auto;
+            width: 100%;
+        }
+        .invoice-paper {
+            background: #ffffff;
+            border-radius: 4px;
+            width: 100%;
+            max-width: 240px;
+            height: 160px;
+            padding: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            text-align: left;
+        }
+        .paper-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .paper-logo {
+            width: 12px;
+            height: 12px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+        .paper-title {
+            font-family: 'Geist Mono', monospace;
+            font-size: 9px;
+            font-weight: 700;
+            color: #171717;
+        }
+        .paper-line {
+            height: 2px;
+            background: #e5e5e5;
+            margin: 6px 0;
+        }
+        .paper-grid {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .grid-line {
+            height: 5px;
+            background: #f5f5f5;
+            border-radius: 1px;
+        }
+        .grid-line.short { width: 35%; background: #e5e5e5; }
+        .grid-line.long { width: 70%; }
+        .grid-line.price { width: 20%; align-self: flex-end; background: #e5e5e5; }
+        .paper-footer {
+            border-top: 1px solid #f0f0f0;
+            padding-top: 6px;
+            text-align: right;
+        }
+        .paper-total {
+            font-family: 'Geist Mono', monospace;
+            font-size: 9px;
+            font-weight: 700;
+            color: #171717;
+        }
+
+        /* Polars grid dataframe */
+        .polars-dataframe {
+            background: #030304;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 24px;
+            width: 100%;
+            text-align: left;
+        }
+        .df-header {
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 8px 12px;
+            font-size: 11px;
+            color: #737373;
+            font-family: 'Geist Mono', monospace;
+        }
+        .df-table {
+            font-family: 'Geist Mono', monospace;
+            font-size: 11px;
+        }
+        .df-row {
+            display: grid;
+            grid-template-columns: 0.6fr 1fr 1fr 1fr;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            padding: 8px 12px;
+            color: #a3a3a3;
+        }
+        .df-row.df-thead {
+            color: #e5e5e5;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.01);
+        }
+        .df-row:last-child {
+            border-bottom: none;
+        }
+        .status-pass {
+            color: var(--accent-emerald);
+            font-weight: 700;
+        }
+        .status-fail {
+            color: var(--accent-pink);
+            font-weight: 700;
+        }
+
+        /* Security Banner */
+        .security-banner {
+            margin: 80px 0 160px;
+        }
+
+        .banner-card {
+            background: #030304;
+            border: 1px solid var(--glass-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 24px;
+            padding: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 60px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .banner-info {
+            max-width: 500px;
+            text-align: left;
+        }
+
+        .badge-red {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(244, 63, 94, 0.06);
+            border: 1px solid rgba(244, 63, 94, 0.15);
+            color: var(--accent-pink);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            padding: 4px 12px;
+            border-radius: 99px;
+            margin-bottom: 24px;
+        }
+
+        .banner-title {
+            font-family: 'Geist', sans-serif;
+            font-size: 38px;
+            font-weight: 700;
+            letter-spacing: -1.8px;
+            margin-bottom: 18px;
+            color: #fff;
+        }
+
+        .banner-desc {
+            color: var(--text-muted);
+            font-size: 15px;
+            line-height: 1.6;
+            margin-bottom: 36px;
+            font-weight: 400;
+        }
+
+        /* Aesthetic Code Blocks */
+        .code-display {
+            background: #030304;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            overflow: hidden;
+            font-family: 'Geist Mono', monospace;
+            font-size: 13px;
+            color: #a3a3a3;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            max-width: 440px;
+            width: 100%;
+            text-align: left;
+        }
+
+        .code-header {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 0;
+            background: rgba(255, 255, 255, 0.01);
+            padding: 12px 18px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            align-items: center;
+        }
+        
+        .code-body {
+            padding: 20px;
+        }
+
+        .code-line {
+            display: block;
+            margin-bottom: 6px;
+        }
+        
+        .token-redact {
+            color: var(--accent-pink);
+            background: rgba(244, 63, 94, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            border: 1px dashed rgba(244, 63, 94, 0.25);
+        }
+
+        /* Footer */
+        footer {
+            padding: 80px 0 60px;
+            border-top: 1px solid var(--glass-border);
+            text-align: center;
+            background-color: #030304;
+        }
+
+        .footer-logo {
+            font-family: 'Geist', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 24px;
+            letter-spacing: -0.5px;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 32px;
+            margin-bottom: 36px;
+        }
+
+        .footer-link {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 13px;
+            transition: color 0.2s;
+        }
+        .footer-link:hover {
+            color: #fff;
+        }
+
+        .footer-text {
+            font-size: 11px;
+            color: #525252;
+            font-family: 'Geist Mono', monospace;
+        }
+
+        /* Animations */
+        @keyframes fade-in-up {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Responsive scaling */
+        @media(max-width: 950px) {
+            h1 { font-size: 48px; letter-spacing: -2px; }
+            .bento-grid { grid-template-columns: 1fr; }
+            .span-2 { grid-column: span 1; }
+            .banner-card { flex-direction: column; padding: 40px; gap: 40px; }
+            .code-display { max-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Navigation -->
+    <header id="nav-header">
+        <div class="logo">
+            <div class="logo-symbol"></div>
+            Klawhub
+        </div>
+        <div class="cta-group">
+            <a href="/dashboard" class="nav-link">Control Panel</a>
+            <a href="/api/slack/install" class="btn-header btn-glass">Add to Slack</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Hero Section -->
+        <section class="hero">
+            <div class="alert-pill">
+                <div class="pulse-indicator"></div>
+                <span>LangGraph & Sandbox Engine Active</span>
+            </div>
+            <h1>Hire Your First<br>AI Coworker</h1>
+            <p class="hero-desc">
+                Not a simple assistant. Klawhub is a workspace-isolated, tool-competent, proactive coworker that executes code, crawls sites, and compiles reports on autopilot.
+            </p>
+            <div class="hero-ctas">
+                <a href="/api/slack/install" class="btn-primary">
+                    <!-- Inline SVG Slack Logo -->
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right:2px;">
+                        <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523 2.528 2.528 0 0 1-2.522-2.523 2.528 2.528 0 0 1 2.522-2.52h2.52v2.52zm1.261 0a2.528 2.528 0 0 1 2.52-2.52h5.043a2.528 2.528 0 0 1 2.522 2.52v5.042a2.528 2.528 0 0 1-2.522 2.52H8.823a2.528 2.528 0 0 1-2.52-2.52v-5.042zM8.823 5.043a2.528 2.528 0 0 1 2.52-2.52 2.528 2.528 0 0 1 2.522 2.52v2.52h-2.522a2.528 2.528 0 0 1-2.52-2.52zm0 1.261a2.528 2.528 0 0 1 2.52 2.52v5.043a2.528 2.528 0 0 1-2.522 2.522H3.782a2.528 2.528 0 0 1-2.52-2.522 2.528 2.528 0 0 1 2.52-2.52h5.041zm10.136 3.782a2.528 2.528 0 0 1 2.52-2.522 2.528 2.528 0 0 1 2.522 2.522 2.528 2.528 0 0 1-2.522 2.52h-2.52v-2.52zm-1.262 0a2.528 2.528 0 0 1-2.52 2.52h-5.043a2.528 2.528 0 0 1-2.522-2.52V3.782a2.528 2.528 0 0 1 2.522-2.52h5.043a2.528 2.528 0 0 1 2.52 2.52v5.041zm-3.78 10.136a2.528 2.528 0 0 1-2.52 2.52 2.528 2.528 0 0 1-2.522-2.52v-2.52h2.522a2.528 2.528 0 0 1 2.52 2.52zm0-1.262a2.528 2.528 0 0 1-2.52-2.52v-5.043a2.528 2.528 0 0 1 2.522-2.52h5.043a2.528 2.528 0 0 1 2.52 2.52v5.043h-5.043z"/>
+                    </svg>
+                    Connect Slack
+                </a>
+                <a href="/dashboard" class="btn-secondary">Mission Control</a>
+            </div>
+        </section>
+
+        <!-- Features Bento Grid -->
+        <section class="features" id="capabilities">
+            <div class="section-header">
+                <h2>The Custom Bento Matrix</h2>
+                <p class="section-desc">Klawhub boots an advanced, tool-competent execution graph mapped into isolated sandbox environments.</p>
+            </div>
+            
+            <div class="bento-grid">
+                <!-- Card 1: Sandbox (Span 2) -->
+                <div class="bento-card span-2" id="feat-1">
+                    <div class="card-meta">
+                        <div class="card-icon">💻</div>
+                        <div class="card-title">Isolated Cloud Execution</div>
+                        <p class="card-desc">Runs complete Python 3.11 scripts and complex analytical libraries inside isolated containers. Dynamically compiles, checks AST flags, and executes safely with standard resource limits.</p>
+                    </div>
+                    <div class="mock-terminal">
+                        <div class="terminal-header">
+                            <div class="terminal-dots">
+                                <span class="t-dot t-red"></span>
+                                <span class="t-dot t-yellow"></span>
+                                <span class="t-dot t-green"></span>
+                            </div>
+                            <div class="terminal-title">sandbox-exec ~ python</div>
+                        </div>
+                        <div class="terminal-body">
+                            <div class="t-line"><span class="t-prompt">$</span> pip install polars fastembed weasyprint --quiet</div>
+                            <div class="t-line t-muted">Installing packages... Done (1.4s)</div>
+                            <div class="t-line"><span class="t-prompt">$</span> python3 data_analysis.py</div>
+                            <div class="t-line t-cyan">>>> import polars as pl</div>
+                            <div class="t-line t-cyan">>>> df = pl.read_csv("telemetry.csv")</div>
+                            <div class="t-line t-success">>>> Execution complete. Yielding vector chart... [Done]</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2: Headless Crawler -->
+                <div class="bento-card" id="feat-2">
+                    <div class="card-meta">
+                        <div class="card-icon">✈️</div>
+                        <div class="card-title">Rust Headless Scraping</div>
+                        <p class="card-desc">Leverages Lightpanda browser runtimes to extract JavaScript-rendered web content, returning ready schemas (e.g. flight options) at scale.</p>
+                    </div>
+                    <div class="crawler-comparison">
+                        <div class="comparison-row">
+                            <div class="row-label">Node Puppeteer</div>
+                            <div class="row-bar-container">
+                                <div class="row-bar slow" style="width: 100%;">12.8s</div>
+                            </div>
+                        </div>
+                        <div class="comparison-row">
+                            <div class="row-label">Rust Lightpanda</div>
+                            <div class="row-bar-container">
+                                <div class="row-bar fast" style="width: 15%;">1.1s</div>
+                            </div>
+                        </div>
+                        <div class="comparison-meta">9x Speed Gain • Epoll</div>
+                    </div>
+                </div>
+
+                <!-- Card 3: Documents Synthesizer -->
+                <div class="bento-card" id="feat-3">
+                    <div class="card-meta">
+                        <div class="card-icon">📄</div>
+                        <div class="card-title">Vector Document Typeset</div>
+                        <p class="card-desc">Formats invoice templates and PDF layouts via WeasyPrint, allowing precise styling, margins, and custom vector typesets.</p>
+                    </div>
+                    <div class="invoice-container">
+                        <div class="invoice-paper">
+                            <div class="paper-header">
+                                <div class="paper-logo"></div>
+                                <div class="paper-title">INVOICE</div>
+                            </div>
+                            <div class="paper-line"></div>
+                            <div class="paper-grid">
+                                <div class="grid-line short"></div>
+                                <div class="grid-line long"></div>
+                                <div class="grid-line price"></div>
+                            </div>
+                            <div class="paper-footer">
+                                <div class="paper-total">Total: $4,200.00</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 4: Data Science (Span 2) -->
+                <div class="bento-card span-2" id="feat-4">
+                    <div class="card-meta">
+                        <div class="card-icon">📊</div>
+                        <div class="card-title">Data Science & ML Pipeline</div>
+                        <p class="card-desc">Applies sophisticated regressions, classifications, and custom feature models using Polars, Scikit-learn, and local Fastembed models for rapid analysis.</p>
+                    </div>
+                    <div class="polars-dataframe">
+                        <div class="df-header">DataFrame: sandbox_telemetry (120,402 rows)</div>
+                        <div class="df-table">
+                            <div class="df-row df-thead">
+                                <div>index</div>
+                                <div>metric_val</div>
+                                <div>confidence</div>
+                                <div>status</div>
+                            </div>
+                            <div class="df-row">
+                                <div>0</div>
+                                <div>0.9421</div>
+                                <div>98.4%</div>
+                                <div class="status-pass">SUCCESS</div>
+                            </div>
+                            <div class="df-row">
+                                <div>1</div>
+                                <div>1.2052</div>
+                                <div>99.1%</div>
+                                <div class="status-pass">SUCCESS</div>
+                            </div>
+                            <div class="df-row">
+                                <div>2</div>
+                                <div>0.0812</div>
+                                <div>92.0%</div>
+                                <div class="status-fail">AUDIT_ERR</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Security Firewall Banner -->
+        <section class="security-banner">
+            <div class="banner-card">
+                <div class="banner-info">
+                    <div class="badge-red">Outbound Data Leak Firewall</div>
+                    <h3 class="banner-title">The Auditor Protection</h3>
+                    <p class="banner-desc">
+                        Security is Klawhub's absolute priority. The graph's dedicated Auditor node intercepts all outgoing communication payloads, scanning and redacting database URIs, Stripe secret tokens, AWS credentials, and private PEM keys before they can leave the boundary.
+                    </p>
+                    <a href="/api/slack/install" class="btn-primary" style="padding:12px 24px; font-size:14px; box-shadow:none;">Activate Secure Workspace</a>
+                </div>
+                <!-- Interactive Aesthetic Code Block -->
+                <div class="code-display">
+                    <div class="code-header">
+                        <div class="t-dot t-red"></div>
+                        <div class="t-dot t-yellow"></div>
+                        <div class="t-dot t-green"></div>
+                        <span style="font-size: 11px; color: #525252; margin-left: auto; font-family: inherit;">auditor.py</span>
+                    </div>
+                    <div class="code-body">
+                        <span class="code-line" style="color:#525252;"># Redacting credentials payload</span>
+                        <span class="code-line"><span style="color:#818cf8;">import</span> re</span>
+                        <span class="code-line">payload = {</span>
+                        <span class="code-line">&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a5b4fc;">"workspace"</span>: <span style="color:#818cf8;">"Klawhub_Inc"</span>,</span>
+                        <span class="code-line">&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a5b4fc;">"stripe_key"</span>: <span class="token-redact">[REDACTED_STRIPE_KEY]</span>,</span>
+                        <span class="code-line">&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a5b4fc;">"status"</span>: <span style="color:#10b981;">"firewall_active"</span></span>
+                        <span class="code-line">}</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-logo">Klawhub</div>
+        <div class="footer-links">
+            <a href="#capabilities" class="footer-link">Capabilities</a>
+            <a href="/dashboard" class="footer-link">Control Panel</a>
+            <a href="/api/slack/install" class="footer-link">OAuth Connect</a>
+        </div>
+        <p class="footer-text">&copy; 2026 Klawhub Coworkers Platform. Strictly Multi-Tenant Encrypted.</p>
+    </footer>
+
+    <!-- Interactive Card Lighting Tracking Javascript Effect -->
+    <script>
+        const cards = document.querySelectorAll('.bento-card');
+        cards.forEach(card => {
+            card.addEventListener('mousemove', e => {
+                const rect = card.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                card.style.setProperty('--x', `${x}px`);
+                card.style.setProperty('--y', `${y}px`);
+            });
+        });
+    </script>
+</body>
+</html>

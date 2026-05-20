@@ -1,10 +1,13 @@
 {
   "functions": {
-    "src/app/api/inngest/route.ts": {
+    "api/index.py": {
       "maxDuration": 300
-    },
-    "src/app/api/slack/**/*.ts": {
-      "maxDuration": 60
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index.py"
+    }
+  ]
 }

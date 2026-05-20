@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klawhub | Mission Control Dashboard</title>
+    
+    <!-- Meta tags for dashboard SEO and performance -->
+    <meta name="description" content="Klawhub multi-tenant AI Coworker dashboard. Manage bot identity, enable capabilities, and track sandboxed runs telemetry.">
+    
+    <!-- Premium Google Fonts: Geist Sans and Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #050506;
+            --primary: #818cf8;
+            --primary-glow: rgba(129, 140, 248, 0.15);
+            --accent-pink: #f43f5e;
+            --accent-emerald: #10b981;
+            --text-main: #f3f4f6;
+            --text-muted: #a3a3a3;
+            --glass-bg: rgba(255, 255, 255, 0.015);
+            --glass-border: rgba(255, 255, 255, 0.04);
+            --glass-border-hover: rgba(255, 255, 255, 0.09);
+            --sidebar-width: 260px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Geist', -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(129, 140, 248, 0.04) 0px, transparent 40%),
+                linear-gradient(rgba(255, 255, 255, 0.005) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.005) 1px, transparent 1px);
+            background-size: 100% 100%, 32px 32px, 32px 32px;
+            color: var(--text-main);
+            overflow-x: hidden;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Fixed Sidebar */
+        aside {
+            width: var(--sidebar-width);
+            background: #070708;
+            border-right: 1px solid var(--glass-border);
+            padding: 40px 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: fixed;
+            height: 100vh;
+            left: 0;
+            top: 0;
+            z-index: 10;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Geist', sans-serif;
+            font-size: 18px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            color: #fff;
+        }
+
+        .logo-indicator {
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            box-shadow: 0 0 10px var(--primary);
+            border-radius: 2px;
+            transform: rotate(45deg);
+        }
+
+        .workspace-badge {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--glass-border);
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 24px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .workspace-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--accent-emerald);
+            box-shadow: 0 0 8px var(--accent-emerald);
+        }
+
+        .nav-menu {
+            list-style: none;
+            margin-top: 40px;
+            flex-grow: 1;
+        }
+
+        .nav-item {
+            margin-bottom: 6px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-muted);
+            text-decoration: none;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .nav-link:hover, .nav-link.active {
+            background: rgba(255, 255, 255, 0.03);
+            color: #fff;
+        }
+        .nav-link.active {
+            font-weight: 600;
+            border-left: 2px solid var(--primary);
+            border-radius: 0 6px 6px 0;
+            padding-left: 12px;
+        }
+
+        .logout-btn {
+            background: transparent;
+            border: 1px solid rgba(244, 63, 94, 0.2);
+            color: var(--accent-pink);
+            padding: 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            width: 100%;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .logout-btn:hover {
+            background: rgba(244, 63, 94, 0.05);
+            transform: translateY(-1px);
+        }
+
+        /* Main Content Arena */
+        main {
+            margin-left: var(--sidebar-width);
+            flex-grow: 1;
+            padding: 60px 80px;
+            max-width: 1100px;
+            width: calc(100% - var(--sidebar-width));
+        }
+
+        .dash-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 48px;
+        }
+
+        h1 {
+            font-family: 'Geist', sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -1.2px;
+            color: #fff;
+        }
+
+        /* Telemetry Metric Cards */
+        .telemetry-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .tel-card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 24px;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .tel-card:hover {
+            border-color: rgba(255, 255, 255, 0.08);
+            border-top-color: rgba(255, 255, 255, 0.18);
+            transform: translateY(-1px);
+        }
+
+        .tel-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .tel-val {
+            font-family: 'Geist', sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+
+        .tel-meta {
+            font-size: 11px;
+            color: var(--accent-emerald);
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 500;
+        }
+
+        /* Responsive Dashboard layout */
+        .dash-grid {
+            display: grid;
+            grid-template-columns: 1.6fr 1fr;
+            gap: 24px;
+        }
+
+        .panel-card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+        }
+
+        .panel-title {
+            font-family: 'Geist', sans-serif;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: #fff;
+            letter-spacing: -0.3px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="text"], textarea {
+            width: 100%;
+            background: #030304;
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        input[type="text"]:focus, textarea:focus {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: #000;
+        }
+
+        /* Skill Switch item */
+        .skill-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+        }
+        .skill-item:last-child {
+            border-bottom: none;
+        }
+
+        .skill-info {
+            max-width: 80%;
+            text-align: left;
+        }
+
+        .skill-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+
+        .skill-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        /* Toggle switches */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 38px;
+            height: 20px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: .2s cubic-bezier(0.16, 1, 0.3, 1);
+            border-radius: 99px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 12px;
+            width: 12px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #525252;
+            transition: .2s cubic-bezier(0.16, 1, 0.3, 1);
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: var(--primary);
+            border-color: rgba(129, 140, 248, 0.2);
+            box-shadow: 0 0 10px rgba(129, 140, 248, 0.2);
+        }
+        input:checked + .slider:before {
+            transform: translateX(18px);
+            background-color: #fff;
+        }
+
+        /* Action Save button */
+        .btn-save {
+            background: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #070708;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            width: 100%;
+        }
+        .btn-save:hover {
+            background: #e5e5e5;
+        }
+
+        /* Doughnut Telemetry Circle */
+        .chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            padding: 16px 0;
+        }
+
+        .chart-label-center {
+            position: absolute;
+            text-align: center;
+        }
+        
+        .chart-center-num {
+            font-family: 'Geist', sans-serif;
+            font-size: 28px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+
+        .chart-center-lbl {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .chart-legends {
+            margin-top: 24px;
+            display: flex;
+            justify-content: space-around;
+            gap: 10px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .legend-color {
+            width: 8px;
+            height: 8px;
+            border-radius: 20%;
+        }
+
+        /* Minimalist Toast Alerts */
+        .toast {
+            position: fixed;
+            bottom: 40px;
+            right: 40px;
+            background: #070708;
+            border: 1px solid var(--accent-emerald);
+            padding: 14px 24px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            transform: translateY(120%);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 200;
+        }
+        .toast.show {
+            transform: translateY(0);
+        }
+        .toast.error {
+            border-color: var(--accent-pink);
+        }
+
+        /* Adaptive scaling */
+        @media(max-width: 950px) {
+            body { flex-direction: column; }
+            aside { width: 100%; height: auto; position: relative; padding: 24px; border-right: none; border-bottom: 1px solid var(--glass-border); }
+            main { margin-left: 0; width: 100%; padding: 24px; }
+            .dash-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar Navigation -->
+    <aside>
+        <div>
+            <div class="logo-group">
+                <div class="logo-indicator"></div>
+                Klawhub
+            </div>
+            
+            <div class="workspace-badge">
+                <div class="workspace-dot"></div>
+                <span id="badge-workspace-name">Loading Workspace...</span>
+            </div>
+
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="/dashboard" class="nav-link active">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        Mission Control
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/" class="nav-link">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;">
+                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                        </svg>
+                        Landing Page
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <button class="logout-btn" type="button" onclick="handleLogout()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+            Disconnect Workspace
+        </button>
+    </aside>
+
+    <!-- Main Content Arena -->
+    <main>
+        <div class="dash-header">
+            <div>
+                <h1>Mission Control</h1>
+                <p style="color:var(--text-muted); font-size:13px; margin-top:4px;">Manage custom profile, skills, and execution telemetry.</p>
+            </div>
+            <div class="workspace-badge" style="margin-top:0;">
+                <span id="badge-workspace-plan" style="text-transform:uppercase; font-size:10px; font-weight:700; color:var(--primary);">FREE PLAN</span>
+            </div>
+        </div>
+
+        <!-- Telemetry Row -->
+        <section class="telemetry-row">
+            <!-- Runs -->
+            <div class="tel-card">
+                <div class="tel-label">Sandboxed Runs</div>
+                <div class="tel-val" id="tel-runs">0</div>
+                <div class="tel-meta">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg>
+                    <span>100% active state</span>
+                </div>
+            </div>
+            <!-- Tasks -->
+            <div class="tel-card">
+                <div class="tel-label">Milestones Completed</div>
+                <div class="tel-val" id="tel-tasks">0</div>
+                <div class="tel-meta" style="color:var(--accent-pink);">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><polyline points="9 11 12 14 22 4"></polyline></svg>
+                    <span id="tel-tasks-completed">0 fully audited</span>
+                </div>
+            </div>
+            <!-- Active Schedules -->
+            <div class="tel-card">
+                <div class="tel-label">Schedules Connected</div>
+                <div class="tel-val" id="tel-schedules">0</div>
+                <div class="tel-meta" style="color:var(--primary);">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <span>Cron active triggers</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dynamic Grid -->
+        <section class="dash-grid">
+            <!-- Left Panel (Settings Forms) -->
+            <div>
+                <!-- Identity panel -->
+                <div class="panel-card">
+                    <div class="panel-title">
+                        Coworker Identity Profile
+                        <!-- Ambient Active toggle -->
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Bot Active</span>
+                            <label class="switch">
+                                <input type="checkbox" id="field-is-active" checked>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="field-agent-name">Coworker Name</label>
+                        <input type="text" id="field-agent-name" placeholder="e.g. Klawhub">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="field-agent-personality">Custom System Personality / Instructions</label>
+                        <textarea id="field-agent-personality" rows="4" placeholder="Detail custom prompt structures and communication styles..."></textarea>
+                    </div>
+                </div>
+
+                <!-- Skills configuration -->
+                <div class="panel-card">
+                    <div class="panel-title">Sandboxed Skills Allowed</div>
+                    
+                    <div class="skill-item">
+                        <div class="skill-info">
+                            <div class="skill-name">Web Search (Tavily/Lightpanda)</div>
+                            <div class="skill-desc">Allows the Explorer node to query live web caches and fetch remote search indexes.</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" class="skill-toggle" value="web_search">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="skill-item">
+                        <div class="skill-info">
+                            <div class="skill-name">Python Cloud Sandbox</div>
+                            <div class="skill-desc">Equips the Worker to execute Python 3.11 code, run analytics, and compile scripts dynamically.</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" class="skill-toggle" value="python_sandbox">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="skill-item">
+                        <div class="skill-info">
+                            <div class="skill-name">Word & PDF Document Synthesis</div>
+                            <div class="skill-desc">Enables formatting reports, typesetting margins, and building customer invoices via WeasyPrint.</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" class="skill-toggle" value="pdf_generator">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Save Trigger -->
+                <button class="btn-save" type="button" onclick="handleSaveSettings()">Synchronize Coworker Settings</button>
+            </div>
+
+            <!-- Right Panel (Limits & Telemetry Graphs) -->
+            <div>
+                <!-- Plan & Usage Limits Card -->
+                <div class="panel-card">
+                    <div class="panel-title">Resource Budget Quotas</div>
+                    <div style="margin-bottom:20px;">
+                        <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); margin-bottom:6px;">
+                            <span>Monthly Runs Budget</span>
+                            <span style="color:#fff; font-weight:600;"><span id="usage-runs-curr">0</span> / <span id="usage-runs-limit">50</span> Runs</span>
+                        </div>
+                        <!-- Progress bar -->
+                        <div style="width:100%; height:6px; background:rgba(255,255,255,0.02); border:1px solid var(--glass-border); border-radius:99px; overflow:hidden;">
+                            <div id="usage-progress-bar" style="width: 0%; height:100%; background:linear-gradient(90deg, var(--primary) 0%, var(--accent-pink) 100%); transition:width 0.8s;"></div>
+                        </div>
+                    </div>
+                    <p style="font-size:11px; color:var(--text-muted); line-height:1.5;">Budgets are reset on the first of each month. Upgrade to Enterprise for unlimited execution sandboxes.</p>
+                </div>
+
+                <!-- Interactive SVG telemetry ring chart -->
+                <div class="panel-card">
+                    <div class="panel-title">Compute Token Telemetry</div>
+                    <div class="chart-container">
+                        <!-- Ring SVG -->
+                        <svg width="180" height="180" viewBox="0 0 100 100">
+                            <!-- Background track circle -->
+                            <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.01)" stroke-width="8"></circle>
+                            <!-- Animated GPT-4 Segment (Indigo) -->
+                            <circle cx="50" cy="50" r="40" fill="none" stroke="var(--primary)" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="150" stroke-linecap="round" id="chart-seg-gpt" transform="rotate(-90 50 50)"></circle>
+                            <!-- Animated Claude Segment (Pink) -->
+                            <circle cx="50" cy="50" r="40" fill="none" stroke="var(--accent-pink)" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="200" stroke-linecap="round" id="chart-seg-claude" transform="rotate(30 50 50)"></circle>
+                        </svg>
+                        
+                        <div class="chart-label-center">
+                            <div class="chart-center-num" id="chart-total-runs">0</div>
+                            <div class="chart-center-lbl">Total API Calls</div>
+                        </div>
+                    </div>
+
+                    <div class="chart-legends">
+                        <div class="legend-item">
+                            <div class="legend-color" style="background:var(--primary);"></div>
+                            <span>Ollama Gemma</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background:var(--accent-pink);"></div>
+                            <span>Modal Engine</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Success/Error Toast Message Alert -->
+    <div class="toast" id="toast-alert">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" id="toast-icon">
+            <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        <span id="toast-text">Settings synced with Slack coworker profile</span>
+    </div>
+
+    <!-- Inject dashboard client execution scripts -->
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
