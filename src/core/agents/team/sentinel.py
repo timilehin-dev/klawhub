@@ -43,7 +43,7 @@ async def sentinel_node(state: Dict[str, Any]) -> Dict[str, Any]:
         # Ingest custom personality and dynamic skills limits
         bot_name = workspace.agent_name or "Klawhub"
         personality = workspace.agent_personality or "Professional, efficient, and precise."
-        enabled_skills = workspace.enabled_skills or ["web_search", "sandbox_execution", "code_analysis"]
+        enabled_skills = workspace.enabled_skills or ["web_search", "sandbox_execution", "code_analysis", "document_generator"]
 
     logger.info(f"Sentinel loaded profile for bot '{bot_name}' with personality: '{personality}'")
 

@@ -35,7 +35,8 @@ class ASTSafetyScanner(ast.NodeVisitor):
         'scipy', 'sklearn', 'matplotlib', 'seaborn', 'plotly', 'torch', 'transformers', 
         'crawl4ai', 'weasyprint', 'fastembed', 'pypandoc', 'spacy', 'nltk', 'polars',
         'lightpanda', 'playwright', 'pdfplumber', 'markdown', 'typst', 'xml', 'uuid',
-        'hashlib', 'hmac', 'base64', 'io', 'zipfile', 'tarfile', 'random', 'functools'
+        'hashlib', 'hmac', 'base64', 'io', 'zipfile', 'tarfile', 'random', 'functools',
+        'document_generator', 'docx', 'pptx', 'openpyxl'
     }
 
     # Sandbox-expanded whitelisted modules (silently allowed for containers)
