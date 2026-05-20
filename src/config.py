@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     ollama_api_key_2: Optional[str] = Field(default=None, validation_alias="OLLAMA_API_KEY_2")
     ollama_api_key_3: Optional[str] = Field(default=None, validation_alias="OLLAMA_API_KEY_3")
     ollama_base_url: str = Field(
-        default="https://api.ollama.com/v1", 
+        default="https://api.ollama.com", 
         validation_alias="OLLAMA_BASE_URL"
     )
     

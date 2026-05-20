@@ -96,14 +96,44 @@ async def orchestrator_node(state: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 async def _replan_milestones(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Helper method to dynamically adjust the milestone plan if a defect or exception is raised."""
-    # Simple, highly reactive replanning: mark current milestone as pending again and adjust description
+    """Helper method to dynamically adjust the milestone plan if a defect or exception is raised.
+    
+    Enforces a maximum retry cap of 3 attempts per milestone to prevent infinite
+    Worker → Orchestrator retry loops when external services (e.g., Ollama) are down.
+    """
     milestones = list(state.get("milestones", []))
     active_index = state.get("active_milestone_index", 0)
     errors = state.get("errors", [])
     
+    MAX_RETRIES = 3
+    
     if active_index < len(milestones):
         current = milestones[active_index]
+        retry_count = current.get("_retry_count", 0) + 1
+        current["_retry_count"] = retry_count
+        
+        if retry_count >= MAX_RETRIES:
+            # Cap reached — abort this milestone and force graph exit
+            logger.error(
+                f"Milestone {current.get('id')} failed after {MAX_RETRIES} attempts. "
+                f"Last error: {errors[-1] if errors else 'Unknown'}. Aborting execution."
+            )
+            current["status"] = "failed"
+            # Force all milestones to completed so orchestrator_router routes to END
+            for m in milestones:
+                if m.get("status") != "failed":
+                    m["status"] = "completed"
+            
+            return {
+                "milestones": milestones,
+                "active_index": active_index,
+                "worker_output": (
+                    f":warning: I was unable to complete this task after {MAX_RETRIES} attempts. "
+                    f"The last error encountered was: {errors[-1] if errors else 'an unknown issue'}. "
+                    f"Please try again in a few minutes."
+                )
+            }
+        
         current["description"] += f" (Retrying due to previous failure: {errors[-1]})"
         current["status"] = "pending"
         
