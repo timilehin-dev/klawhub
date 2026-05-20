@@ -403,7 +403,7 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
     async def run_agent() -> dict:
         from src.core.agents.graph import coworker_app
         config = {
-            "recursion_limit": 10,
+            "recursion_limit": 50,
             "configurable": {
                 "workspace_id": str(workspace.id),
                 "thread_id": thread_ts
@@ -673,7 +673,7 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
         try:
             # Execute coworker app StateGraph
             config = {
-                "recursion_limit": 10,
+                "recursion_limit": 50,
                 "configurable": {
                     "workspace_id": str(workspace_id),
                     "thread_id": thread_ts or str(uuid.uuid4())

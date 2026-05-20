@@ -11,7 +11,7 @@ import time
 import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Request, Response, HTTPException, Form, Depends
+from fastapi import FastAPI, Request, Response, HTTPException, Form, Depends, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import select, func
@@ -487,8 +487,105 @@ async def slack_events(request: Request, body_bytes: bytes = Depends(verify_slac
     return {"ok": True}
 
 
+async def open_settings_modal_bg(
+    workspace_id: uuid.UUID,
+    workspace_name: str,
+    workspace_agent_name: Optional[str],
+    workspace_agent_personality: Optional[str],
+    workspace_enabled_skills: Optional[List[str]],
+    trigger_id: str,
+    channel_id: str
+):
+    """Asynchronously generates the Slack Block Kit modal form and opens it using the trigger_id.
+    
+    Executed in a background task to instantly free the main HTTP response thread, avoiding trigger_id expiration.
+    """
+    try:
+        from src.integrations.providers.slack.client import SlackClient
+        slack_client = SlackClient(workspace_id)
+        
+        all_skills = ["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator"]
+        enabled_skills = workspace_enabled_skills or []
+        for sk in enabled_skills:
+            if sk not in all_skills:
+                all_skills.append(sk)
+                
+        skill_options = [
+            {
+                "text": {"type": "plain_text", "text": sk.replace("_", " ").title(), "emoji": True},
+                "value": sk
+            }
+            for sk in all_skills
+        ]
+        
+        initial_skill_options = [
+            opt for opt in skill_options if opt["value"] in enabled_skills
+        ]
+        
+        modal_view = {
+            "type": "modal",
+            "callback_id": "settings_modal",
+            "title": {"type": "plain_text", "text": "Configure Coworker"},
+            "submit": {"type": "plain_text", "text": "Save Changes"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "private_metadata": json.dumps({"channel_id": channel_id, "workspace_id": str(workspace_id)}),
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"🔧 *Configure Coworker Identity for `{workspace_name}`*"
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "block_agent_name",
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "input_agent_name",
+                        "initial_value": workspace_agent_name or "Klawhub",
+                        "placeholder": {"type": "plain_text", "text": "Enter bot name..."}
+                    },
+                    "label": {"type": "plain_text", "text": "Agent Bot Name"}
+                },
+                {
+                    "type": "input",
+                    "block_id": "block_agent_personality",
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "input_agent_personality",
+                        "multiline": True,
+                        "initial_value": workspace_agent_personality or "Professional, efficient, and precise.",
+                        "placeholder": {"type": "plain_text", "text": "Describe how this coworker should act..."}
+                    },
+                    "label": {"type": "plain_text", "text": "Agent Personality Profile"}
+                },
+                {
+                    "type": "input",
+                    "block_id": "block_enabled_skills",
+                    "element": {
+                        "type": "checkboxes",
+                        "action_id": "input_enabled_skills",
+                        "options": skill_options,
+                        **({"initial_options": initial_skill_options} if initial_skill_options else {})
+                    },
+                    "label": {"type": "plain_text", "text": "Active Cognitive Skills"}
+                }
+            ]
+        }
+        
+        await slack_client.open_view(trigger_id, modal_view)
+        logger.info("Successfully opened configuration modal in background task.")
+    except Exception as e:
+        logger.error(f"Failed to open configure modal in background task: {e}", exc_info=True)
+
+
 @app.post("/api/slack/commands")
-async def slack_commands(request: Request, body_bytes: bytes = Depends(verify_slack_request)):
+async def slack_commands(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body_bytes: bytes = Depends(verify_slack_request)
+):
     """Receives and executes /klawhub slash commands, delivering gorgeous Block Kit messages."""
     import urllib.parse
     form_data = urllib.parse.parse_qs(body_bytes.decode("utf-8"))
@@ -598,90 +695,16 @@ async def slack_commands(request: Request, body_bytes: bytes = Depends(verify_sl
                 "text": ":warning: Command requires a trigger ID. Please execute it within Slack."
             })
             
-        # Get all skills available and set the initial selected ones
-        all_skills = ["web_search", "puppeteer_scraping", "python_sandbox", "pdf_generator"]
-        enabled_skills = workspace.enabled_skills or []
-        for sk in enabled_skills:
-            if sk not in all_skills:
-                all_skills.append(sk)
-                
-        skill_options = [
-            {
-                "text": {"type": "plain_text", "text": sk.replace("_", " ").title(), "emoji": True},
-                "value": sk
-            }
-            for sk in all_skills
-        ]
-        
-        initial_skill_options = [
-            opt for opt in skill_options if opt["value"] in enabled_skills
-        ]
-        
-        modal_view = {
-            "type": "modal",
-            "callback_id": "settings_modal",
-            "title": {"type": "plain_text", "text": "Configure Coworker"},
-            "submit": {"type": "plain_text", "text": "Save Changes"},
-            "close": {"type": "plain_text", "text": "Cancel"},
-            "private_metadata": json.dumps({"channel_id": channel_id, "workspace_id": str(workspace.id)}),
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"🔧 *Configure Coworker Identity for `{workspace.name}`*"
-                    }
-                },
-                {
-                    "type": "input",
-                    "block_id": "block_agent_name",
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "input_agent_name",
-                        "initial_value": workspace.agent_name or "Klawhub",
-                        "placeholder": {"type": "plain_text", "text": "Enter bot name..."}
-                    },
-                    "label": {"type": "plain_text", "text": "Agent Bot Name"}
-                },
-                {
-                    "type": "input",
-                    "block_id": "block_agent_personality",
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "input_agent_personality",
-                        "multiline": True,
-                        "initial_value": workspace.agent_personality or "Professional, efficient, and precise.",
-                        "placeholder": {"type": "plain_text", "text": "Describe how this coworker should act..."}
-                    },
-                    "label": {"type": "plain_text", "text": "Agent Personality Profile"}
-                },
-                {
-                    "type": "input",
-                    "block_id": "block_enabled_skills",
-                    "element": {
-                        "type": "checkboxes",
-                        "action_id": "input_enabled_skills",
-                        "options": skill_options,
-                        **({"initial_options": initial_skill_options} if initial_skill_options else {})
-                    },
-                    "label": {"type": "plain_text", "text": "Active Cognitive Skills"}
-                }
-            ]
-        }
-        
-        from src.integrations.providers.slack.client import SlackClient
-        slack_client = SlackClient(workspace.id)
-        
-        # Open the view in the background to return HTTP 200 within Slack's 3-second limit
-        async def _open_modal_bg():
-            try:
-                await slack_client.open_view(trigger_id, modal_view)
-                logger.info("Successfully opened configuration modal in background task.")
-            except Exception as e:
-                logger.error(f"Failed to open configure modal in background: {e}")
-                
-        import asyncio
-        asyncio.create_task(_open_modal_bg())
+        background_tasks.add_task(
+            open_settings_modal_bg,
+            workspace_id=workspace.id,
+            workspace_name=workspace.name,
+            workspace_agent_name=workspace.agent_name,
+            workspace_agent_personality=workspace.agent_personality,
+            workspace_enabled_skills=workspace.enabled_skills,
+            trigger_id=trigger_id,
+            channel_id=channel_id
+        )
         return Response(content="", media_type="text/plain")
 
     elif text_args in ["help", ""]:
