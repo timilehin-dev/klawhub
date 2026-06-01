@@ -155,8 +155,57 @@ class LLMClient:
                     else:
                         logger.warning(f"Ollama server returned error status {response.status_code}: {response.text}")
                         self.rotator.mark_failed(url)
-            except Exception as e:
+                except Exception as e:
                 logger.error(f"HTTP request to Ollama host '{url}' failed: {str(e)}")
                 self.rotator.mark_failed(url)
 
         raise RuntimeError("All configured Ollama endpoints failed to respond to the request.")
+
+    @classmethod
+    async def generate_embedding(cls, text: str) -> List[float]:
+        """Generates a text embedding vector (384-dimensional) via the Modal Sandbox's fastembed instance."""
+        import json
+        import base64
+        import hmac
+        import hashlib
+        import time
+        from src.config import settings
+
+        payload = {
+            "type": "generate_embedding",
+            "text": text
+        }
+        payload_str = json.dumps(payload)
+        
+        # Sign payload + timestamp using HMAC SHA-256
+        timestamp = str(int(time.time()))
+        message = f"{payload_str}:{timestamp}".encode('utf-8')
+        secret_bytes = settings.modal_webhook_secret.encode('utf-8')
+        signature = hmac.new(secret_bytes, message, hashlib.sha256).hexdigest()
+        
+        headers = {
+            "X-Webhook-Timestamp": timestamp,
+            "X-Webhook-Signature": signature,
+            "X-Webhook-Secret": settings.modal_webhook_secret,
+            "Content-Type": "application/json"
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    settings.modal_function_url,
+                    content=payload_str,
+                    headers=headers
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("success"):
+                        return result.get("embedding", [])
+                    else:
+                        logger.error(f"Modal embedding generation returned failure: {result.get('error')}")
+                else:
+                    logger.error(f"Modal embedding generation HTTP error status {response.status_code}: {response.text}")
+        except Exception as e:
+            logger.error(f"Failed to generate embedding via Modal sandbox: {e}")
+        return []
+

@@ -48,6 +48,9 @@ class AgentState(TypedDict):
     
     # Sandbox generated files
     generated_files: Optional[List[Dict[str, Any]]]
+    
+    # Structured thread history list (e.g. [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}])
+    history: Optional[List[Dict[str, str]]]
 
 
 # --- Transition Routers ---

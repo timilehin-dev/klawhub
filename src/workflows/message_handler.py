@@ -307,6 +307,7 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
     has_thread = slack_event.get("thread_ts") is not None
     compiled_transcript = ""
     thread_files = []
+    structured_history = []
 
     if has_thread:
         async def fetch_thread_data() -> dict:
@@ -314,6 +315,7 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
                 replies = await slack_client.get_thread_replies(channel_id, slack_event.get("thread_ts"))
                 transcript_lines = []
                 files = []
+                history = []
                 for msg in replies:
                     # Form transcript entry
                     if msg.get("bot_id") or msg.get("user") == workspace.slack_bot_user_id:
@@ -324,21 +326,34 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
                     text = msg.get("text", "")
                     transcript_lines.append(f"{user_label}: {text}")
                     
+                    # Accumulate structured thread history
+                    # Skip the current message (the one currently being processed) to avoid duplicating it as the user_query
+                    if msg.get("ts") != message_ts:
+                        is_bot = msg.get("bot_id") or msg.get("user") == workspace.slack_bot_user_id
+                        role = "assistant" if is_bot else "user"
+                        hist_text = msg.get("text", "")
+                        if not is_bot and workspace.slack_bot_user_id:
+                            bot_mention_tag = f"<@{workspace.slack_bot_user_id}>"
+                            hist_text = hist_text.replace(bot_mention_tag, "").strip()
+                        history.append({"role": role, "content": hist_text})
+                    
                     # Accumulate any files uploaded inside the thread replies
                     msg_files = msg.get("files", [])
                     if msg_files:
                         files.extend(msg_files)
                 return {
                     "transcript": "\n".join(transcript_lines),
-                    "files": files
+                    "files": files,
+                    "history": history
                 }
             except Exception as e:
                 logger.error(f"Failed to fetch thread replies: {e}")
-                return {"transcript": "", "files": []}
+                return {"transcript": "", "files": [], "history": []}
                 
         thread_data = await ctx.step.run("fetch-thread-data", fetch_thread_data)
         compiled_transcript = thread_data.get("transcript", "")
         thread_files = thread_data.get("files", [])
+        structured_history = thread_data.get("history", [])
 
     # Process any attached files (PDF, CSV, TXT, etc.)
     attached_files_content = []
@@ -413,7 +428,8 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
             "workspace_id": str(workspace.id),
             "thread_id": thread_ts,
             "user_query": user_query,
-            "context_data": attached_files_content
+            "context_data": attached_files_content,
+            "history": structured_history
         }
         
         try:
@@ -617,6 +633,113 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
 
         slack_client = SlackClient(workspace_id)
         
+        if "monitor silence" in action.lower():
+            try:
+                logger.info(f"Running Silence Detector scanner for channel {channel_id}...")
+                
+                # Fetch recent conversation history from channel
+                messages = await slack_client.get_history(channel_id, limit=20)
+                
+                # Find threads active in the last 7 days
+                import time
+                now_ts = time.time()
+                one_day_sec = 24 * 60 * 60
+                seven_days_sec = 7 * one_day_sec
+                
+                thread_parents = []
+                for msg in messages:
+                    ts_val = float(msg.get("ts", 0))
+                    if now_ts - ts_val > seven_days_sec:
+                        continue
+                    if msg.get("reply_count", 0) > 0:
+                        thread_parents.append(msg)
+                        
+                logger.info(f"Silence Detector: found {len(thread_parents)} active threads to scan.")
+                
+                # Fetch workspace details to get bot user id
+                async with get_db_session() as session:
+                    workspace = await session.get(Workspace, workspace_id)
+                bot_user_id = workspace.slack_bot_user_id if workspace else None
+                
+                for parent in thread_parents:
+                    parent_ts = parent.get("ts")
+                    replies = await slack_client.get_thread_replies(channel_id, parent_ts)
+                    if not replies:
+                        continue
+                        
+                    last_msg = replies[-1]
+                    last_ts = float(last_msg.get("ts", 0))
+                    
+                    if now_ts - last_ts > one_day_sec:
+                        # Unresolved questions or tasks check
+                        thread_text = "\n".join([r.get("text", "") for r in replies])
+                        has_question = "?" in parent.get("text", "") or any(kw in thread_text.lower() for kw in ["unresolved", "stuck", "pending", "outstanding", "blocker", "help", "need"])
+                        
+                        from src.db.models import Task
+                        async with get_db_session() as session:
+                            stmt = select(Task).where(
+                                Task.workspace_id == workspace_id,
+                                Task.slack_thread_ts == parent_ts,
+                                Task.status == "pending"
+                            )
+                            tasks_res = await session.execute(stmt)
+                            pending_tasks = tasks_res.scalars().all()
+                            
+                        if pending_tasks or has_question:
+                            # Verify that Klawhub hasn't already bumped this thread in the last 24h
+                            last_bump_by_bot = False
+                            for reply in reversed(replies):
+                                if reply.get("user") == bot_user_id or reply.get("bot_id"):
+                                    if "gone quiet" in reply.get("text", ""):
+                                        last_bump_by_bot = True
+                                        break
+                                        
+                            if not last_bump_by_bot:
+                                bump_msg = (
+                                    f"👋 *Hey team! Just checking in — this thread seems to have gone quiet.* \n"
+                                    f"• Was this resolved, or is anyone still stuck? \n"
+                                )
+                                if pending_tasks:
+                                    bump_msg += f"• There are *{len(pending_tasks)} pending tasks* still logged for this thread."
+                                    
+                                await slack_client.post_message(
+                                    channel_id=channel_id,
+                                    text=bump_msg,
+                                    thread_ts=parent_ts
+                                )
+                                logger.info(f"Gently bumped thread {parent_ts} in channel {channel_id} due to silence.")
+                                
+                # Update database status to success
+                async with get_db_session() as session:
+                    statement = select(Schedule).where(
+                        Schedule.id == sched_id,
+                        Schedule.workspace_id == workspace_id
+                    )
+                    db_schedule = (await session.execute(statement)).scalar_one_or_none()
+                    if db_schedule:
+                        db_schedule.last_triggered_at = datetime.utcnow()
+                        db_schedule.last_run_status = "success"
+                        db_schedule.consecutive_successes = (db_schedule.consecutive_successes or 0) + 1
+                        db_schedule.fail_count = 0
+                        db_schedule.updated_at = datetime.utcnow()
+                        await session.commit()
+            except Exception as e:
+                logger.error(f"Error in Silence Detector cron task: {e}", exc_info=True)
+                async with get_db_session() as session:
+                    statement = select(Schedule).where(
+                        Schedule.id == sched_id,
+                        Schedule.workspace_id == workspace_id
+                    )
+                    db_schedule = (await session.execute(statement)).scalar_one_or_none()
+                    if db_schedule:
+                        db_schedule.last_triggered_at = datetime.utcnow()
+                        db_schedule.last_run_status = "failure"
+                        db_schedule.consecutive_successes = 0
+                        db_schedule.fail_count = (db_schedule.fail_count or 0) + 1
+                        db_schedule.updated_at = datetime.utcnow()
+                        await session.commit()
+            return
+
         # Post initial execution/huddle notification message
         is_huddle = any(kw in name.lower() or kw in action.lower() for kw in ["huddle", "standup", "retro"])
         

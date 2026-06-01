@@ -400,9 +400,87 @@ async def logout(response: Response):
 # Slack Gateway HTTP API Routes
 # ─────────────────────────────────────────────
 
+async def process_reaction_added_bg(
+    workspace_id: uuid.UUID,
+    user_id: str,
+    reaction: str,
+    channel_id: str,
+    message_ts: str
+):
+    """Processes reaction feedback asynchronously in the background, logging to database for Few-Shot Learning."""
+    try:
+        from src.integrations.providers.slack.client import SlackClient
+        from src.db.models import WorkflowLearning
+        from sqlmodel import select
+        
+        slack_client = SlackClient(workspace_id)
+        
+        # 1. Fetch the bot's message text
+        replies = await slack_client.get_thread_replies(channel_id, message_ts)
+        if not replies:
+            return
+            
+        bot_message = None
+        for msg in replies:
+            if msg.get("ts") == message_ts:
+                bot_message = msg
+                break
+                
+        if not bot_message:
+            return
+            
+        bot_text = bot_message.get("text", "")
+        
+        # 2. Get the triggering user message in history
+        trigger_text = "Conversational message"
+        for idx, msg in enumerate(replies):
+            if msg.get("ts") == message_ts and idx > 0:
+                trigger_text = replies[idx - 1].get("text", "")
+                break
+                
+        # 3. Classify feedback rating
+        rating = 5 if reaction in ["white_check_mark", "heavy_check_mark", "+1", "thumbsup"] else 1
+        feedback_label = "Positive" if rating == 5 else "Negative"
+        
+        logger.info(f"Reaction-Based Learning: Recording {feedback_label} feedback on message {message_ts}")
+        
+        async with get_db_session() as session:
+            # Check unique constraint to avoid duplicates
+            statement = select(WorkflowLearning).where(
+                WorkflowLearning.workspace_id == workspace_id,
+                WorkflowLearning.slack_user_id == user_id,
+                WorkflowLearning.message_ts == message_ts,
+                WorkflowLearning.reaction == reaction
+            )
+            result = await session.execute(statement)
+            existing = result.scalar_one_or_none()
+            
+            if not existing:
+                learning = WorkflowLearning(
+                    workspace_id=workspace_id,
+                    slack_user_id=user_id,
+                    message_ts=message_ts,
+                    reaction=reaction,
+                    category="conversational",
+                    trigger_prompt=trigger_text[:200],
+                    feedback=feedback_label,
+                    correction=bot_text[:500],
+                    rating=rating
+                )
+                session.add(learning)
+                await session.commit()
+                logger.info(f"Successfully recorded reaction workflow learning record {learning.id}")
+    except Exception as e:
+        logger.error(f"Error in process_reaction_added_bg: {e}", exc_info=True)
+
+
 @app.post("/api/slack/events")
-async def slack_events(request: Request, body_bytes: bytes = Depends(verify_slack_request)):
-    """Receives, verifies, and routes Slack event subscriptions (mentions and direct messages)."""
+async def slack_events(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body_bytes: bytes = Depends(verify_slack_request)
+):
+    """Receives, verifies, and routes Slack event subscriptions (mentions, direct messages, and reactions)."""
     try:
         payload = json.loads(body_bytes.decode("utf-8"))
     except json.JSONDecodeError:
@@ -421,12 +499,12 @@ async def slack_events(request: Request, body_bytes: bytes = Depends(verify_slac
     event_id = payload.get("event_id")
     team_id = payload.get("team_id")
     
-    # Process messages or app_mentions
-    if event_type not in ["message", "app_mention"]:
+    # Process messages, app_mentions, or reactions
+    if event_type not in ["message", "app_mention", "reaction_added"]:
         return {"ok": True}
         
-    # Ignore bot messages to prevent infinite execution loops
-    if event.get("bot_id") or event.get("user") == event.get("bot_user_id"):
+    # Ignore bot messages to prevent infinite execution loops (except for reactions)
+    if event_type != "reaction_added" and (event.get("bot_id") or event.get("user") == event.get("bot_user_id")):
         return {"ok": True}
         
     channel = event.get("channel", "")
@@ -445,6 +523,23 @@ async def slack_events(request: Request, body_bytes: bytes = Depends(verify_slac
         
     if not workspace.is_active:
         logger.warning(f"Workspace {workspace.id} is currently inactive. Ignoring event.")
+        return {"ok": True}
+        
+    # Handle reaction feedback asynchronously in a background task
+    if event_type == "reaction_added":
+        item = event.get("item", {})
+        item_user = event.get("item_user")
+        
+        if item.get("type") == "message" and item_user == workspace.slack_bot_user_id:
+            logger.info(f"Asynchronously processing reaction feedback on bot message in background task...")
+            background_tasks.add_task(
+                process_reaction_added_bg,
+                workspace_id=workspace.id,
+                user_id=user,
+                reaction=event.get("reaction"),
+                channel_id=item.get("channel"),
+                message_ts=item.get("ts")
+            )
         return {"ok": True}
         
     # Exclude bot self-messages using database bot user ID boundary
@@ -580,6 +675,338 @@ async def open_settings_modal_bg(
         logger.error(f"Failed to open configure modal in background task: {e}", exc_info=True)
 
 
+def format_skills_list(workspace_name: str, skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Generates gorgeous Block Kit layout representing the workspace custom skills."""
+    blocks = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"🧠 Workspace Cognitive Skills - {workspace_name}",
+                "emoji": True
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"Here are the custom cognitive skills engineered and installed for your workspace."
+            }
+        },
+        {"type": "divider"}
+    ]
+    
+    if not skills:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "_No custom cognitive skills installed. Ask me to engineer a custom skill to get started!_"
+            }
+        })
+    else:
+        for s in skills:
+            status_emoji = "🟢 `ACTIVE`" if s.get("is_active") else "⏸️ `PAUSED`"
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Skill Name:* `{s.get('name')}`\n"
+                            f"• *Description:* _{s.get('description')}_\n"
+                            f"• *Entrypoint:* `{s.get('entrypoint')}`\n"
+                            f"• *Status:* {status_emoji}"
+                }
+            })
+            
+            toggle_action = "skill_pause" if s.get("is_active") else "skill_resume"
+            toggle_text = "⏸️ Pause" if s.get("is_active") else "▶️ Resume"
+            
+            blocks.append({
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": toggle_text},
+                        "action_id": toggle_action,
+                        "value": str(s.get("id"))
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "🗑️ Delete"},
+                        "style": "danger",
+                        "action_id": "skill_delete",
+                        "value": str(s.get("id")),
+                        "confirm": {
+                            "title": {"type": "plain_text", "text": "Confirm Delete"},
+                            "text": {"type": "plain_text", "text": "Are you sure you want to permanently delete this cognitive skill?"},
+                            "confirm": {"type": "plain_text", "text": "Delete"},
+                            "deny": {"type": "plain_text", "text": "Cancel"}
+                        }
+                    }
+                ]
+            })
+            blocks.append({"type": "divider"})
+            
+    blocks.append({
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "➕ Create New Skill"},
+                "style": "primary",
+                "action_id": "skill_create_modal"
+            }
+        ]
+    })
+    
+    return blocks
+
+
+def build_skill_creation_modal(workspace_id: uuid.UUID, channel_id: str) -> Dict[str, Any]:
+    """Generates gorgeous stateful Skill Creation Modal layout."""
+    return {
+        "type": "modal",
+        "callback_id": "skill_create_modal_submit",
+        "title": {"type": "plain_text", "text": "Create Custom Skill"},
+        "submit": {"type": "plain_text", "text": "Create"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "private_metadata": json.dumps({"channel_id": channel_id, "workspace_id": str(workspace_id)}),
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "➕ *Set up a new dynamic cognitive skill coworker huddle.*"
+                }
+            },
+            {
+                "type": "input",
+                "block_id": "block_skill_name",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "input_skill_name",
+                    "placeholder": {"type": "plain_text", "text": "e.g., csv_summarizer"}
+                },
+                "label": {"type": "plain_text", "text": "Skill Name"}
+            },
+            {
+                "type": "input",
+                "block_id": "block_skill_desc",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "input_skill_desc",
+                    "placeholder": {"type": "plain_text", "text": "e.g., Summarizes csv input and prints a row count report"}
+                },
+                "label": {"type": "plain_text", "text": "Description"}
+            },
+            {
+                "type": "input",
+                "block_id": "block_skill_source",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "input_skill_source",
+                    "multiline": True,
+                    "placeholder": {"type": "plain_text", "text": "def handler(text):\n    # Write Python code here\n    print('Hello World')"}
+                },
+                "label": {"type": "plain_text", "text": "Python Source Code"}
+            }
+        ]
+    }
+
+
+async def open_skill_creation_modal_bg(
+    workspace_id: uuid.UUID,
+    trigger_id: str,
+    channel_id: str
+):
+    """Asynchronously generates and opens the Slack Block Kit skill creation modal."""
+    try:
+        from src.integrations.providers.slack.client import SlackClient
+        slack_client = SlackClient(workspace_id)
+        modal_view = build_skill_creation_modal(workspace_id, channel_id)
+        await slack_client.open_view(trigger_id, modal_view)
+        logger.info("Successfully opened skill creation modal in background task.")
+    except Exception as e:
+        logger.error(f"Failed to open skill creation modal: {e}", exc_info=True)
+
+
+def format_schedules_list(workspace_name: str, schedules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Generates gorgeous Block Kit layout representing the workspace schedules."""
+    blocks = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"⏰ Workspace Schedules - {workspace_name}",
+                "emoji": True
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"Here are the active and paused cron trigger schedules configured for your workspace."
+            }
+        },
+        {"type": "divider"}
+    ]
+    
+    if not schedules:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "_No schedules configured. Type `/klawhub schedule create` or ask me to schedule standups to create one!_"
+            }
+        })
+    else:
+        for s in schedules:
+            status_emoji = "🟢 `ACTIVE`" if s.get("is_active") else "⏸️ `PAUSED`"
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Schedule Name:* `{s.get('name')}`\n"
+                            f"• *Cron Expr:* `{s.get('cron_expr')}`\n"
+                            f"• *Timezone:* `{s.get('timezone')}`\n"
+                            f"• *Action message:* _{s.get('action')}_\n"
+                            f"• *Channel:* <#{s.get('channel_id')}>\n"
+                            f"• *Status:* {status_emoji}"
+                }
+            })
+            
+            toggle_action = "schedule_pause" if s.get("is_active") else "schedule_resume"
+            toggle_text = "⏸️ Pause" if s.get("is_active") else "▶️ Resume"
+            
+            blocks.append({
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": toggle_text},
+                        "action_id": toggle_action,
+                        "value": str(s.get("id"))
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "🗑️ Delete"},
+                        "style": "danger",
+                        "action_id": "schedule_delete",
+                        "value": str(s.get("id")),
+                        "confirm": {
+                            "title": {"type": "plain_text", "text": "Confirm Delete"},
+                            "text": {"type": "plain_text", "text": "Are you sure you want to permanently delete this schedule?"},
+                            "confirm": {"type": "plain_text", "text": "Delete"},
+                            "deny": {"type": "plain_text", "text": "Cancel"}
+                        }
+                    }
+                ]
+            })
+            blocks.append({"type": "divider"})
+            
+    blocks.append({
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "➕ Create New Schedule"},
+                "style": "primary",
+                "action_id": "schedule_create_modal"
+            }
+        ]
+    })
+    
+    return blocks
+
+
+def build_schedule_creation_modal(workspace_id: uuid.UUID, channel_id: str) -> Dict[str, Any]:
+    """Generates gorgeous stateful Schedule Creation Modal layout."""
+    return {
+        "type": "modal",
+        "callback_id": "schedule_create_modal_submit",
+        "title": {"type": "plain_text", "text": "Create Cron Schedule"},
+        "submit": {"type": "plain_text", "text": "Create"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "private_metadata": json.dumps({"channel_id": channel_id, "workspace_id": str(workspace_id)}),
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "➕ *Set up a new recurring schedule coworker huddle.*"
+                }
+            },
+            {
+                "type": "input",
+                "block_id": "block_schedule_name",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "input_schedule_name",
+                    "placeholder": {"type": "plain_text", "text": "e.g., Daily Standup Report"}
+                },
+                "label": {"type": "plain_text", "text": "Schedule Name"}
+            },
+            {
+                "type": "input",
+                "block_id": "block_schedule_cron",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "input_schedule_cron",
+                    "placeholder": {"type": "plain_text", "text": "e.g., 0 9 * * 1-5 (every weekday at 9am)"}
+                },
+                "label": {"type": "plain_text", "text": "Cron Expression (5 fields)"}
+            },
+            {
+                "type": "input",
+                "block_id": "block_schedule_timezone",
+                "element": {
+                    "type": "static_select",
+                    "action_id": "input_schedule_timezone",
+                    "initial_option": {
+                        "text": {"type": "plain_text", "text": "UTC"},
+                        "value": "UTC"
+                    },
+                    "options": [
+                        {"text": {"type": "plain_text", "text": "UTC"}, "value": "UTC"},
+                        {"text": {"type": "plain_text", "text": "US/Eastern (EST/EDT)"}, "value": "US/Eastern"},
+                        {"text": {"type": "plain_text", "text": "US/Central (CST/CDT)"}, "value": "US/Central"},
+                        {"text": {"type": "plain_text", "text": "US/Pacific (PST/PDT)"}, "value": "US/Pacific"},
+                        {"text": {"type": "plain_text", "text": "Europe/London (GMT/BST)"}, "value": "Europe/London"},
+                        {"text": {"type": "plain_text", "text": "Asia/Tokyo (JST)"}, "value": "Asia/Tokyo"}
+                    ]
+                },
+                "label": {"type": "plain_text", "text": "Timezone"}
+            },
+            {
+                "type": "input",
+                "block_id": "block_schedule_action",
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "input_schedule_action",
+                    "placeholder": {"type": "plain_text", "text": "e.g., ask team to standup huddle or execute daily report"}
+                },
+                "label": {"type": "plain_text", "text": "Action / Intent (Message to trigger)"}
+            }
+        ]
+    }
+
+
+async def open_schedule_creation_modal_bg(
+    workspace_id: uuid.UUID,
+    trigger_id: str,
+    channel_id: str
+):
+    """Asynchronously generates and opens the Slack Block Kit schedule creation modal huddle."""
+    try:
+        from src.integrations.providers.slack.client import SlackClient
+        slack_client = SlackClient(workspace_id)
+        modal_view = build_schedule_creation_modal(workspace_id, channel_id)
+        await slack_client.open_view(trigger_id, modal_view)
+        logger.info("Successfully opened schedule creation modal in background task.")
+    except Exception as e:
+        logger.error(f"Failed to open schedule creation modal: {e}", exc_info=True)
+
+
 @app.post("/api/slack/commands")
 async def slack_commands(
     request: Request,
@@ -685,6 +1112,98 @@ async def slack_commands(
         return JSONResponse({
             "response_type": "in_channel",
             "blocks": blocks
+        })
+        
+    elif text_args.startswith("schedule") or text_args.startswith("schedules"):
+        subargs = text_args.replace("schedules", "").replace("schedule", "").strip()
+        
+        if subargs.startswith("create"):
+            trigger_id = form_data.get("trigger_id", [""])[0]
+            if not trigger_id:
+                return JSONResponse({
+                    "response_type": "ephemeral",
+                    "text": ":warning: Command requires a trigger ID. Please execute it within Slack."
+                })
+                
+            background_tasks.add_task(
+                open_schedule_creation_modal_bg,
+                workspace_id=workspace.id,
+                trigger_id=trigger_id,
+                channel_id=channel_id
+            )
+            return Response(content="", media_type="text/plain")
+        else:
+            # Default: list all active/paused schedules scoped to workspace
+            from src.core.tools.schedule_control import ScheduleControl
+            schedules = await ScheduleControl.list_schedules(workspace.id)
+            blocks = format_schedules_list(workspace.name, schedules)
+            return JSONResponse({
+                "response_type": "ephemeral",
+                "blocks": blocks
+            })
+        
+    elif text_args.startswith("skill") or text_args.startswith("skills"):
+        subargs = text_args.replace("skills", "").replace("skill", "").strip()
+        
+        if subargs.startswith("create"):
+            trigger_id = form_data.get("trigger_id", [""])[0]
+            if not trigger_id:
+                return JSONResponse({
+                    "response_type": "ephemeral",
+                    "text": ":warning: Command requires a trigger ID. Please execute it within Slack."
+                })
+                
+            background_tasks.add_task(
+                open_skill_creation_modal_bg,
+                workspace_id=workspace.id,
+                trigger_id=trigger_id,
+                channel_id=channel_id
+            )
+            return Response(content="", media_type="text/plain")
+        else:
+            from src.core.tools.skill_control import SkillControl
+            skills = await SkillControl.list_skills(workspace.id)
+            blocks = format_skills_list(workspace.name, skills)
+            return JSONResponse({
+                "response_type": "ephemeral",
+                "blocks": blocks
+            })
+        
+    elif text_args.startswith("monitor"):
+        from src.core.tools.schedule_control import ScheduleControl
+        try:
+            schedules = await ScheduleControl.list_schedules(workspace.id)
+            existing = [s for s in schedules if s.get("channel_id") == channel_id and "monitor silence" in s.get("action", "").lower()]
+            
+            if existing:
+                return JSONResponse({
+                    "response_type": "ephemeral",
+                    "text": f"👀 *Silence Monitor is already active for this channel!*\n• *Schedule Name:* `{existing[0].get('name')}`\n• *Cron Expr:* `{existing[0].get('cron_expr')}`"
+                })
+                
+            cron_expr = "0 * * * *"
+            result = await ScheduleControl.create_schedule(
+                workspace_id=workspace.id,
+                slack_user_id=user_id,
+                name="Silence Detector",
+                cron_expr=cron_expr,
+                action=f"monitor silence in channel {channel_id}",
+                channel_id=channel_id,
+                timezone="UTC"
+            )
+            confirm_text = (
+                f"📡 *Silence Detector monitoring successfully activated for this channel!*\n"
+                f"• *Name:* `Silence Detector`\n"
+                f"• *Frequency:* `Every Hour` (`{cron_expr}`)\n"
+                f"• *Scope:* <#{channel_id}>\n\n"
+                f"I will scan this channel and its active threads. If any thread with pending tasks or unresolved questions goes silent for more than 24 hours, I will gently bump it! 🤫"
+            )
+        except Exception as e:
+            confirm_text = f"❌ *Failed to activate Silence Detector:* {str(e)}"
+            
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": confirm_text
         })
         
     elif text_args in ["configure", "settings"]:
@@ -979,6 +1498,67 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                     text=confirm_text,
                     thread_ts=target_thread
                 )
+                
+        elif callback_id == "schedule_create_modal_submit":
+            values = view.get("state", {}).get("values", {})
+            name = values.get("block_schedule_name", {}).get("input_schedule_name", {}).get("value")
+            cron_expr = values.get("block_schedule_cron", {}).get("input_schedule_cron", {}).get("value")
+            timezone = values.get("block_schedule_timezone", {}).get("input_schedule_timezone", {}).get("selected_option", {}).get("value") or "UTC"
+            action_text = values.get("block_schedule_action", {}).get("input_schedule_action", {}).get("value")
+            
+            from src.core.tools.schedule_control import ScheduleControl
+            try:
+                result = await ScheduleControl.create_schedule(
+                    workspace_id=workspace.id,
+                    slack_user_id=user_id,
+                    name=name,
+                    cron_expr=cron_expr,
+                    action=action_text,
+                    channel_id=target_channel,
+                    timezone=timezone
+                )
+                confirm_text = (
+                    f"⏰ *New Cron Schedule successfully created!*\n"
+                    f"• *Name:* `{name}`\n"
+                    f"• *Cron expression:* `{cron_expr}`\n"
+                    f"• *Timezone:* `{timezone}`\n"
+                    f"• *Action:* _{action_text}_"
+                )
+            except Exception as e:
+                confirm_text = f"❌ *Failed to create schedule:* {str(e)}"
+                
+        elif callback_id == "skill_create_modal_submit":
+            values = view.get("state", {}).get("values", {})
+            name = values.get("block_skill_name", {}).get("input_skill_name", {}).get("value")
+            description = values.get("block_skill_desc", {}).get("input_skill_desc", {}).get("value")
+            source_code = values.get("block_skill_source", {}).get("input_skill_source", {}).get("value")
+            
+            from src.core.tools.skill_control import SkillControl
+            try:
+                res = await SkillControl.create_skill(
+                    workspace_id=workspace.id,
+                    name=name,
+                    description=description,
+                    source_code=source_code,
+                    entrypoint="handler"
+                )
+                if res.get("status") == "success":
+                    confirm_text = (
+                        f"🧠 *New Cognitive Skill successfully created & verified!*\n"
+                        f"• *Name:* `{res['skill']['name']}`\n"
+                        f"• *Description:* _{res['skill']['description']}_\n"
+                        f"• *Status:* `ACTIVE`"
+                    )
+                else:
+                    confirm_text = f"❌ *Failed to create skill:* {res.get('message')}"
+            except Exception as e:
+                confirm_text = f"❌ *Failed to create skill:* {str(e)}"
+                
+            if target_channel:
+                await slack_client.post_message(
+                    channel_id=target_channel,
+                    text=confirm_text
+                )
 
         # Acknowledge submission and close the modal
         return JSONResponse({"response_action": "clear"})
@@ -1270,5 +1850,230 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                             "replace_original": False,
                             "text": f"✅ An action item in this thread was marked as completed by <@{user_id}>! :tada:"
                         })
+                        
+            elif action_id == "schedule_pause":
+                schedule_id = action.get("value")
+                from src.core.tools.schedule_control import ScheduleControl
+                await ScheduleControl.toggle_schedule_status(workspace.id, uuid.UUID(schedule_id), False)
+                if response_url:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(response_url, json={
+                            "response_type": "ephemeral",
+                            "replace_original": False,
+                            "text": f"⏸️ Schedule paused successfully!"
+                        })
+                        
+            elif action_id == "schedule_resume":
+                schedule_id = action.get("value")
+                from src.core.tools.schedule_control import ScheduleControl
+                await ScheduleControl.toggle_schedule_status(workspace.id, uuid.UUID(schedule_id), True)
+                if response_url:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(response_url, json={
+                            "response_type": "ephemeral",
+                            "replace_original": False,
+                            "text": f"▶️ Schedule reactivated successfully!"
+                        })
+                        
+            elif action_id == "schedule_delete":
+                schedule_id = action.get("value")
+                from src.core.tools.schedule_control import ScheduleControl
+                await ScheduleControl.delete_schedule(workspace.id, uuid.UUID(schedule_id))
+                if response_url:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(response_url, json={
+                            "response_type": "ephemeral",
+                            "replace_original": False,
+                            "text": f"🗑️ Schedule deleted successfully!"
+                        })
+                        
+            elif action_id == "schedule_create_modal":
+                if trigger_id:
+                    modal_view = build_schedule_creation_modal(workspace.id, channel_id)
+                    try:
+                        await slack_client.open_view(trigger_id, modal_view)
+                    except Exception as e:
+                        logger.error(f"Failed to open schedule creation modal from button click: {e}")
+                        
+            elif action_id == "skill_pause":
+                skill_id = action.get("value")
+                from src.core.tools.skill_control import SkillControl
+                await SkillControl.toggle_skill_status(workspace.id, uuid.UUID(skill_id), False)
+                if response_url:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(response_url, json={
+                            "response_type": "ephemeral",
+                            "replace_original": False,
+                            "text": f"⏸️ Cognitive skill paused successfully!"
+                        })
+                        
+            elif action_id == "skill_resume":
+                skill_id = action.get("value")
+                from src.core.tools.skill_control import SkillControl
+                await SkillControl.toggle_skill_status(workspace.id, uuid.UUID(skill_id), True)
+                if response_url:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(response_url, json={
+                            "response_type": "ephemeral",
+                            "replace_original": False,
+                            "text": f"▶️ Cognitive skill reactivated successfully!"
+                        })
+                        
+            elif action_id == "skill_delete":
+                skill_id = action.get("value")
+                from src.core.tools.skill_control import SkillControl
+                await SkillControl.delete_skill(workspace.id, uuid.UUID(skill_id))
+                if response_url:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(response_url, json={
+                            "response_type": "ephemeral",
+                            "replace_original": False,
+                            "text": f"🗑️ Cognitive skill deleted successfully!"
+                        })
+                        
+            elif action_id == "skill_create_modal":
+                if trigger_id:
+                    modal_view = build_skill_creation_modal(workspace.id, channel_id)
+                    try:
+                        await slack_client.open_view(trigger_id, modal_view)
+                    except Exception as e:
+                        logger.error(f"Failed to open skill creation modal from button click: {e}")
+                        
+            elif action_id.startswith("run_skill_"):
+                skill_val = action.get("value")
+                skill_name, thread_ts = skill_val.split(":", 1)
+                
+                if response_url:
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            await client.post(response_url, json={
+                                "replace_original": True,
+                                "text": f"🚀 *Executing Cognitive Skill `{skill_name}` inside the Modal cloud sandbox...*"
+                            })
+                    except Exception as e:
+                        logger.error(f"Failed to update suggestion card: {e}")
+                
+                # Retrieve the custom skill from PostgreSQL DB
+                from src.db.models import Skill, PendingAction
+                async with get_db_session() as session:
+                    statement = select(Skill).where(
+                        Skill.workspace_id == workspace.id,
+                        Skill.name == skill_name,
+                        Skill.is_active == True
+                    )
+                    skill_db = (await session.execute(statement)).scalar_one_or_none()
+                
+                if skill_db:
+                    # Create a pre-approved PendingAction in the database to execute it immediately
+                    pre_approved_action = PendingAction(
+                        workspace_id=workspace.id,
+                        slack_user_id=user_id,
+                        slack_channel_id=channel_id,
+                        tool_name="modal_sandbox",
+                        params={"code": skill_db.source_code, "milestone": f"Execute custom skill: {skill_name}", "thread_ts": thread_ts},
+                        status="approved"
+                    )
+                    async with get_db_session() as session:
+                        session.add(pre_approved_action)
+                        await session.commit()
+                
+                # Dispatch event to Inngest
+                await inngest_client.send(
+                    inngest.Event(
+                        name="slack/event.received",
+                        data={
+                            "event": {
+                                "type": "message",
+                                "channel": channel_id,
+                                "ts": thread_ts,
+                                "thread_ts": thread_ts,
+                                "text": f"execute skill {skill_name}",
+                                "user": user_id
+                            },
+                            "eventId": str(uuid.uuid4()),
+                            "teamId": team_id
+                        }
+                    )
+                )
+                
+            elif action_id == "dismiss_suggestion":
+                if response_url:
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            await client.post(response_url, json={
+                                "replace_original": True,
+                                "text": "Dismissed. Let me know if you need any other help! 😊"
+                            })
+                    except Exception as e:
+                        logger.error(f"Failed to update dismiss card: {e}")
+                        
+            elif action_id == "approve_action":
+                action_id_str = action.get("value")
+                from src.db.models import PendingAction
+                
+                async with get_db_session() as session:
+                    statement = select(PendingAction).where(PendingAction.id == uuid.UUID(action_id_str))
+                    db_act = (await session.execute(statement)).scalar_one_or_none()
+                    if db_act:
+                        db_act.status = "approved"
+                        db_act.updated_at = datetime.utcnow()
+                        await session.commit()
+                        
+                # Update Slack card to remove huddle buttons and show success
+                if response_url:
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            await client.post(response_url, json={
+                                "replace_original": True,
+                                "text": "✅ *Sandbox Action Approved!* Coworker is compiling and executing the script now... 🚀"
+                            })
+                    except Exception as e:
+                        logger.error(f"Failed to update Slack approval card: {e}")
+                
+                # Simulate Slack message event to re-trigger graph execution asynchronously in Inngest
+                logger.info(f"Re-dispatching slack/event.received event to Inngest for thread huddle approval continuation...")
+                msg_ts = payload.get("container", {}).get("message_ts") or payload.get("message", {}).get("ts")
+                thread_ts = payload.get("message", {}).get("thread_ts") or msg_ts
+                
+                await inngest_client.send(
+                    inngest.Event(
+                        name="slack/event.received",
+                        data={
+                            "event": {
+                                "type": "message",
+                                "channel": channel_id,
+                                "ts": msg_ts,
+                                "thread_ts": thread_ts,
+                                "text": "Action Approved",
+                                "user": user_id
+                            },
+                            "eventId": str(uuid.uuid4()),
+                            "teamId": team_id
+                        }
+                    )
+                )
+                
+            elif action_id == "reject_action":
+                action_id_str = action.get("value")
+                from src.db.models import PendingAction
+                
+                async with get_db_session() as session:
+                    statement = select(PendingAction).where(PendingAction.id == uuid.UUID(action_id_str))
+                    db_act = (await session.execute(statement)).scalar_one_or_none()
+                    if db_act:
+                        db_act.status = "rejected"
+                        db_act.updated_at = datetime.utcnow()
+                        await session.commit()
+                        
+                # Update Slack card to remove huddle buttons and show rejection
+                if response_url:
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            await client.post(response_url, json={
+                                "replace_original": True,
+                                "text": "❌ *Sandbox Action Rejected* by the user."
+                            })
+                    except Exception as e:
+                        logger.error(f"Failed to update Slack rejection card: {e}")
                         
     return {"ok": True}

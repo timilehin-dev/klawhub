@@ -83,6 +83,8 @@ async def init_db_models() -> None:
         db_dialect = conn.dialect.name
         if db_dialect == "postgresql":
             logger.info("Executing PostgreSQL schema evolution for multi-tenant skills...")
+            # Enable pgvector extension
+            await conn.execute(text('CREATE EXTENSION IF NOT EXISTS vector;'))
             # Add columns if they do not exist
             await conn.execute(text('ALTER TABLE "skills" ADD COLUMN IF NOT EXISTS "workspace_id" UUID REFERENCES workspaces(id) ON DELETE CASCADE;'))
             await conn.execute(text('ALTER TABLE "skills" ADD COLUMN IF NOT EXISTS "repo_url" TEXT;'))
