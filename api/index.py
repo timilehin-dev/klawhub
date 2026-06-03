@@ -1022,8 +1022,19 @@ async def slack_commands(
     team_id = form_data.get("team_id", [""])[0]
     channel_id = form_data.get("channel_id", [""])[0]
     user_id = form_data.get("user_id", [""])[0]
-    
-    logger.info(f"Slash command '{command}' with arguments '{text_args}' triggered by {user_id} in workspace {team_id}.")
+
+    # Sanitize user-controlled fields before logging to prevent log injection (CWE-117).
+    # Newlines (\r, \n) in attacker-controlled input can forge additional log entries.
+    def _sanitize_log(value: str) -> str:
+        return value.replace("\r", "\\r").replace("\n", "\\n")
+
+    logger.info(
+        "Slash command '%s' with arguments '%s' triggered by %s in workspace %s.",
+        _sanitize_log(command),
+        _sanitize_log(text_args),
+        _sanitize_log(user_id),
+        _sanitize_log(team_id),
+    )
     
     async with get_db_session() as session:
         statement = select(Workspace).where(Workspace.slack_team_id == team_id)

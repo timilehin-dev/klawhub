@@ -54,7 +54,24 @@ async def sentinel_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # Detect simple conversational queries (greetings, intros, questions)
     # If conversational, pre-populate a simple worker milestone to bypass Orchestrator LLM planning completely!
     conversational_keywords = ["hello", "hi", "hey", "introduce", "who are you", "what can you do", "status", "help"]
-    is_conversational = any(kw in user_query.lower() for kw in conversational_keywords) or len(user_query.split()) < 5
+
+    # Explicit work-intent blocklist: never short-circuit Orchestrator planning for these
+    work_intent_keywords = [
+        "summarize", "summary", "action items", "document", "pdf", "file", "attachment",
+        "research", "analyze", "analyse", "report", "write", "draft", "generate",
+        "build", "create", "schedule", "task", "remind", "deploy", "execute",
+        "search", "find", "look up", "investigate", "explain", "review"
+    ]
+    has_work_intent = any(kw in user_query.lower() for kw in work_intent_keywords)
+
+    is_conversational = (
+        not has_work_intent
+        and (
+            any(kw in user_query.lower() for kw in conversational_keywords)
+            or len(user_query.split()) < 5
+        )
+    )
+
     
     milestones = []
     if is_conversational:

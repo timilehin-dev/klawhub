@@ -93,7 +93,7 @@ class LLMClient:
         user_query: str,
         mode: str = "STANDARD_CHAT",
         temperature: float = 0.2,
-        max_retries: int = 1
+        max_retries: int = 2
     ) -> Dict[str, Any]:
         """Executes a chat completion request with auto-failover, backoff, and rotator tracking."""
         compiled_messages = ContextTokenBudgeter.compile_prompt(system_prompt, history, user_query, mode)
@@ -124,25 +124,27 @@ class LLMClient:
 
             api_url = f"{url.rstrip('/')}/api/chat"
             logger.info(f"Issuing chat completion to: {api_url} (Attempt {attempt + 1}/{max_retries})")
-            
+
             try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                # 10s connect timeout, 180s read timeout to handle large model inference
+                timeout = httpx.Timeout(connect=10.0, read=180.0, write=10.0, pool=5.0)
+                async with httpx.AsyncClient(timeout=timeout) as client:
                     response = await client.post(
                         api_url,
                         json=payload,
                         headers=headers
                     )
-                    
+
                     if response.status_code == 200:
                         data = response.json()
-                        
+
                         # Native Ollama response format: data["message"]["content"]
                         content = data.get("message", {}).get("content", "")
-                        
+
                         # Extract usage stats from Ollama native response
                         prompt_eval_count = data.get("prompt_eval_count", 0)
                         eval_count = data.get("eval_count", 0)
-                        
+
                         return {
                             "content": content,
                             "usage": {
@@ -155,7 +157,7 @@ class LLMClient:
                     else:
                         logger.warning(f"Ollama server returned error status {response.status_code}: {response.text}")
                         self.rotator.mark_failed(url)
-                except Exception as e:
+            except Exception as e:
                 logger.error(f"HTTP request to Ollama host '{url}' failed: {str(e)}")
                 self.rotator.mark_failed(url)
 

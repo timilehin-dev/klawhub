@@ -9,9 +9,15 @@ from src.db.models import Schedule
 
 logger = logging.getLogger("klawhub.core.tools.schedule_control")
 
+# Maximum allowed lengths to prevent DB bloat and abuse
+MAX_NAME_LENGTH = 200
+MAX_ACTION_LENGTH = 2000
+MAX_TIMEZONE_LENGTH = 64
+
+
 class ScheduleControl:
     """Multi-tenant safe schedule management controller.
-    
+
     Guarantees absolute data isolation by requiring workspace_id validation
     across all operations (create, list, pause, resume, update, delete).
     """
@@ -28,19 +34,35 @@ class ScheduleControl:
         timezone: str = "UTC"
     ) -> Dict[str, Any]:
         """Creates and persists a new cron trigger schedule for the workspace."""
-        logger.info(f"Creating schedule '{name}' for workspace {workspace_id}")
-        
-        # Validate cron expression
-        if not cron_expr or not croniter.is_valid(cron_expr):
+        # --- Input validation ---
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ValueError("Schedule name is required.")
+        if len(clean_name) > MAX_NAME_LENGTH:
+            raise ValueError(f"Schedule name exceeds {MAX_NAME_LENGTH} characters.")
+
+        clean_action = (action or "").strip()
+        if not clean_action:
+            raise ValueError("Schedule action is required.")
+        if len(clean_action) > MAX_ACTION_LENGTH:
+            raise ValueError(f"Schedule action exceeds {MAX_ACTION_LENGTH} characters.")
+
+        clean_timezone = (timezone or "UTC").strip()
+        if len(clean_timezone) > MAX_TIMEZONE_LENGTH:
+            raise ValueError(f"Timezone string exceeds {MAX_TIMEZONE_LENGTH} characters.")
+
+        if not croniter.is_valid(cron_expr):
             raise ValueError(f"Invalid cron expression: '{cron_expr}'. Must have 5 fields.")
+
+        logger.info(f"Creating schedule '{clean_name}' for workspace {workspace_id}")
 
         new_schedule = Schedule(
             workspace_id=workspace_id,
             slack_user_id=slack_user_id,
-            name=name,
+            name=clean_name,
             cron_expr=cron_expr,
-            timezone=timezone,
-            action=action,
+            timezone=clean_timezone,
+            action=clean_action,
             channel_id=channel_id,
             is_active=True
         )
@@ -48,11 +70,11 @@ class ScheduleControl:
         async with get_db_session() as session:
             session.add(new_schedule)
             await session.commit()
-            
+
             logger.info(f"Successfully created schedule {new_schedule.id} for workspace {workspace_id}")
             return {
                 "status": "success",
-                "message": f"Schedule '{name}' successfully created.",
+                "message": f"Schedule '{clean_name}' successfully created.",
                 "schedule": {
                     "id": str(new_schedule.id),
                     "name": new_schedule.name,
@@ -68,12 +90,12 @@ class ScheduleControl:
     async def list_schedules(cls, workspace_id: uuid.UUID) -> List[Dict[str, Any]]:
         """Lists all active and paused schedules securely scoped to the active workspace_id."""
         logger.info(f"Listing schedules for workspace {workspace_id}")
-        
+
         async with get_db_session() as session:
             statement = select(Schedule).where(Schedule.workspace_id == workspace_id)
             result = await session.execute(statement)
             schedules = result.scalars().all()
-            
+
             return [
                 {
                     "id": str(s.id),
@@ -98,7 +120,7 @@ class ScheduleControl:
         """Toggles a schedule's active status securely after verifying workspace ownership."""
         status_label = "activate" if is_active else "pause"
         logger.info(f"Attempting to {status_label} schedule {schedule_id} in workspace {workspace_id}")
-        
+
         async with get_db_session() as session:
             statement = select(Schedule).where(
                 Schedule.id == schedule_id,
@@ -106,19 +128,19 @@ class ScheduleControl:
             )
             result = await session.execute(statement)
             schedule = result.scalar_one_or_none()
-            
+
             if not schedule:
                 raise ValueError(f"Schedule with ID '{schedule_id}' not found in your workspace.")
-                
+
             schedule.is_active = is_active
             schedule.updated_at = datetime.utcnow()
-            
+
             if is_active:
                 # Reset consecutive failure counters upon manual reactivation
                 schedule.fail_count = 0
-            
+
             await session.commit()
-            
+
             logger.info(f"Schedule {schedule_id} status updated to is_active={is_active}")
             return {
                 "status": "success",
@@ -131,7 +153,7 @@ class ScheduleControl:
     async def delete_schedule(cls, workspace_id: uuid.UUID, schedule_id: uuid.UUID) -> Dict[str, Any]:
         """Permanently deletes a schedule record securely after verifying workspace ownership."""
         logger.info(f"Attempting to delete schedule {schedule_id} in workspace {workspace_id}")
-        
+
         async with get_db_session() as session:
             # Check ownership first
             statement = select(Schedule).where(
@@ -140,13 +162,13 @@ class ScheduleControl:
             )
             result = await session.execute(statement)
             schedule = result.scalar_one_or_none()
-            
+
             if not schedule:
                 raise ValueError(f"Schedule with ID '{schedule_id}' not found in your workspace.")
-                
+
             await session.delete(schedule)
             await session.commit()
-            
+
             logger.info(f"Successfully deleted schedule {schedule_id} from workspace {workspace_id}")
             return {
                 "status": "success",
@@ -167,7 +189,19 @@ class ScheduleControl:
     ) -> Dict[str, Any]:
         """Securly updates a schedule's configurations after ownership checks."""
         logger.info(f"Attempting to update schedule {schedule_id} in workspace {workspace_id}")
-        
+
+        # --- Pre-validate cron if provided ---
+        if cron_expr is not None and not croniter.is_valid(cron_expr):
+            raise ValueError(f"Invalid cron expression: '{cron_expr}'. Must have 5 fields.")
+
+        # --- Pre-validate length caps ---
+        if name is not None and len(name.strip()) > MAX_NAME_LENGTH:
+            raise ValueError(f"Schedule name exceeds {MAX_NAME_LENGTH} characters.")
+        if action is not None and len(action.strip()) > MAX_ACTION_LENGTH:
+            raise ValueError(f"Schedule action exceeds {MAX_ACTION_LENGTH} characters.")
+        if timezone is not None and len(timezone.strip()) > MAX_TIMEZONE_LENGTH:
+            raise ValueError(f"Timezone string exceeds {MAX_TIMEZONE_LENGTH} characters.")
+
         async with get_db_session() as session:
             statement = select(Schedule).where(
                 Schedule.id == schedule_id,
@@ -175,26 +209,24 @@ class ScheduleControl:
             )
             result = await session.execute(statement)
             schedule = result.scalar_one_or_none()
-            
+
             if not schedule:
                 raise ValueError(f"Schedule with ID '{schedule_id}' not found in your workspace.")
-                
+
             if name is not None:
-                schedule.name = name
+                schedule.name = name.strip()
             if cron_expr is not None:
-                if not croniter.is_valid(cron_expr):
-                    raise ValueError(f"Invalid cron expression: '{cron_expr}'")
                 schedule.cron_expr = cron_expr
             if action is not None:
-                schedule.action = action
+                schedule.action = action.strip()
             if channel_id is not None:
                 schedule.channel_id = channel_id
             if timezone is not None:
-                schedule.timezone = timezone
-                
+                schedule.timezone = timezone.strip()
+
             schedule.updated_at = datetime.utcnow()
             await session.commit()
-            
+
             logger.info(f"Successfully updated schedule {schedule_id}")
             return {
                 "status": "success",

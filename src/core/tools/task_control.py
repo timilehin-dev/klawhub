@@ -8,9 +8,35 @@ from src.db.models import Task
 
 logger = logging.getLogger("klawhub.core.tools.task_control")
 
+# --- Validation constants ---
+VALID_TASK_TYPES = {"action_item", "bug_fix", "research", "feature_request"}
+VALID_TASK_STATUSES = {"pending", "completed"}
+MAX_REQUEST_LENGTH = 4000
+
+
+def _validate_type(task_type: str) -> str:
+    """Validates task type against allow-list. Returns canonical lowercase value."""
+    normalized = (task_type or "action_item").strip().lower()
+    if normalized not in VALID_TASK_TYPES:
+        raise ValueError(
+            f"Invalid task type '{task_type}'. Must be one of: {sorted(VALID_TASK_TYPES)}"
+        )
+    return normalized
+
+
+def _validate_status(status: str) -> str:
+    """Validates task status against allow-list. Returns canonical lowercase value."""
+    normalized = (status or "pending").strip().lower()
+    if normalized not in VALID_TASK_STATUSES:
+        raise ValueError(
+            f"Invalid task status '{status}'. Must be one of: {sorted(VALID_TASK_STATUSES)}"
+        )
+    return normalized
+
+
 class TaskControl:
     """Multi-tenant safe task management controller.
-    
+
     Guarantees absolute data isolation by requiring workspace_id validation
     across all operations (create, list, update_status, delete).
     """
@@ -28,21 +54,30 @@ class TaskControl:
     ) -> Dict[str, Any]:
         """Creates and persists a new task for the workspace."""
         logger.info(f"Creating task for workspace {workspace_id} by user {slack_user_id}")
-        
+
+        # --- Input validation ---
+        clean_request = (request or "").strip()
+        if not clean_request:
+            raise ValueError("Task request text is required.")
+        if len(clean_request) > MAX_REQUEST_LENGTH:
+            raise ValueError(f"Task request exceeds {MAX_REQUEST_LENGTH} characters.")
+        valid_type = _validate_type(type)
+        valid_status = _validate_status(status)
+
         new_task = Task(
             workspace_id=workspace_id,
             slack_user_id=slack_user_id,
             slack_channel_id=channel_id or "",
             slack_thread_ts=thread_ts,
-            type=type,
-            request=request,
-            status=status
+            type=valid_type,
+            request=clean_request,
+            status=valid_status
         )
 
         async with get_db_session() as session:
             session.add(new_task)
             await session.commit()
-            
+
             logger.info(f"Successfully created task {new_task.id} for workspace {workspace_id}")
             return {
                 "status": "success",
@@ -60,12 +95,12 @@ class TaskControl:
     async def list_tasks(cls, workspace_id: uuid.UUID) -> List[Dict[str, Any]]:
         """Lists all tasks securely scoped to the active workspace_id."""
         logger.info(f"Listing tasks for workspace {workspace_id}")
-        
+
         async with get_db_session() as session:
             statement = select(Task).where(Task.workspace_id == workspace_id).order_by(Task.created_at.desc())
             result = await session.execute(statement)
             tasks = result.scalars().all()
-            
+
             return [
                 {
                     "id": str(t.id),
@@ -78,60 +113,12 @@ class TaskControl:
             ]
 
     @classmethod
-    async def update_task_status(
+    async def get_task(
         cls,
         workspace_id: uuid.UUID,
-        task_id: uuid.UUID,
-        status: str
+        task_id: uuid.UUID
     ) -> Dict[str, Any]:
-        """Updates a task's status securely after verifying workspace ownership."""
-        logger.info(f"Attempting to update status of task {task_id} in workspace {workspace_id}")
-        
-        async with get_db_session() as session:
-            statement = select(Task).where(
-                Task.id == task_id,
-                Task.workspace_id == workspace_id
-            )
-            result = await session.execute(statement)
-            task = result.scalar_one_or_none()
-            
-            if not task:
-                raise ValueError(f"Task with ID '{task_id}' not found in your workspace.")
-                
-            task.status = status
-            task.updated_at = datetime.utcnow()
-            await session.commit()
-            
-            logger.info(f"Task {task_id} status updated to {status}")
-            return {
-                "status": "success",
-                "message": f"Task status updated to '{status}'.",
-                "task_id": str(task.id),
-                "status_updated": task.status
-            }
+        """Retrieves a single task by ID, scoped to the active workspace.
 
-    @classmethod
-    async def delete_task(cls, workspace_id: uuid.UUID, task_id: uuid.UUID) -> Dict[str, Any]:
-        """Permanently deletes a task record securely after verifying workspace ownership."""
-        logger.info(f"Attempting to delete task {task_id} in workspace {workspace_id}")
-        
-        async with get_db_session() as session:
-            statement = select(Task).where(
-                Task.id == task_id,
-                Task.workspace_id == workspace_id
-            )
-            result = await session.execute(statement)
-            task = result.scalar_one_or_none()
-            
-            if not task:
-                raise ValueError(f"Task with ID '{task_id}' not found in your workspace.")
-                
-            await session.delete(task)
-            await session.commit()
-            
-            logger.info(f"Successfully deleted task {task_id} from workspace {workspace_id}")
-            return {
-                "status": "success",
-                "message": f"Task has been successfully deleted.",
-                "task_id": str(task_id)
-            }
+        Returns a friendly dict (not raises) when the task is missing so the
+        worker
