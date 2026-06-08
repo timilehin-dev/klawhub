@@ -6,6 +6,27 @@ from src.core.llm.rotators import ResilientOllamaRotator
 
 logger = logging.getLogger("klawhub.core.llm.client")
 
+
+def _mode_default_read_timeout(mode: str) -> float:
+    """Return a conservative read timeout tuned to expected prompt size by mode."""
+    timeouts = {
+        "STANDARD_CHAT": 90.0,
+        "DEEP_INGESTION": 240.0,
+        "VETERAN_ENGINEERING": 300.0,
+    }
+    return timeouts.get(mode.upper(), 180.0)
+
+def _bounded_read_timeout(mode: str, timeout_seconds: Optional[float], deadline_epoch: Optional[float]) -> float:
+    """Resolve timeout from explicit value, mode default, and absolute deadline."""
+    import time
+
+    read_timeout = float(timeout_seconds) if timeout_seconds is not None else _mode_default_read_timeout(mode)
+    if deadline_epoch is not None:
+        remaining = float(deadline_epoch) - time.time()
+        # Leave a small cushion for response handling/retry bookkeeping.
+        read_timeout = min(read_timeout, max(1.0, remaining - 2.0))
+    return max(1.0, read_timeout)
+
 class ContextTokenBudgeter:
     """Estimates and prunes prompt context to guarantee optimal token budgets.
     
@@ -93,9 +114,15 @@ class LLMClient:
         user_query: str,
         mode: str = "STANDARD_CHAT",
         temperature: float = 0.2,
-        max_retries: int = 2
+        max_retries: int = 2,
+        timeout_seconds: Optional[float] = None,
+        deadline_epoch: Optional[float] = None
     ) -> Dict[str, Any]:
-        """Executes a chat completion request with auto-failover, backoff, and rotator tracking."""
+        """Executes a chat completion request with auto-failover, backoff, and rotator tracking.
+
+        timeout_seconds and deadline_epoch are optional hardening knobs for callers that
+        know their execution budget; omitting them preserves the historical API behavior.
+        """
         compiled_messages = ContextTokenBudgeter.compile_prompt(system_prompt, history, user_query, mode)
         model = os.getenv("OLLAMA_MODEL", "gemma4:31b-cloud")
         if mode.upper() == "VETERAN_ENGINEERING":
@@ -123,11 +150,18 @@ class LLMClient:
             }
 
             api_url = f"{url.rstrip('/')}/api/chat"
-            logger.info(f"Issuing chat completion to: {api_url} (Attempt {attempt + 1}/{max_retries})")
+            logger.info(f"Issuing chat completion to: {api_url} (Attempt {attempt + 1}/{max_retries}, mode={mode}, read_timeout={_bounded_read_timeout(mode, timeout_seconds, deadline_epoch):.1f}s)")
 
             try:
-                # 10s connect timeout, 180s read timeout to handle large model inference
-                timeout = httpx.Timeout(connect=10.0, read=180.0, write=10.0, pool=5.0)
+                read_timeout = _bounded_read_timeout(mode, timeout_seconds, deadline_epoch)
+                connect_timeout = min(10.0, max(1.0, read_timeout / 3.0))
+                write_timeout = min(10.0, max(1.0, read_timeout / 3.0))
+                timeout = httpx.Timeout(
+                    connect=connect_timeout,
+                    read=read_timeout,
+                    write=write_timeout,
+                    pool=5.0
+                )
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     response = await client.post(
                         api_url,

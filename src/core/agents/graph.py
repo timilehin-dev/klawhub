@@ -11,8 +11,8 @@ from src.core.agents.team.reviewer import reviewer_node
 from src.core.agents.team.critic import critic_node
 from src.core.agents.team.auditor import auditor_node
 
-# In-memory checkpointer for serverless (each invocation is isolated)
-from langgraph.checkpoint.memory import MemorySaver
+# Persistent checkpointer for serverless-safe multi-step Slack workflows
+from src.core.agents.state import HMACCheckpointSaver
 
 logger = logging.getLogger("klawhub.core.agents.graph")
 
@@ -51,6 +51,17 @@ class AgentState(TypedDict):
     
     # Structured thread history list (e.g. [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}])
     history: Optional[List[Dict[str, str]]]
+
+    # Slack delivery context propagated from the gateway for tool and approval flows
+    slack_user_id: Optional[str]
+    slack_channel_id: Optional[str]
+    slack_message_ts: Optional[str]
+    slack_thread_ts: Optional[str]
+
+    # Explicit continuation metadata for multi-step Slack actions
+    continuation_type: Optional[str]
+    approved_action_id: Optional[str]
+    original_request: Optional[str]
 
 
 # --- Transition Routers ---
@@ -177,6 +188,6 @@ def create_coworker_graph() -> StateGraph:
     return workflow
 
 
-# Compile the production-ready runnable graph
-checkpointer = MemorySaver()
+# Compile the production-ready runnable graph with persistent, signed checkpoints.
+checkpointer = HMACCheckpointSaver()
 coworker_app = create_coworker_graph().compile(checkpointer=checkpointer)

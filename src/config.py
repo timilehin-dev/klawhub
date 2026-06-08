@@ -9,6 +9,13 @@ class Settings(BaseSettings):
     
     # Supabase / Postgres Database
     database_url: str = Field(..., validation_alias="DATABASE_URL")
+
+    # Database runtime hardening
+    db_pool_mode: str = Field(default="auto", validation_alias="DB_POOL_MODE")
+    db_pool_size: int = Field(default=5, validation_alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=5, validation_alias="DB_MAX_OVERFLOW")
+    db_pool_recycle_seconds: int = Field(default=1800, validation_alias="DB_POOL_RECYCLE_SECONDS")
+    run_startup_ddl: bool = Field(default=False, validation_alias=AliasChoices("RUN_STARTUP_DDL", "KLAWHUB_RUN_STARTUP_DDL"))
     
     # Redis Cache & Checkpointer State
     upstash_redis_rest_url: str = Field(..., validation_alias="UPSTASH_REDIS_REST_URL")
@@ -20,7 +27,7 @@ class Settings(BaseSettings):
     
     # Slack OAuth & Credentials
     slack_signing_secret: str = Field(..., validation_alias="SLACK_SIGNING_SECRET")
-    slack_bot_token: str = Field(..., validation_alias="SLACK_BOT_TOKEN")
+    slack_bot_token: Optional[str] = Field(default=None, validation_alias="SLACK_BOT_TOKEN")
     
     # Modal sandbox webhook client
     modal_function_url: str = Field(..., validation_alias="MODAL_FUNCTION_URL")

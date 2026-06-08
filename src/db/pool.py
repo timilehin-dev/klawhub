@@ -1,7 +1,9 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from sqlalchemy import text
+from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlmodel import SQLModel
 from src.config import settings
@@ -10,10 +12,22 @@ logger = logging.getLogger("klawhub.db")
 
 import urllib.parse
 
+SERVERLESS_ENV_VARS = ("VERCEL", "AWS_LAMBDA_FUNCTION_NAME", "FUNCTION_TARGET", "K_SERVICE")
+
+def _is_serverless_runtime() -> bool:
+    """Detect request-scoped runtimes where global connection pools cause fan-out."""
+    return any(os.environ.get(name) for name in SERVERLESS_ENV_VARS)
+
+def _uses_transaction_pooler(url: str) -> bool:
+    """Detect PgBouncer/Supabase pooler URLs that are safest without client-side pooling."""
+    lowered = url.lower()
+    return "pgbouncer=true" in lowered or "pooler.supabase" in lowered or ":6543" in lowered
+
 # Automatically translate postgres:// to postgresql+asyncpg:// for asyncpg driver support
 db_url = settings.database_url
 
 # Parse and remove 'pgbouncer' parameter from query string if present (causes asyncpg connection crash)
+uses_transaction_pooler = _uses_transaction_pooler(db_url)
 if "sqlite" not in db_url:
     try:
         parsed_url = urllib.parse.urlparse(db_url)
@@ -32,20 +46,40 @@ elif db_url.startswith("postgresql://"):
 
 logger.info("Initializing asynchronous database connection pool...")
 
-# Create the resilient async engine
+# Create the resilient async engine. Serverless and external transaction poolers should
+# not keep process-global SQLAlchemy pools because each warm function instance can otherwise
+# multiply open database connections. Dedicated workers can opt back in with DB_POOL_MODE=pooled.
+pool_mode = settings.db_pool_mode.lower().strip()
+if pool_mode not in {"auto", "pooled", "null"}:
+    logger.warning("Unsupported DB_POOL_MODE=%s; falling back to auto", settings.db_pool_mode)
+    pool_mode = "auto"
+
+use_null_pool = pool_mode == "null" or (
+    pool_mode == "auto" and (uses_transaction_pooler or _is_serverless_runtime())
+)
+
 if "sqlite" in db_url:
     async_engine = create_async_engine(
         db_url,
         echo=False
     )
+elif use_null_pool:
+    logger.info("Using NullPool for serverless/transaction-pooler database connections.")
+    async_engine = create_async_engine(
+        db_url,
+        echo=False,
+        poolclass=NullPool,
+        pool_pre_ping=True,
+        connect_args={"statement_cache_size": 0}
+    )
 else:
     async_engine = create_async_engine(
         db_url,
         echo=False,
-        pool_size=10,
-        max_overflow=20,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
         pool_pre_ping=True,
-        pool_recycle=1800,
+        pool_recycle=settings.db_pool_recycle_seconds,
         connect_args={"statement_cache_size": 0}
     )
 
@@ -74,10 +108,16 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 async def init_db_models() -> None:
-    """Utility to initialize database schemas.
+    """Utility to initialize database schemas when explicitly enabled.
     
-    Note: Supabase migration handles table creation, but this is a helpful local baseline.
+    Production/serverless deployments should run migrations out-of-band; startup DDL is
+    gated by RUN_STARTUP_DDL/KLAWHUB_RUN_STARTUP_DDL because api/index.py calls this hook
+    on every cold start.
     """
+    if not settings.run_startup_ddl:
+        logger.info("Skipping startup database DDL; set RUN_STARTUP_DDL=true to enable schema evolution.")
+        return
+
     async with async_engine.begin() as conn:
         logger.info("Verifying database models schema...")
         db_dialect = conn.dialect.name
