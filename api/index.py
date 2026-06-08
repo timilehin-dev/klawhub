@@ -341,13 +341,23 @@ async def get_dashboard_stats(request: Request):
             raise HTTPException(status_code=404, detail="Workspace not found")
 
         # 2. Get Telemetry Counters
-        runs_query = select(Run).where(Run.workspace_id == workspace_id)
-        runs_result = await session.execute(runs_query)
-        runs = runs_result.scalars().all()
+        # Optimized counting queries to avoid N+1 and large data transfer
+        runs_count_query = select(func.count(Run.id)).where(Run.workspace_id == workspace_id)
+        runs_count_res = await session.execute(runs_count_query)
+        total_runs = runs_count_res.scalar() or 0
 
-        tasks_query = select(Task).where(Task.workspace_id == workspace_id)
-        tasks_result = await session.execute(tasks_query)
-        tasks = tasks_result.scalars().all()
+        runs_completed_query = select(func.count(Run.id)).where(Run.workspace_id == workspace_id, Run.status == "completed")
+        runs_completed_res = await session.execute(runs_completed_query)
+        completed_runs = runs_completed_res.scalar() or 0
+        pending_runs = total_runs - completed_runs
+
+        tasks_count_query = select(func.count(Task.id)).where(Task.workspace_id == workspace_id)
+        tasks_count_res = await session.execute(tasks_count_query)
+        total_tasks = tasks_count_res.scalar() or 0
+
+        tasks_completed_query = select(func.count(Task.id)).where(Task.workspace_id == workspace_id, Task.status == "completed")
+        tasks_completed_res = await session.execute(tasks_completed_query)
+        completed_tasks = tasks_completed_res.scalar() or 0
 
         schedules_count_query = select(func.count(Schedule.id)).where(
             Schedule.workspace_id == workspace_id,
@@ -356,13 +366,7 @@ async def get_dashboard_stats(request: Request):
         schedules_count_res = await session.execute(schedules_count_query)
         active_schedules = schedules_count_res.scalar() or 0
 
-    # Aggregate telemetry splits
-    total_runs = len(runs)
-    completed_runs = sum(1 for r in runs if r.status == "completed")
-    pending_runs = total_runs - completed_runs
-
-    total_tasks = len(tasks)
-    completed_tasks = sum(1 for t in tasks if t.status == "completed")
+    # Aggregate telemetry splits already handled optimally via SQL COUNT queries
     
     # Model compute telemetry (simulated dashboard ratios for aesthetic graph representation)
     model_splits = {
