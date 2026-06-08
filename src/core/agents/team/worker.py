@@ -19,7 +19,7 @@ CODE_EXECUTION_KEYWORDS = [
 
 def _needs_sandbox_execution(user_query: str, milestone_desc: str) -> bool:
     """Determines if the user query or milestone requires sandbox code execution.
-    
+
     Simple conversational queries (greetings, introductions, questions, summaries)
     should be answered directly by the LLM without sandbox execution.
     """
@@ -29,7 +29,7 @@ def _needs_sandbox_execution(user_query: str, milestone_desc: str) -> bool:
 
 async def worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Worker Node: Handles task execution.
-    
+
     For conversational queries: returns LLM text response directly.
     For code-execution queries: generates, validates (via AST), and executes in Modal sandbox.
     """
@@ -39,6 +39,20 @@ async def worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     context_data = state.get("context_data", [])
     milestones = state.get("milestones", [])
     active_index = state.get("active_milestone_index", 0)
+
+    # Slack approval continuations must bypass fresh LLM planning and resume the approved action directly.
+    if state.get("continuation_type") == "modal_sandbox_approval" and state.get("approved_action_id"):
+        if not milestones:
+            milestones = [{
+                "id": 1,
+                "description": state.get("original_request") or "Execute approved Modal sandbox action",
+                "status": "pending",
+                "assigned_to": "worker"
+            }]
+            active_index = 0
+        elif active_index >= len(milestones):
+            active_index = 0
+        milestones[active_index]["assigned_to"] = "worker"
 
     # If the active milestone is NOT a worker milestone, skip
     if active_index >= len(milestones) or milestones[active_index].get("assigned_to") != "worker":
@@ -50,6 +64,8 @@ async def worker_node(state: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"Worker processing milestone: '{milestone_desc}'")
 
     # Decide execution path: direct LLM response vs sandbox code execution
+    if state.get("continuation_type") == "modal_sandbox_approval" and state.get("approved_action_id"):
+        return await _handle_code_execution(state, current_milestone, milestones, active_index)
     if not _needs_sandbox_execution(user_query, milestone_desc):
         # --- CONVERSATIONAL PATH: Return LLM text directly ---
         return await _handle_conversational(state, current_milestone, milestones, active_index)
@@ -65,7 +81,7 @@ async def _handle_conversational(
     active_index: int
 ) -> Dict[str, Any]:
     """Handles conversational queries by running a local multi-turn tool execution loop.
-    
+
     Permits Klawhub to inspect patterns, manage tasks, schedules, and memory securely.
     """
     user_query = state.get("user_query")
@@ -112,7 +128,7 @@ async def _handle_conversational(
     slack_user_id = state.get("slack_user_id") or "U_AGENT"
     slack_channel_id = state.get("slack_channel_id") or ""
     slack_thread_ts = state.get("thread_id")
-    
+
     import uuid
     ws_uuid = uuid.UUID(str(workspace_id))
 
@@ -127,10 +143,10 @@ async def _handle_conversational(
     llm = LLMClient()
     current_query = user_query
     conversation_history = list(state.get("history") or [])
-    
+
     MAX_ITERATIONS = 3
     final_output = ""
-    
+
     try:
         for iteration in range(MAX_ITERATIONS):
             logger.info(f"Conversational Tool Loop Iteration {iteration + 1}/{MAX_ITERATIONS}")
@@ -140,28 +156,28 @@ async def _handle_conversational(
                 user_query=current_query,
                 mode="STANDARD_CHAT"
             )
-            
+
             content = response["content"].strip()
             final_output = content
-            
+
             # Check for [TOOL:name]...[/TOOL] pattern
             start_tag = "[TOOL:"
             end_tag = "[/TOOL]"
-            
+
             if start_tag in content and end_tag in content:
                 try:
                     tag_start = content.find(start_tag)
                     tag_end = content.find(end_tag)
-                    
+
                     tool_clause = content[tag_start : tag_end + len(end_tag)]
                     tool_header = content[tag_start : content.find("]", tag_start)]
                     tool_name = tool_header.split(":")[1].strip()
-                    
+
                     payload_str = content[content.find("]", tag_start) + 1 : tag_end].strip()
                     payload = json.loads(payload_str)
-                    
+
                     logger.info(f"Conversational loop parsed tool call: {tool_name} with params: {payload}")
-                    
+
                     result = None
                     if tool_name == "schedule_control":
                         from src.core.tools.schedule_control import ScheduleControl
@@ -208,7 +224,7 @@ async def _handle_conversational(
                             )
                         else:
                             result = {"error": f"Unknown schedule_control action: {action}"}
-                            
+
                     elif tool_name == "task_control":
                         from src.core.tools.task_control import TaskControl
                         action = payload.get("action")
@@ -237,7 +253,7 @@ async def _handle_conversational(
                             )
                         else:
                             result = {"error": f"Unknown task_control action: {action}"}
-                            
+
                     elif tool_name == "memory_control":
                         from src.core.tools.memory_control import MemoryControl
                         action = payload.get("action")
@@ -261,7 +277,7 @@ async def _handle_conversational(
                             )
                         else:
                             result = {"error": f"Unknown memory_control action: {action}"}
-                            
+
                     elif tool_name == "skill_control":
                         from src.core.tools.skill_control import SkillControl
                         action = payload.get("action")
@@ -292,11 +308,11 @@ async def _handle_conversational(
                             result = {"error": f"Unknown skill_control action: {action}"}
                     else:
                         result = {"error": f"Tool '{tool_name}' is not registered."}
-                        
+
                     conversation_history.append({"role": "assistant", "content": content})
                     conversation_history.append({"role": "user", "content": f"[TOOL_RESPONSE:{tool_name}]{json.dumps(result)}[/TOOL_RESPONSE]"})
                     current_query = f"Here is the result of your tool invocation: {json.dumps(result)}. Please formulate your final response to the user."
-                    
+
                 except Exception as e:
                     logger.error(f"Error executing local tool '{tool_name}' in conversational loop: {e}", exc_info=True)
                     conversation_history.append({"role": "assistant", "content": content})
@@ -305,7 +321,7 @@ async def _handle_conversational(
             else:
                 logger.info("Conversational tool loop completed with final response.")
                 break
-                
+
         # Clean final response content of any tool clauses
         if start_tag in final_output:
             final_output = final_output.split(start_tag)[0].strip()
@@ -350,7 +366,7 @@ async def _handle_code_execution(
     workspace_id = state.get("workspace_id")
     slack_channel_id = state.get("slack_channel_id") or ""
     slack_thread_ts = state.get("thread_id")
-    
+
     ws_uuid = uuid.UUID(str(workspace_id))
     milestone_desc = current_milestone.get("description", "")
 
@@ -400,20 +416,39 @@ async def _handle_code_execution(
             }
         ]
 
-    # Check database for existing PendingAction for this thread huddle
+    # Check database for an explicit approved action first, then fall back to this thread huddle.
     existing_action = None
+    approved_action_id = state.get("approved_action_id")
     async with get_db_session() as session:
-        statement = select(PendingAction).where(
-            PendingAction.workspace_id == ws_uuid,
-            PendingAction.tool_name == "modal_sandbox"
-        ).order_by(PendingAction.created_at.desc())
-        
-        result = await session.execute(statement)
-        actions = result.scalars().all()
-        for act in actions:
-            if act.params.get("thread_ts") == slack_thread_ts and act.status in ["pending", "approved", "rejected"]:
-                existing_action = act
-                break
+        if approved_action_id:
+            try:
+                explicit_stmt = select(PendingAction).where(
+                    PendingAction.id == uuid.UUID(str(approved_action_id)),
+                    PendingAction.workspace_id == ws_uuid,
+                    PendingAction.tool_name == "modal_sandbox"
+                )
+                existing_action = (await session.execute(explicit_stmt)).scalar_one_or_none()
+            except ValueError:
+                return {"errors": [f"Invalid approved sandbox action id: {approved_action_id}"]}
+
+        if not existing_action:
+            statement = select(PendingAction).where(
+                PendingAction.workspace_id == ws_uuid,
+                PendingAction.tool_name == "modal_sandbox"
+            ).order_by(PendingAction.created_at.desc())
+
+            result = await session.execute(statement)
+            actions = result.scalars().all()
+            for act in actions:
+                if act.params.get("thread_ts") == slack_thread_ts and act.status in ["pending", "approved", "rejected"]:
+                    existing_action = act
+                    break
+
+    if approved_action_id and not existing_action:
+        return {
+            "errors": [f"Approved sandbox action was not found or is outside this workspace: {approved_action_id}"],
+            "milestones": milestones
+        }
 
     # If action was already rejected, return error
     if existing_action and existing_action.status == "rejected":
@@ -452,7 +487,7 @@ async def _handle_code_execution(
                         custom_skill = res.scalar_one_or_none()
                     if custom_skill:
                         break
-                        
+
         if custom_skill:
             logger.info(f"Custom skill '{custom_skill.name}' retrieved from database. Bypassing LLM generation.")
             python_code = custom_skill.source_code
@@ -525,7 +560,7 @@ async def _handle_code_execution(
         # Post beautiful approval block card huddle to Slack thread
         from src.integrations.providers.slack.client import SlackClient
         slack_client_instance = SlackClient(ws_uuid)
-        
+
         code_lines = python_code.splitlines()
         preview = "\n".join(code_lines[:8]) + ("\n# ... [code truncated]" if len(code_lines) > 8 else "")
         blocks = build_approval_card(new_action.id, milestone_desc, preview)
@@ -550,7 +585,7 @@ async def _handle_code_execution(
 
     from src.integrations.providers.slack.client import SlackClient
     slack_client_instance = SlackClient(ws_uuid)
-    
+
     slack_sdk_client = None
     progress_ts = None
     try:
@@ -577,7 +612,7 @@ async def _handle_code_execution(
                 )
             except Exception as pe:
                 logger.error(f"Failed to update progress status: {pe}")
-                
+
         scanner = ASTSafetyScanner(python_code)
         scanner.scan()
         logger.info("AST validation SUCCESS. No security risks detected.")
@@ -608,7 +643,7 @@ async def _handle_code_execution(
         if result.get("success"):
             stdout = result.get("stdout", "").strip()
             logger.info("Sandbox execution completed successfully.")
-            
+
             if progress_ts and slack_sdk_client:
                 try:
                     await slack_sdk_client.chat_update(
@@ -618,10 +653,10 @@ async def _handle_code_execution(
                     )
                 except Exception as pe:
                     logger.error(f"Failed to update progress status: {pe}")
-            
+
             updated_milestones = list(milestones)
             updated_milestones[active_index]["status"] = "completed"
-            
+
             return {
                 "worker_output": stdout,
                 "milestones": updated_milestones,
@@ -688,7 +723,7 @@ async def _get_few_shot_examples(workspace_id: uuid.UUID) -> str:
     from src.db.pool import get_db_session
     from src.db.models import WorkflowLearning
     from sqlmodel import select
-    
+
     try:
         async with get_db_session() as session:
             # Positive examples: rating == 5, ordered by created_at desc (limit 3)
@@ -698,7 +733,7 @@ async def _get_few_shot_examples(workspace_id: uuid.UUID) -> str:
             ).order_by(WorkflowLearning.created_at.desc()).limit(3)
             pos_res = await session.execute(pos_stmt)
             pos_examples = pos_res.scalars().all()
-            
+
             # Negative examples: rating == 1, ordered by created_at desc (limit 3)
             neg_stmt = select(WorkflowLearning).where(
                 WorkflowLearning.workspace_id == workspace_id,
@@ -706,7 +741,7 @@ async def _get_few_shot_examples(workspace_id: uuid.UUID) -> str:
             ).order_by(WorkflowLearning.created_at.desc()).limit(3)
             neg_res = await session.execute(neg_stmt)
             neg_examples = neg_res.scalars().all()
-            
+
         context = ""
         if pos_examples:
             context += "\n--- APPROVED STYLE/BEHAVIOR PATTERNS (DO THESE) ---\n"

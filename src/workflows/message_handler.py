@@ -429,7 +429,14 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
             "thread_id": thread_ts,
             "user_query": user_query,
             "context_data": attached_files_content,
-            "history": structured_history
+            "history": structured_history,
+            "slack_user_id": slack_event.get("user"),
+            "slack_channel_id": channel_id,
+            "slack_message_ts": message_ts,
+            "slack_thread_ts": thread_ts,
+            "continuation_type": event_data.get("continuationType"),
+            "approved_action_id": event_data.get("approvedActionId"),
+            "original_request": event_data.get("originalRequest")
         }
         
         try:

@@ -6,6 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import uuid
 import logging
+import asyncio
 import httpx
 import time
 import json
@@ -24,7 +25,7 @@ from src.workflows.inngest_app import inngest_client
 from src.workflows.message_handler import slack_message_handler, cron_schedule_runner
 
 from src.db.pool import get_db_session
-from src.db.models import Workspace, Run, Task, Schedule
+from src.db.models import Workspace, Run, Task, Schedule, ProcessedEvent
 from src.integrations.crypto import encrypt_token, decrypt_token
 from src.config import settings
 
@@ -40,9 +41,13 @@ app = FastAPI(title="Klawhub API", description="Serverless Python Gateway for Kl
 
 @app.on_event("startup")
 async def startup_event():
+    if os.getenv("KLAWHUB_RUN_SCHEMA_EVOLUTION", "false").lower() not in {"1", "true", "yes"}:
+        logger.info("Skipping runtime database schema evolution; Supabase migrations own production schema.")
+        return
+
     from src.db.pool import init_db_models
     try:
-        logger.info("Running database schema evolution on FastAPI startup...")
+        logger.info("Running database schema evolution on FastAPI startup because KLAWHUB_RUN_SCHEMA_EVOLUTION is enabled...")
         await init_db_models()
     except Exception as e:
         logger.error(f"Startup database migration failed: {e}", exc_info=True)
@@ -59,6 +64,55 @@ inngest.fast_api.serve(
 
 # Initialize Slack request signature verifier
 slack_verifier = SignatureVerifier(settings.slack_signing_secret)
+
+
+async def dispatch_slack_event_to_inngest_bg(event: Dict[str, Any], event_id: Optional[str], team_id: Optional[str]) -> None:
+    """Dispatches Slack events to Inngest outside Slack's acknowledgement path."""
+    event_identifier = event_id or str(uuid.uuid4())
+    try:
+        await asyncio.wait_for(
+            inngest_client.send(
+                inngest.Event(
+                    name="slack/event.received",
+                    data={
+                        "event": event,
+                        "eventId": event_identifier,
+                        "teamId": team_id
+                    },
+                    id=event_identifier
+                )
+            ),
+            timeout=8.0
+        )
+        logger.info(f"Successfully dispatched slack/event.received event {event_identifier} to Inngest.")
+    except Exception as e:
+        logger.error(f"Failed to dispatch Slack event {event_identifier} to Inngest in background: {e}", exc_info=True)
+
+
+async def add_initial_reaction_bg(workspace_id: uuid.UUID, channel_id: str, message_ts: str, reaction: str = "eyes") -> None:
+    """Adds immediate visual Slack acknowledgement without blocking the Slack Events response."""
+    try:
+        from src.integrations.providers.slack.client import SlackClient
+        slack_client = SlackClient(workspace_id)
+        await asyncio.wait_for(slack_client.add_reaction(channel_id, message_ts, reaction), timeout=4.0)
+    except Exception as e:
+        logger.warning(f"Failed to add immediate '{reaction}' reaction: {e}")
+
+
+def should_forward_proactive_channel_message(text: str) -> bool:
+    """Cheap gateway heuristic for unmentioned channel messages that may deserve proactive handling."""
+    normalized = (text or "").lower()
+    if not normalized or len(normalized.split()) < 4:
+        return False
+    if "?" in normalized:
+        return True
+    proactive_phrases = [
+        "how do we", "how can i", "help with", "anyone know", "how to",
+        "need to find", "is there a", "can someone", "where is", "stuck on",
+        "trying to", "problem with", "error running", "fail to", "failing to",
+        "need a", "need an", "please build", "please create"
+    ]
+    return any(phrase in normalized for phrase in proactive_phrases)
 
 
 async def verify_slack_request(request: Request) -> bytes:
@@ -550,35 +604,47 @@ async def slack_events(
     is_dm = channel.startswith("D") or event.get("channel_type") == "im"
     bot_mention_tag = f"<@{workspace.slack_bot_user_id}>"
     
+    should_ack_reaction = False
     if is_dm:
         logger.info(f"Direct Message received in channel {channel} from user {user}.")
         cleaned_text = text.replace(bot_mention_tag, "").strip()
+        should_ack_reaction = True
     else:
-        # Public or private channel: Must contain bot mention
-        if bot_mention_tag not in text:
-            # Silence policy: ignore standard channel-wide conversations
+        has_bot_mention = bool(bot_mention_tag and bot_mention_tag in text)
+        if has_bot_mention:
+            logger.info(f"App mention received in channel {channel} from user {user}.")
+            cleaned_text = text.replace(bot_mention_tag, "").strip()
+            should_ack_reaction = True
+        elif should_forward_proactive_channel_message(text):
+            logger.info(f"Forwarding likely proactive channel need in {channel} from user {user}.")
+            cleaned_text = text.strip()
+        else:
             return {"ok": True}
-            
-        logger.info(f"App mention received in channel {channel} from user {user}.")
-        cleaned_text = text.replace(bot_mention_tag, "").strip()
-        
+
     # Clean up any residual double-spaces or legacy tags
     event["text"] = cleaned_text
-    
-    # Dispatch the asynchronous Inngest workflow background trigger
-    logger.info(f"Dispatching slack/event.received event {event_id} to Inngest...")
-    await inngest_client.send(
-        inngest.Event(
-            name="slack/event.received",
-            data={
-                "event": event,
-                "eventId": event_id,
-                "teamId": team_id
-            },
-            id=event_id
-        )
-    )
-    
+
+    if should_ack_reaction and channel and event.get("ts"):
+        background_tasks.add_task(add_initial_reaction_bg, workspace.id, channel, event.get("ts"), "eyes")
+
+    # Slack may retry the same event if its 3-second ack window is missed. Keep the
+    # workflow idempotent before handing work to Inngest in the background.
+    if event_id:
+        try:
+            async with get_db_session() as session:
+                existing = await session.get(ProcessedEvent, event_id)
+                if existing:
+                    logger.info(f"Duplicate Slack event {event_id} ignored before Inngest dispatch.")
+                    return {"ok": True}
+                session.add(ProcessedEvent(event_id=event_id))
+                await session.commit()
+        except Exception as e:
+            logger.warning(f"ProcessedEvent idempotency check failed for {event_id}; relying on Inngest idempotency: {e}")
+
+    # Dispatch the Inngest workflow outside Slack's acknowledgement path.
+    logger.info(f"Scheduling slack/event.received event {event_id} dispatch to Inngest in background...")
+    background_tasks.add_task(dispatch_slack_event_to_inngest_bg, event, event_id, team_id)
+
     return {"ok": True}
 
 
@@ -2022,13 +2088,20 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                 action_id_str = action.get("value")
                 from src.db.models import PendingAction
                 
+                original_request = None
                 async with get_db_session() as session:
-                    statement = select(PendingAction).where(PendingAction.id == uuid.UUID(action_id_str))
+                    statement = select(PendingAction).where(
+                        PendingAction.id == uuid.UUID(action_id_str),
+                        PendingAction.workspace_id == workspace.id
+                    )
                     db_act = (await session.execute(statement)).scalar_one_or_none()
                     if db_act:
                         db_act.status = "approved"
                         db_act.updated_at = datetime.utcnow()
+                        original_request = db_act.params.get("milestone") or db_act.params.get("request")
                         await session.commit()
+                    else:
+                        logger.warning(f"Approval requested for unknown or cross-workspace PendingAction {action_id_str}")
                         
                 # Update Slack card to remove huddle buttons and show success
                 if response_url:
@@ -2059,7 +2132,10 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                                 "user": user_id
                             },
                             "eventId": str(uuid.uuid4()),
-                            "teamId": team_id
+                            "teamId": team_id,
+                            "continuationType": "modal_sandbox_approval",
+                            "approvedActionId": action_id_str,
+                            "originalRequest": original_request
                         }
                     )
                 )

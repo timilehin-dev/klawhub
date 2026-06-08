@@ -15,6 +15,7 @@ import hashlib
 import time
 import requests
 import asyncio
+from typing import Optional
 from fastapi import Request, HTTPException
 
 app = modal.App("klawhub-sandbox")
@@ -96,31 +97,63 @@ def get_embedding_model():
 # Auth Middleware
 # ─────────────────────────────────────────────
 
-def verify_request(request: Request) -> bool:
-    """Verify requests using a shared webhook secret."""
+def verify_request(request: Request, body: bytes, max_age_seconds: int = 300) -> bool:
+    """Verify requests with timestamped HMAC, preserving legacy secret fallback."""
     expected = os.environ.get("MODAL_WEBHOOK_SECRET")
-    provided = request.headers.get("X-Webhook-Secret", "")
+    provided_secret = request.headers.get("X-Webhook-Secret", "")
+    timestamp = request.headers.get("X-Webhook-Timestamp", "")
+    provided_signature = request.headers.get("X-Webhook-Signature", "")
 
     if not expected:
         # CRITICAL: Secret MUST be configured in production
         print("WARNING: MODAL_WEBHOOK_SECRET is not configured. Denying all requests.")
         return False
 
-    if not provided:
+    # Prefer and enforce the replay-safe HMAC path whenever HMAC headers are sent.
+    if timestamp or provided_signature:
+        if not timestamp or not provided_signature:
+            return False
+        try:
+            timestamp_int = int(timestamp)
+        except ValueError:
+            return False
+        if abs(int(time.time()) - timestamp_int) > max_age_seconds:
+            return False
+
+        message = body + f":{timestamp}".encode("utf-8")
+        expected_signature = hmac.new(
+            expected.encode("utf-8"),
+            message,
+            hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(provided_signature, expected_signature)
+
+    # Backward compatibility for older clients that only send X-Webhook-Secret.
+    if not provided_secret:
         return False
 
-    return hmac.compare_digest(provided, expected)
+    return hmac.compare_digest(provided_secret, expected)
 
 
 # ─────────────────────────────────────────────
 # Code Execution (with Dynamic Dependencies)
 # ─────────────────────────────────────────────
 
-def _execute_code_impl(code: str, language: str = "python", dependencies: list[str] = None, max_memory_mb: int = 4096, mounted_skills: dict = None):
+def _execute_code_impl(code: str, language: str = "python", dependencies: Optional[list[str]] = None, max_memory_mb: int = 4096, mounted_skills: Optional[dict] = None, timeout_seconds: int = 120):
     if language not in ["python", "javascript"]:
-        return {"success": False, "error": f"Unsupported language: {language}"}
+        return {
+            "success": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"Unsupported language: {language}",
+            "error": f"Unsupported language: {language}",
+            "duration_ms": 0,
+            "generated_files": []
+        }
 
     dependencies = dependencies or []
+    timeout_seconds = max(1, min(int(timeout_seconds or 120), 600))
+    start_time = time.monotonic()
 
     # Use a strictly isolated temporary directory for the execution
     with tempfile.TemporaryDirectory() as env_dir:
@@ -164,9 +197,25 @@ def _execute_code_impl(code: str, language: str = "python", dependencies: list[s
                             )
                             if pip_result.returncode != 0:
                                 pip_stderr = pip_result.stderr.decode('utf-8', errors='replace')
-                                return {"success": False, "error": f"Failed to install Python dependencies:\n{pip_stderr[:2000]}"}
+                                return {
+                                    "success": False,
+                                    "exit_code": -1,
+                                    "stdout": "",
+                                    "stderr": f"Failed to install Python dependencies:\n{pip_stderr[:2000]}",
+                                    "error": "Failed to install Python dependencies",
+                                    "duration_ms": int((time.monotonic() - start_time) * 1000),
+                                    "generated_files": []
+                                }
                         except subprocess.TimeoutExpired:
-                            return {"success": False, "error": "Python dependency installation timed out after 180s."}
+                            return {
+                                "success": False,
+                                "exit_code": -1,
+                                "stdout": "",
+                                "stderr": "Python dependency installation timed out after 180s.",
+                                "error": "Python dependency installation timed out after 180s.",
+                                "duration_ms": int((time.monotonic() - start_time) * 1000),
+                                "generated_files": []
+                            }
                     
                     # Add the user site-packages to PYTHONPATH (even if nothing new was installed, for isolation)
                     user_site = os.path.join(user_base, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
@@ -180,9 +229,26 @@ def _execute_code_impl(code: str, language: str = "python", dependencies: list[s
                         subprocess.run(["npm", "init", "-y"], cwd=env_dir, check=True, capture_output=True, timeout=30)
                         subprocess.run(["npm", "install"] + dependencies, cwd=env_dir, check=True, capture_output=True, timeout=180)
                     except subprocess.CalledProcessError as e:
-                        return {"success": False, "error": f"Failed to install NPM dependencies:\n{e.stderr.decode('utf-8', errors='replace')}"}
+                        npm_stderr = e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)
+                        return {
+                            "success": False,
+                            "exit_code": -1,
+                            "stdout": "",
+                            "stderr": f"Failed to install NPM dependencies:\n{npm_stderr}",
+                            "error": "Failed to install NPM dependencies",
+                            "duration_ms": int((time.monotonic() - start_time) * 1000),
+                            "generated_files": []
+                        }
                     except subprocess.TimeoutExpired:
-                        return {"success": False, "error": "NPM dependency installation timed out after 180s."}
+                        return {
+                            "success": False,
+                            "exit_code": -1,
+                            "stdout": "",
+                            "stderr": "NPM dependency installation timed out after 180s.",
+                            "error": "NPM dependency installation timed out after 180s.",
+                            "duration_ms": int((time.monotonic() - start_time) * 1000),
+                            "generated_files": []
+                        }
                 
                 cmd = ["node", filepath]
 
@@ -194,16 +260,16 @@ def _execute_code_impl(code: str, language: str = "python", dependencies: list[s
                     resource.setrlimit(resource.RLIMIT_AS, (max_memory_mb * 1024 * 1024, max_memory_mb * 1024 * 1024))
                 except ValueError:
                     pass
-                # Limit CPU to 120 seconds (matches subprocess timeout)
+                # Limit CPU to the requested execution timeout.
                 try:
-                    resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
+                    resource.setrlimit(resource.RLIMIT_CPU, (timeout_seconds, timeout_seconds))
                 except ValueError:
                     pass
 
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=120,
+                timeout=timeout_seconds,
                 cwd=env_dir,
                 env=env,
                 preexec_fn=set_resource_limits
@@ -244,26 +310,44 @@ def _execute_code_impl(code: str, language: str = "python", dependencies: list[s
 
             return {
                 "success": result.returncode == 0,
+                "exit_code": result.returncode,
                 "stdout": result.stdout.decode('utf-8', errors='replace')[:10000],
                 "stderr": result.stderr.decode('utf-8', errors='replace')[:5000],
                 "error": None if result.returncode == 0 else f"Exit code {result.returncode}",
+                "duration_ms": int((time.monotonic() - start_time) * 1000),
                 "generated_files": generated_files
             }
 
         except subprocess.TimeoutExpired:
-            return {"success": False, "error": "Code execution timed out (120s)"}
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": f"Code execution timed out ({timeout_seconds}s)",
+                "error": f"Code execution timed out ({timeout_seconds}s)",
+                "duration_ms": int((time.monotonic() - start_time) * 1000),
+                "generated_files": []
+            }
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": str(e),
+                "error": str(e),
+                "duration_ms": int((time.monotonic() - start_time) * 1000),
+                "generated_files": []
+            }
 
 
 @app.function(image=image, timeout=600, memory=4096, volumes={"/root/.pip_cache": pip_cache})
-def execute_code(code: str, language: str = "python", dependencies: list[str] = None, mounted_skills: dict = None):
-    return _execute_code_impl(code, language, dependencies, max_memory_mb=3584, mounted_skills=mounted_skills)
+def execute_code(code: str, language: str = "python", dependencies: Optional[list[str]] = None, mounted_skills: Optional[dict] = None, timeout_seconds: int = 120):
+    return _execute_code_impl(code, language, dependencies, max_memory_mb=3584, mounted_skills=mounted_skills, timeout_seconds=timeout_seconds)
 
 
 @app.function(image=image, timeout=600, memory=16384, volumes={"/root/.pip_cache": pip_cache})
-def execute_code_heavy(code: str, language: str = "python", dependencies: list[str] = None, mounted_skills: dict = None):
-    return _execute_code_impl(code, language, dependencies, max_memory_mb=14336, mounted_skills=mounted_skills)
+def execute_code_heavy(code: str, language: str = "python", dependencies: Optional[list[str]] = None, mounted_skills: Optional[dict] = None, timeout_seconds: int = 120):
+    return _execute_code_impl(code, language, dependencies, max_memory_mb=14336, mounted_skills=mounted_skills, timeout_seconds=timeout_seconds)
 
 
 
@@ -567,16 +651,18 @@ def generate_embedding(text: str) -> dict:
 @app.function(image=image, timeout=600, secrets=[webhook_secret])
 @modal.fastapi_endpoint(method="POST")
 async def execute(request: Request):
-    if not verify_request(request):
-        raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
+    body = await request.body()
+    if not verify_request(request, body):
+        raise HTTPException(status_code=401, detail="Invalid or missing webhook signature")
 
-    payload = await request.json()
+    payload = json.loads(body)
     task_type = payload.get("type", "code")
 
     if task_type == "code":
         memory_tier = payload.get("memory_tier", "standard")
         deps = payload.get("dependencies", [])
         mounted_skills = payload.get("mounted_skills", {})
+        timeout_seconds = payload.get("timeout", payload.get("timeout_seconds", 120))
         
         # Auto-promote to heavy if any heavy packages are requested
         heavy_packages = {"torch", "tensorflow", "transformers", "scipy", "fastembed", "spacy", "crawl4ai", "weasyprint", "playwright", "polars"}
@@ -588,14 +674,16 @@ async def execute(request: Request):
                 payload["code"],
                 payload.get("language", "python"),
                 deps,
-                mounted_skills
+                mounted_skills,
+                timeout_seconds
             )
         else:
             return await execute_code.remote.aio(
                 payload["code"],
                 payload.get("language", "python"),
                 deps,
-                mounted_skills
+                mounted_skills,
+                timeout_seconds
             )
     elif task_type == "web_read":
         return await read_web_page.remote.aio(payload["url"], payload.get("engine", "lightpanda"))

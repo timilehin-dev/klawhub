@@ -297,6 +297,7 @@ def generate_pptx(slides_data: list, filename: str) -> str:
             "code": code,
             "language": language,
             "timeout": timeout_seconds,
+            "timeout_seconds": timeout_seconds,
             "dependencies": deps,
             "memory_tier": tier,
             "mounted_skills": mounted_skills
@@ -331,7 +332,7 @@ def generate_pptx(slides_data: list, filename: str) -> str:
                     "success": success,
                     "exit_code": result.get("exit_code", 0 if success else -1),
                     "stdout": result.get("stdout", ""),
-                    "stderr": result.get("stderr", ""),
+                    "stderr": result.get("stderr", result.get("error", "") if not success else ""),
                     "duration_ms": result.get("duration_ms", 0),
                     "error": result.get("error", None),
                     "generated_files": result.get("generated_files", [])
