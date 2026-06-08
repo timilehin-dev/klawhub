@@ -15,6 +15,7 @@ import hashlib
 import time
 import requests
 import asyncio
+import re
 from typing import Optional
 from fastapi import Request, HTTPException
 
@@ -139,6 +140,16 @@ def verify_request(request: Request, body: bytes, max_age_seconds: int = 300) ->
 # Code Execution (with Dynamic Dependencies)
 # ─────────────────────────────────────────────
 
+
+def _is_valid_package_name(dep: str, language: str = "python") -> bool:
+    if not dep or dep.startswith("-"):
+        return False
+    if language == "python":
+        return bool(re.match(r"^[a-zA-Z0-9_.\-=><~\[\],]+$", dep))
+    else:
+        return bool(re.match(r"^[a-zA-Z0-9_.\-@/^:]+$", dep))
+
+
 def _execute_code_impl(code: str, language: str = "python", dependencies: Optional[list[str]] = None, max_memory_mb: int = 4096, mounted_skills: Optional[dict] = None, timeout_seconds: int = 120):
     if language not in ["python", "javascript"]:
         return {
@@ -180,8 +191,21 @@ def _execute_code_impl(code: str, language: str = "python", dependencies: Option
 
             if language == "python":
                 if dependencies:
-                    # Efficiency Check: filter out already pre-installed packages
-                    to_install = [d for d in dependencies if d.split("==")[0].lower() not in PRE_INSTALLED_PACKAGES]
+                    # Validate all dependencies
+                    to_install = []
+                    for d in dependencies:
+                        if not _is_valid_package_name(d, "python"):
+                            return {
+                                "success": False,
+                                "exit_code": -1,
+                                "stdout": "",
+                                "stderr": f"Invalid or potentially malicious dependency name: {d}",
+                                "error": "Invalid dependency name",
+                                "duration_ms": int((time.monotonic() - start_time) * 1000),
+                                "generated_files": []
+                            }
+                        if d.split("==")[0].lower() not in PRE_INSTALLED_PACKAGES:
+                            to_install.append(d)
                     
                     user_base = os.path.join(env_dir, "user_packages")
                     os.makedirs(user_base, exist_ok=True)
@@ -225,6 +249,17 @@ def _execute_code_impl(code: str, language: str = "python", dependencies: Option
 
             elif language == "javascript":
                 if dependencies:
+                    for d in dependencies:
+                        if not _is_valid_package_name(d, "javascript"):
+                            return {
+                                "success": False,
+                                "exit_code": -1,
+                                "stdout": "",
+                                "stderr": f"Invalid or potentially malicious dependency name: {d}",
+                                "error": "Invalid dependency name",
+                                "duration_ms": int((time.monotonic() - start_time) * 1000),
+                                "generated_files": []
+                            }
                     try:
                         subprocess.run(["npm", "init", "-y"], cwd=env_dir, check=True, capture_output=True, timeout=30)
                         subprocess.run(["npm", "install"] + dependencies, cwd=env_dir, check=True, capture_output=True, timeout=180)
@@ -526,8 +561,13 @@ sns.set_theme(style="whitegrid")
             env["MPLBACKEND"] = "Agg"
 
             if dependencies:
-                # Efficiency Check: skip libraries already baked into the image
-                to_install = [d for d in dependencies if d.split("==")[0].lower() not in PRE_INSTALLED_PACKAGES]
+                # Validate all dependencies
+                to_install = []
+                for d in dependencies:
+                    if not _is_valid_package_name(d, "python"):
+                        return {"success": False, "error": f"Invalid or potentially malicious dependency name: {d}"}
+                    if d.split("==")[0].lower() not in PRE_INSTALLED_PACKAGES:
+                        to_install.append(d)
 
                 if to_install:
                     user_base = os.path.join(env_dir, "user_packages")
