@@ -348,5 +348,32 @@ def generate_pptx(slides_data: list, filename: str) -> str:
                     "duration_ms": 0
                 }
 
+
+    async def read_web_page(self, url: str, engine: str = "lightpanda", timeout_seconds: int = 30) -> Dict[str, Any]:
+        """
+        Calls the `read_web_page` function deployed on Modal, utilizing Lightpanda.
+        """
+        payload = {
+            "type": "read_web_page",
+            "url": url,
+            "engine": engine
+        }
+
+        headers = self._generate_headers(json.dumps(payload))
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    self.function_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=timeout_seconds
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Sandbox read_web_page execution failed: {e}")
+                raise
+
 # Global Sandbox Client instance
 sandbox_client = SandboxClient()

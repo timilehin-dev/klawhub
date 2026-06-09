@@ -18,12 +18,14 @@ KlawHub operates as a **proactive, multi-tenant AI coworker** based on the follo
 - **Python 3.x**
 - **FastAPI** & **Uvicorn**
 - **SQLModel** / **SQLAlchemy** + **asyncpg**
-- **PostgreSQL** (with **pgvector** for semantic search)
+- **PostgreSQL / Supabase** (with **pgvector** for semantic search)
 - **Inngest** (async workflows & scheduling)
 - **LangGraph** (multi-agent orchestration)
 - **Upstash Redis** (cross-thread context memory)
 - **Slack SDK** (UI and communication)
 - **Modal** (sandbox environment)
+
+*Note: The project previously used Node.js/Drizzle ORM but has been migrated to Python/SQLModel. Drizzle ORM is no longer used for database management.*
 
 ## Golden Rule
 
@@ -44,9 +46,14 @@ Copy `.env.local.example` to `.env.local` and fill in all values. Key requiremen
 - Supabase connection details
 - Slack API tokens
 
-### 3. Database Setup
-Ensure your PostgreSQL database (e.g., Supabase) is running and has `pgvector` enabled.
-When querying pgvector columns, filters use `.is_not(None)` instead of `!= None` to properly translate to `IS NOT NULL`.
+### 3. Database Setup (Supabase)
+Klawhub relies entirely on Supabase for data and vector storage. You must manually apply the migrations and RLS policies via the Supabase dashboard or CLI. **Do not use Drizzle.**
+
+1. **Enable pgvector**: Ensure your Supabase project has the `pgvector` extension enabled.
+2. **Apply Migrations**: Execute the SQL files located in `supabase/migrations/` sequentially.
+3. **Enable Row Level Security (RLS)**: Run the script `supabase/enable_rls.sql` in your Supabase SQL Editor. This script enforces strict multi-tenant workspace isolation.
+
+When querying pgvector columns in code via SQLModel/SQLAlchemy, filters must use `.is_not(None)` instead of `!= None` to properly translate to `IS NOT NULL`.
 
 ### 4. Running the App
 ```bash
