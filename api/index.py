@@ -10,6 +10,7 @@ import asyncio
 import httpx
 import time
 import json
+from sqlalchemy import case
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Request, Response, HTTPException, Form, Depends, BackgroundTasks
@@ -341,13 +342,24 @@ async def get_dashboard_stats(request: Request):
             raise HTTPException(status_code=404, detail="Workspace not found")
 
         # 2. Get Telemetry Counters
-        runs_query = select(Run).where(Run.workspace_id == workspace_id)
-        runs_result = await session.execute(runs_query)
-        runs = runs_result.scalars().all()
+        runs_query = select(
+            func.count(Run.id).label("total"),
+            func.sum(case((Run.status == "completed", 1), else_=0)).label("completed")
+        ).where(Run.workspace_id == workspace_id)
+        runs_res = await session.execute(runs_query)
+        runs_row = runs_res.first()
+        total_runs = runs_row.total or 0
+        completed_runs = int(runs_row.completed or 0)
+        pending_runs = total_runs - completed_runs
 
-        tasks_query = select(Task).where(Task.workspace_id == workspace_id)
-        tasks_result = await session.execute(tasks_query)
-        tasks = tasks_result.scalars().all()
+        tasks_query = select(
+            func.count(Task.id).label("total"),
+            func.sum(case((Task.status == "completed", 1), else_=0)).label("completed")
+        ).where(Task.workspace_id == workspace_id)
+        tasks_res = await session.execute(tasks_query)
+        tasks_row = tasks_res.first()
+        total_tasks = tasks_row.total or 0
+        completed_tasks = int(tasks_row.completed or 0)
 
         schedules_count_query = select(func.count(Schedule.id)).where(
             Schedule.workspace_id == workspace_id,
@@ -357,12 +369,6 @@ async def get_dashboard_stats(request: Request):
         active_schedules = schedules_count_res.scalar() or 0
 
     # Aggregate telemetry splits
-    total_runs = len(runs)
-    completed_runs = sum(1 for r in runs if r.status == "completed")
-    pending_runs = total_runs - completed_runs
-
-    total_tasks = len(tasks)
-    completed_tasks = sum(1 for t in tasks if t.status == "completed")
     
     # Model compute telemetry (simulated dashboard ratios for aesthetic graph representation)
     model_splits = {
@@ -1121,9 +1127,14 @@ async def slack_commands(
         
     if text_args == "status":
         async with get_db_session() as session:
-            runs_query = select(Run).where(Run.workspace_id == workspace.id)
-            runs_result = await session.execute(runs_query)
-            runs = runs_result.scalars().all()
+            runs_query = select(
+                func.count(Run.id).label("total"),
+                func.sum(case((Run.status == "completed", 1), else_=0)).label("completed")
+            ).where(Run.workspace_id == workspace.id)
+            runs_res = await session.execute(runs_query)
+            runs_row = runs_res.first()
+            total_runs = runs_row.total or 0
+            completed_runs = int(runs_row.completed or 0)
             
             schedules_count_query = select(func.count(Schedule.id)).where(
                 Schedule.workspace_id == workspace.id,
@@ -1132,14 +1143,14 @@ async def slack_commands(
             schedules_count_res = await session.execute(schedules_count_query)
             active_schedules = schedules_count_res.scalar() or 0
             
-            tasks_query = select(Task).where(Task.workspace_id == workspace.id)
-            tasks_result = await session.execute(tasks_query)
-            tasks = tasks_result.scalars().all()
-            
-        total_runs = len(runs)
-        completed_runs = sum(1 for r in runs if r.status == "completed")
-        total_tasks = len(tasks)
-        completed_tasks = sum(1 for t in tasks if t.status == "completed")
+            tasks_query = select(
+                func.count(Task.id).label("total"),
+                func.sum(case((Task.status == "completed", 1), else_=0)).label("completed")
+            ).where(Task.workspace_id == workspace.id)
+            tasks_res = await session.execute(tasks_query)
+            tasks_row = tasks_res.first()
+            total_tasks = tasks_row.total or 0
+            completed_tasks = int(tasks_row.completed or 0)
         
         blocks = [
             {
