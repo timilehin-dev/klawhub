@@ -13,7 +13,7 @@ import json
 from sqlalchemy import case
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Request, Response, HTTPException, Form, Depends, BackgroundTasks
+from fastapi import FastAPI, Request, Response, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import select, func
@@ -65,6 +65,14 @@ inngest.fast_api.serve(
 
 # Initialize Slack request signature verifier
 slack_verifier = SignatureVerifier(settings.slack_signing_secret)
+
+# Shared HTTP client for improved performance (connection pooling)
+http_client = httpx.AsyncClient()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await http_client.aclose()
+
 
 
 async def dispatch_slack_event_to_inngest_bg(event: Dict[str, Any], event_id: Optional[str], team_id: Optional[str]) -> None:
@@ -251,17 +259,16 @@ async def slack_oauth(code: str, request: Request, response: Response):
 
     logger.info("Exchanging Slack authorization code for access token...")
     redirect_uri = get_redirect_uri(request)
-    async with httpx.AsyncClient() as client:
-        res = await client.post(
-            "https://slack.com/api/oauth.v2.access",
-            data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "code": code,
-                "redirect_uri": redirect_uri
-            }
-        )
-        payload = res.json()
+    res = await http_client.post(
+        "https://slack.com/api/oauth.v2.access",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "redirect_uri": redirect_uri
+        }
+    )
+    payload = res.json()
 
     if not payload.get("ok"):
         logger.error(f"Slack OAuth failed: {payload.get('error')}")
@@ -591,7 +598,7 @@ async def slack_events(
         item_user = event.get("item_user")
         
         if item.get("type") == "message" and item_user == workspace.slack_bot_user_id:
-            logger.info(f"Asynchronously processing reaction feedback on bot message in background task...")
+            logger.info("Asynchronously processing reaction feedback on bot message in background task...")
             background_tasks.add_task(
                 process_reaction_added_bg,
                 workspace_id=workspace.id,
@@ -762,7 +769,7 @@ def format_skills_list(workspace_name: str, skills: List[Dict[str, Any]]) -> Lis
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"Here are the custom cognitive skills engineered and installed for your workspace."
+                "text": "Here are the custom cognitive skills engineered and installed for your workspace."
             }
         },
         {"type": "divider"}
@@ -917,7 +924,7 @@ def format_schedules_list(workspace_name: str, schedules: List[Dict[str, Any]]) 
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"Here are the active and paused cron trigger schedules configured for your workspace."
+                "text": "Here are the active and paused cron trigger schedules configured for your workspace."
             }
         },
         {"type": "divider"}
@@ -1922,58 +1929,53 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                 thread_ts = message.get("thread_ts") or message_ts
                 
                 if response_url:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(response_url, json={
-                            "response_type": "in_channel",
-                            "replace_original": False,
-                            "text": f"👤 <@{user_id}> has claimed an action item in this thread! :muscle:"
-                        })
+                    await http_client.post(response_url, json={
+                        "response_type": "in_channel",
+                        "replace_original": False,
+                        "text": f"👤 <@{user_id}> has claimed an action item in this thread! :muscle:"
+                    })
                         
             elif action_id == "task_done":
                 # Mark done button clicked
                 if response_url:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(response_url, json={
-                            "response_type": "in_channel",
-                            "replace_original": False,
-                            "text": f"✅ An action item in this thread was marked as completed by <@{user_id}>! :tada:"
-                        })
+                    await http_client.post(response_url, json={
+                        "response_type": "in_channel",
+                        "replace_original": False,
+                        "text": f"✅ An action item in this thread was marked as completed by <@{user_id}>! :tada:"
+                    })
                         
             elif action_id == "schedule_pause":
                 schedule_id = action.get("value")
                 from src.core.tools.schedule_control import ScheduleControl
                 await ScheduleControl.toggle_schedule_status(workspace.id, uuid.UUID(schedule_id), False)
                 if response_url:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(response_url, json={
-                            "response_type": "ephemeral",
-                            "replace_original": False,
-                            "text": f"⏸️ Schedule paused successfully!"
-                        })
+                    await http_client.post(response_url, json={
+                        "response_type": "ephemeral",
+                        "replace_original": False,
+                        "text": "⏸️ Schedule paused successfully!"
+                    })
                         
             elif action_id == "schedule_resume":
                 schedule_id = action.get("value")
                 from src.core.tools.schedule_control import ScheduleControl
                 await ScheduleControl.toggle_schedule_status(workspace.id, uuid.UUID(schedule_id), True)
                 if response_url:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(response_url, json={
-                            "response_type": "ephemeral",
-                            "replace_original": False,
-                            "text": f"▶️ Schedule reactivated successfully!"
-                        })
+                    await http_client.post(response_url, json={
+                        "response_type": "ephemeral",
+                        "replace_original": False,
+                        "text": "▶️ Schedule reactivated successfully!"
+                    })
                         
             elif action_id == "schedule_delete":
                 schedule_id = action.get("value")
                 from src.core.tools.schedule_control import ScheduleControl
                 await ScheduleControl.delete_schedule(workspace.id, uuid.UUID(schedule_id))
                 if response_url:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(response_url, json={
-                            "response_type": "ephemeral",
-                            "replace_original": False,
-                            "text": f"🗑️ Schedule deleted successfully!"
-                        })
+                    await http_client.post(response_url, json={
+                        "response_type": "ephemeral",
+                        "replace_original": False,
+                        "text": "🗑️ Schedule deleted successfully!"
+                    })
                         
             elif action_id == "schedule_create_modal":
                 if trigger_id:
@@ -1988,36 +1990,33 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                 from src.core.tools.skill_control import SkillControl
                 await SkillControl.toggle_skill_status(workspace.id, uuid.UUID(skill_id), False)
                 if response_url:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(response_url, json={
-                            "response_type": "ephemeral",
-                            "replace_original": False,
-                            "text": f"⏸️ Cognitive skill paused successfully!"
-                        })
+                    await http_client.post(response_url, json={
+                        "response_type": "ephemeral",
+                        "replace_original": False,
+                        "text": "⏸️ Cognitive skill paused successfully!"
+                    })
                         
             elif action_id == "skill_resume":
                 skill_id = action.get("value")
                 from src.core.tools.skill_control import SkillControl
                 await SkillControl.toggle_skill_status(workspace.id, uuid.UUID(skill_id), True)
                 if response_url:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(response_url, json={
-                            "response_type": "ephemeral",
-                            "replace_original": False,
-                            "text": f"▶️ Cognitive skill reactivated successfully!"
-                        })
+                    await http_client.post(response_url, json={
+                        "response_type": "ephemeral",
+                        "replace_original": False,
+                        "text": "▶️ Cognitive skill reactivated successfully!"
+                    })
                         
             elif action_id == "skill_delete":
                 skill_id = action.get("value")
                 from src.core.tools.skill_control import SkillControl
                 await SkillControl.delete_skill(workspace.id, uuid.UUID(skill_id))
                 if response_url:
-                    async with httpx.AsyncClient() as client:
-                        await client.post(response_url, json={
-                            "response_type": "ephemeral",
-                            "replace_original": False,
-                            "text": f"🗑️ Cognitive skill deleted successfully!"
-                        })
+                    await http_client.post(response_url, json={
+                        "response_type": "ephemeral",
+                        "replace_original": False,
+                        "text": "🗑️ Cognitive skill deleted successfully!"
+                    })
                         
             elif action_id == "skill_create_modal":
                 if trigger_id:
@@ -2033,11 +2032,10 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                 
                 if response_url:
                     try:
-                        async with httpx.AsyncClient() as client:
-                            await client.post(response_url, json={
-                                "replace_original": True,
-                                "text": f"🚀 *Executing Cognitive Skill `{skill_name}` inside the Modal cloud sandbox...*"
-                            })
+                        await http_client.post(response_url, json={
+                            "replace_original": True,
+                            "text": f"🚀 *Executing Cognitive Skill `{skill_name}` inside the Modal cloud sandbox...*"
+                        })
                     except Exception as e:
                         logger.error(f"Failed to update suggestion card: {e}")
                 
@@ -2087,11 +2085,10 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
             elif action_id == "dismiss_suggestion":
                 if response_url:
                     try:
-                        async with httpx.AsyncClient() as client:
-                            await client.post(response_url, json={
-                                "replace_original": True,
-                                "text": "Dismissed. Let me know if you need any other help! 😊"
-                            })
+                        await http_client.post(response_url, json={
+                            "replace_original": True,
+                            "text": "Dismissed. Let me know if you need any other help! 😊"
+                        })
                     except Exception as e:
                         logger.error(f"Failed to update dismiss card: {e}")
                         
@@ -2117,16 +2114,15 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                 # Update Slack card to remove huddle buttons and show success
                 if response_url:
                     try:
-                        async with httpx.AsyncClient() as client:
-                            await client.post(response_url, json={
-                                "replace_original": True,
-                                "text": "✅ *Sandbox Action Approved!* Coworker is compiling and executing the script now... 🚀"
-                            })
+                        await http_client.post(response_url, json={
+                            "replace_original": True,
+                            "text": "✅ *Sandbox Action Approved!* Coworker is compiling and executing the script now... 🚀"
+                        })
                     except Exception as e:
                         logger.error(f"Failed to update Slack approval card: {e}")
                 
                 # Simulate Slack message event to re-trigger graph execution asynchronously in Inngest
-                logger.info(f"Re-dispatching slack/event.received event to Inngest for thread huddle approval continuation...")
+                logger.info("Re-dispatching slack/event.received event to Inngest for thread huddle approval continuation...")
                 msg_ts = payload.get("container", {}).get("message_ts") or payload.get("message", {}).get("ts")
                 thread_ts = payload.get("message", {}).get("thread_ts") or msg_ts
                 
@@ -2166,11 +2162,10 @@ async def slack_actions(request: Request, body_bytes: bytes = Depends(verify_sla
                 # Update Slack card to remove huddle buttons and show rejection
                 if response_url:
                     try:
-                        async with httpx.AsyncClient() as client:
-                            await client.post(response_url, json={
-                                "replace_original": True,
-                                "text": "❌ *Sandbox Action Rejected* by the user."
-                            })
+                        await http_client.post(response_url, json={
+                            "replace_original": True,
+                            "text": "❌ *Sandbox Action Rejected* by the user."
+                        })
                     except Exception as e:
                         logger.error(f"Failed to update Slack rejection card: {e}")
                         
