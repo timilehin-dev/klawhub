@@ -2,7 +2,7 @@ import logging
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any
 from src.core.llm.client import LLMClient
 
 logger = logging.getLogger("klawhub.core.agents.team.worker")
