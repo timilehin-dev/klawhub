@@ -15,3 +15,9 @@ async def run_tests():
 
 if __name__ == "__main__":
     asyncio.run(run_tests())
+
+    print("Testing ResearchControl integration...")
+    from src.core.tools.research_control import ResearchControl
+    assert hasattr(ResearchControl, "web_search")
+    assert hasattr(ResearchControl, "read_page")
+    print("ResearchControl structures passed.")

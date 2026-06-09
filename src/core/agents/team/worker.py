@@ -306,6 +306,14 @@ async def _handle_conversational(
                             )
                         else:
                             result = {"error": f"Unknown skill_control action: {action}"}
+                    elif tool_name == "research_control":
+                        from src.core.tools.research_control import ResearchControl
+                        if "query" in payload:
+                            result = await ResearchControl.web_search(workspace_id=ws_uuid, **payload)
+                        elif "url" in payload:
+                            result = await ResearchControl.read_page(workspace_id=ws_uuid, **payload)
+                        else:
+                            result = {"error": "Invalid payload for research_control"}
                     else:
                         result = {"error": f"Tool '{tool_name}' is not registered."}
 
