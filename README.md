@@ -1,16 +1,33 @@
-# Klawhub Build Squad
+# KlawHub Core
 
-A multi-agent system that builds small software tools for you — all in Slack.
+A persistent, workspace-specific, tool-competent, proactive coworker that executes real work, adapts to organizational context, and improves over time — all in Slack.
 
-## Stack
-- **Next.js 15** + TypeScript (Vercel)
-- **Supabase** Postgres + Auth
-- **Drizzle ORM**
-- **Inngest** (async workflows)
-- **Ollama Cloud** (Gemma 4 31B)
-- **Tavily** (web search)
-- **Modal** (code sandbox)
-- **Slack API**
+**KlawHub is not an AI assistant. It is a hire.**
+
+## Vision & Architecture
+
+KlawHub operates as a **proactive, multi-tenant AI coworker** based on the following principles:
+- **Tool-First:** No answer without either Tool usage, Retrieved memory, or Skill execution.
+- **Workspace Isolation:** Strict multi-tenant intelligence. Each Slack workspace has its own cognitive environment, memory, and task patterns.
+- **Dynamic Skills:** All capabilities are packaged as reusable skills. The system uses an AST-based dynamic skill system (`DynamicSkillRegistry`) that compiles and executes Python source code at runtime.
+- **Memory-Grounded:** Uses Episodic, Semantic, and Procedural memory to reduce hallucination and increase reliability.
+- **Proactive:** Runs on schedules to monitor tasks, resolve calendar conflicts, and participate in Slack threads unprompted.
+
+## Tech Stack
+
+- **Python 3.x**
+- **FastAPI** & **Uvicorn**
+- **SQLModel** / **SQLAlchemy** + **asyncpg**
+- **PostgreSQL** (with **pgvector** for semantic search)
+- **Inngest** (async workflows & scheduling)
+- **LangGraph** (multi-agent orchestration)
+- **Upstash Redis** (cross-thread context memory)
+- **Slack SDK** (UI and communication)
+- **Modal** (sandbox environment)
+
+## Golden Rule
+
+> **No dead code.** Every feature, function, or service must have ALL its dependencies wired up before merge — tables in Supabase, env vars in Vercel, Inngest events registered, tools in the registry. If it can't run, it doesn't ship.
 
 ## Quick Start
 
@@ -18,73 +35,39 @@ A multi-agent system that builds small software tools for you — all in Slack.
 ```bash
 git clone https://github.com/timilehin-dev/klawhub.git
 cd klawhub
-npm install
+pip install -r requirements.txt
 ```
 
 ### 2. Environment Variables
-Copy `.env.local.example` to `.env.local` and fill in all values.
+Copy `.env.local.example` to `.env.local` and fill in all values. Key requirements include:
+- `UPSTASH_REDIS_REST_URL`
+- Supabase connection details
+- Slack API tokens
 
 ### 3. Database Setup
+Ensure your PostgreSQL database (e.g., Supabase) is running and has `pgvector` enabled.
+When querying pgvector columns, filters use `.is_not(None)` instead of `!= None` to properly translate to `IS NOT NULL`.
+
+### 4. Running the App
 ```bash
-npx drizzle-kit push
+# Start the FastAPI server
+uvicorn api.main:app --reload
 ```
 
-### 4. Deploy Modal Sandbox
+### 5. Running Tests & Verifications
+Testing and verification scripts are located in `src/scripts/`. Execute them with the necessary environment variables:
 ```bash
-modal deploy modal_app.py
-```
-Copy the deployed URL to `MODAL_FUNCTION_URL` in `.env.local`.
-
-### 5. Run Locally
-```bash
-npm run dev
+PYTHONPATH=. python3 src/scripts/verify_multi_tenant.py
 ```
 
-### 6. Expose Local Server (for Slack Socket Mode)
-```bash
-npx ngrok http 3000
-```
-Copy the HTTPS URL and update Slack Event Subscriptions / Interactivity URLs.
+## Agent System
 
-### 7. Deploy to Vercel
-```bash
-vercel --prod
-```
-
-## How It Works
-
-1. User messages `@Klawhub` or uses `/klawhub [request]`
-2. **General Agent** receives the request
-3. **PM Agent** writes a technical spec
-4. **Engineer Agent** writes the code
-5. **QA Agent** tests it in a Modal sandbox
-6. If it fails, Engineer fixes it once
-7. Final code is delivered in the Slack thread
-
-## File Structure
-```
-src/
-├── lib/
-│   ├── db/           # Drizzle schema + connection
-│   ├── llm/          # Ollama Cloud client (2-key rotation)
-│   ├── tools/        # 5 tools: search, memory, code, update
-│   ├── agents/       # PM, Engineer, QA, General configs
-│   ├── slack/        # Slack Web API client
-│   └── inngest/      # Async workflow engine
-└── app/
-    └── api/
-        ├── slack/    # Events, actions, commands
-        └── inngest/  # Inngest function server
-```
-
-## Agent Team
-
-| Agent | Role |
-|-------|------|
-| **General** | Router + coordinator |
-| **PM** | Writes technical specs |
-| **Engineer** | Writes code |
-| **QA** | Tests code in sandbox |
+- **General Agent:** Interprets intent, selects skills, and coordinates sub-agents.
+- **PM Agent:** Task creation, sprint planning, and reporting.
+- **Analyst Agent:** Data interpretation and KPI tracking.
+- **Research Agent:** Market research and knowledge synthesis.
+- **Engineer Agent:** Code assistance, debugging, repo interaction (using Modal sandbox).
+- **Operations Agent:** Process automation.
 
 ## License
 MIT
