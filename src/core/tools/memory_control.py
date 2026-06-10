@@ -3,7 +3,7 @@ import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from sqlmodel import select
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from src.db.pool import get_db_session
 from src.db.models import Memory
 from src.core.llm.client import LLMClient
@@ -91,21 +91,32 @@ class MemoryControl:
                 except Exception as e:
                     logger.error(f"Memory similarity search query error: {e}. Falling back to keyword search...")
             
-            # Fallback to naive keyword search
-            statement = select(Memory).where(Memory.workspace_id == workspace_id).limit(10)
+            # Fallback to keyword search
+            conditions = []
+            for word in query.split():
+                # Escape wildcards for safety
+                escaped_word = word.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+                conditions.append(Memory.content.ilike(f"%{escaped_word}%", escape='\\'))  # type: ignore
+
+            if not conditions:
+                return []
+
+            statement = select(Memory).where(
+                Memory.workspace_id == workspace_id,
+                or_(*conditions)
+            ).limit(limit)
             result = await session.execute(statement)
-            all_memories = result.scalars().all()
+            matches = result.scalars().all()
             
-            matches = []
-            for m in all_memories:
-                if any(word in m.content.lower() for word in query.lower().split()):
-                    matches.append({
-                        "id": str(m.id),
-                        "content": m.content,
-                        "category": m.category,
-                        "created_at": m.created_at.isoformat() if m.created_at else None
-                    })
-            return matches[:limit]
+            return [
+                {
+                    "id": str(m.id),
+                    "content": m.content,
+                    "category": m.category,
+                    "created_at": m.created_at.isoformat() if m.created_at else None
+                }
+                for m in matches
+            ]
 
     @classmethod
     async def delete_memory(cls, workspace_id: uuid.UUID, memory_id: uuid.UUID) -> Dict[str, Any]:
