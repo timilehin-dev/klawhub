@@ -432,17 +432,17 @@ async def _handle_code_execution(
                 return {"errors": [f"Invalid approved sandbox action id: {approved_action_id}"]}
 
         if not existing_action:
+            # Performance optimization: Push JSON and IN filters directly to PostgreSQL database
+            # rather than loading all workspace pending actions into memory and filtering via Python.
             statement = select(PendingAction).where(
                 PendingAction.workspace_id == ws_uuid,
-                PendingAction.tool_name == "modal_sandbox"
+                PendingAction.tool_name == "modal_sandbox",
+                PendingAction.status.in_(["pending", "approved", "rejected"]),
+                PendingAction.params["thread_ts"].astext == slack_thread_ts
             ).order_by(PendingAction.created_at.desc())
 
             result = await session.execute(statement)
-            actions = result.scalars().all()
-            for act in actions:
-                if act.params.get("thread_ts") == slack_thread_ts and act.status in ["pending", "approved", "rejected"]:
-                    existing_action = act
-                    break
+            existing_action = result.scalars().first()
 
     if approved_action_id and not existing_action:
         return {
