@@ -2,7 +2,7 @@ import modal
 import subprocess
 import tempfile
 import os
-import json
+
 import sys
 try:
     import resource
@@ -81,7 +81,6 @@ PRE_INSTALLED_PACKAGES = {
     "playwright"
 }
 
-
 # ── Global Model Singletons ──
 # Instantiated once per container life to avoid re-loading latency
 _embedding_model = None
@@ -92,7 +91,6 @@ def get_embedding_model():
         from fastembed import TextEmbedding
         _embedding_model = TextEmbedding()
     return _embedding_model
-
 
 # ─────────────────────────────────────────────
 # Auth Middleware
@@ -135,11 +133,9 @@ def verify_request(request: Request, body: bytes, max_age_seconds: int = 300) ->
 
     return hmac.compare_digest(provided_secret, expected)
 
-
 # ─────────────────────────────────────────────
 # Code Execution (with Dynamic Dependencies)
 # ─────────────────────────────────────────────
-
 
 def _is_valid_package_name(dep: str, language: str = "python") -> bool:
     if not dep or dep.startswith("-"):
@@ -148,7 +144,6 @@ def _is_valid_package_name(dep: str, language: str = "python") -> bool:
         return bool(re.match(r"^[a-zA-Z0-9_.\-=><~\[\],]+$", dep))
     else:
         return bool(re.match(r"^[a-zA-Z0-9_.\-@/^:]+$", dep))
-
 
 def _execute_code_impl(code: str, language: str = "python", dependencies: Optional[list[str]] = None, max_memory_mb: int = 4096, mounted_skills: Optional[dict] = None, timeout_seconds: int = 120):
     if language not in ["python", "javascript"]:
@@ -374,17 +369,13 @@ def _execute_code_impl(code: str, language: str = "python", dependencies: Option
                 "generated_files": []
             }
 
-
 @app.function(image=image, timeout=600, memory=4096, volumes={"/root/.pip_cache": pip_cache})
 def execute_code(code: str, language: str = "python", dependencies: Optional[list[str]] = None, mounted_skills: Optional[dict] = None, timeout_seconds: int = 120):
     return _execute_code_impl(code, language, dependencies, max_memory_mb=3584, mounted_skills=mounted_skills, timeout_seconds=timeout_seconds)
 
-
 @app.function(image=image, timeout=600, memory=16384, volumes={"/root/.pip_cache": pip_cache})
 def execute_code_heavy(code: str, language: str = "python", dependencies: Optional[list[str]] = None, mounted_skills: Optional[dict] = None, timeout_seconds: int = 120):
     return _execute_code_impl(code, language, dependencies, max_memory_mb=14336, mounted_skills=mounted_skills, timeout_seconds=timeout_seconds)
-
-
 
 # ─────────────────────────────────────────────
 # Web Page Reader (using Lightpanda)
@@ -437,7 +428,6 @@ def read_web_page(url: str, engine: str = "lightpanda"):
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
-
 
 # ─────────────────────────────────────────────
 # Professional Document Generation (Pandoc / WeasyPrint)
@@ -519,7 +509,6 @@ def generate_document(data: dict):
 
     except Exception as e:
         return {"success": False, "error": str(e)}
-
 
 # ─────────────────────────────────────────────
 # Data Analytics
@@ -616,7 +605,6 @@ sns.set_theme(style="whitegrid")
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-
 # ─────────────────────────────────────────────
 # Document Parsing and OCR Extraction
 # ─────────────────────────────────────────────
@@ -671,7 +659,6 @@ def parse_document(file_b64: str, filename: str):
             "error": f"Failed to parse document: {str(e)}"
         }
 
-
 @app.function(image=image, timeout=30, secrets=[webhook_secret])
 def generate_embedding(text: str) -> dict:
     try:
@@ -682,7 +669,6 @@ def generate_embedding(text: str) -> dict:
         return {"success": False, "error": "No embeddings returned"}
     except Exception as e:
         return {"success": False, "error": f"Embedding generation failed: {str(e)}"}
-
 
 # ─────────────────────────────────────────────
 # Unified Entry Point
@@ -695,7 +681,7 @@ async def execute(request: Request):
     if not verify_request(request, body):
         raise HTTPException(status_code=401, detail="Invalid or missing webhook signature")
 
-    payload = json.loads(body)
+    payload = await request.json()
     task_type = payload.get("type", "code")
 
     if task_type == "code":
