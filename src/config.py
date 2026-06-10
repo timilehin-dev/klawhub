@@ -84,12 +84,6 @@ class Settings(BaseSettings):
     )
 
     @property
-    def tavily_keys(self) -> List[str]:
-        """Returns non-empty Tavily keys as a rotating list."""
-        keys = [self.tavily_api_key_1, self.tavily_api_key_2, self.tavily_api_key_3]
-        return [k for k in keys if k]
-
-    @property
     def ollama_keys(self) -> List[str]:
         """Returns non-empty Ollama keys as a rotating list."""
         keys = [self.ollama_api_key_1, self.ollama_api_key_2, self.ollama_api_key_3]

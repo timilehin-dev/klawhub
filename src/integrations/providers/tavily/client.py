@@ -20,7 +20,7 @@ class TavilyClient(BaseAPIClient):
 
     def _init_global_key(self):
         """Initializes global key by trying to find a non-empty key from settings."""
-        keys = settings.tavily_keys
+        keys = [settings.tavily_api_key_1, settings.tavily_api_key_2, settings.tavily_api_key_3]
         for key in keys:
             if key:
                 self._global_api_key = key

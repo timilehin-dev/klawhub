@@ -1,5 +1,6 @@
-⚡ Optimize telemetry stats with direct SQL counting
+🧹 Remove dead code `tavily_keys` in config
 
-💡 **What:** Replaced the loading of all `Run` and `Task` objects to memory and doing counting with Python list comprehensions with optimized SQL queries `select(func.count(Run.id))` to count directly in the database.
-🎯 **Why:** The N+1 and loading huge volumes of models from the database simply to sum counts is highly inefficient, taking longer times and significantly higher memory allocations as workspaces grow.
-📊 **Measured Improvement:** Replaced memory logic counting models with database-level execution counts. Simulated benchmarking via in-memory SQLite tables locally showcased a ~16x speedup (0.16s down to 0.01s on 10,000 runs data).
+🎯 **What:** Removed the `tavily_keys` property from `src/config.py`. Updated `src/integrations/providers/tavily/client.py` to correctly fetch keys directly instead of accessing the dead code property.
+💡 **Why:** To improve maintainability and readability by getting rid of dead code.
+✅ **Verification:** Ran `PYTHONPATH=. python3 src/scripts/verify_tavily_lightpanda.py` which executes assertions that test the Tavily integration directly. Also ran the code review tool and it flagged no issues with the logic changes. I have removed the pycache files from being committed as well.
+✨ **Result:** A cleaner codebase where useless unused property is gone but everything functions normally without regressions.
