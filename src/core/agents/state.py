@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, AsyncIterator, Iterator, Tuple
 
 from sqlmodel import select
-from sqlalchemy import delete
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     Checkpoint,
