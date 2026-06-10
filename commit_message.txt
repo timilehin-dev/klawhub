@@ -1,5 +1,0 @@
-⚡ Optimize telemetry stats with direct SQL counting
-
-💡 **What:** Replaced the loading of all `Run` and `Task` objects to memory and doing counting with Python list comprehensions with optimized SQL queries `select(func.count(Run.id))` to count directly in the database.
-🎯 **Why:** The N+1 and loading huge volumes of models from the database simply to sum counts is highly inefficient, taking longer times and significantly higher memory allocations as workspaces grow.
-📊 **Measured Improvement:** Replaced memory logic counting models with database-level execution counts. Simulated benchmarking via in-memory SQLite tables locally showcased a ~16x speedup (0.16s down to 0.01s on 10,000 runs data).

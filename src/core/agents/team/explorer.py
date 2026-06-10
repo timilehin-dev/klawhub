@@ -5,8 +5,77 @@ from typing import Dict, Any, List
 from sqlmodel import select
 from src.db.pool import get_db_session
 from src.db.models import Knowledge, Memory
+from sqlalchemy import text
 
 logger = logging.getLogger("klawhub.core.agents.team.explorer")
+
+async def _perform_vector_search(session, workspace_id: uuid.UUID, query_vector: List[float]) -> List[str]:
+    """Perform pgvector similarity search for knowledge and memories."""
+    context_fragments = []
+
+    # 1. Fetch relevant explicit company knowledge using pgvector cosine similarity (<=>)
+    knowledge_statement = select(Knowledge).where(
+        Knowledge.workspace_id == workspace_id,
+        Knowledge.embedding != None
+    ).order_by(text("embedding <=> :val")).params(val=query_vector).limit(5)
+
+    result = await session.execute(knowledge_statement)
+    knowledge_records = result.scalars().all()
+
+    for k in knowledge_records:
+        title = k.entity_name or "Untitled Knowledge"
+        data_dict = k.data or {}
+        content = data_dict.get("content") or data_dict.get("text") or json.dumps(data_dict)
+        context_fragments.append(f"[Knowledge File: {title}]\n{content}")
+
+    # 2. Fetch relevant past thread context memories using pgvector cosine similarity (<=>)
+    memory_statement = select(Memory).where(
+        Memory.workspace_id == workspace_id,
+        Memory.embedding != None
+    ).order_by(text("embedding <=> :val")).params(val=query_vector).limit(5)
+
+    result = await session.execute(memory_statement)
+    memory_records = result.scalars().all()
+
+    for m in memory_records:
+        content = m.content or ""
+        context_fragments.append(f"[Past Interaction Memory]\nMemory: {content} (Category: {m.category})")
+
+    return context_fragments
+
+async def _perform_keyword_search(session, workspace_id: uuid.UUID, user_query: str) -> List[str]:
+    """Fallback keyword search for knowledge and memories."""
+    context_fragments = []
+
+    # 1. Fallback Fetch explicit company knowledge
+    knowledge_statement = select(Knowledge).where(
+        Knowledge.workspace_id == workspace_id
+    ).limit(5)
+    result = await session.execute(knowledge_statement)
+    knowledge_records = result.scalars().all()
+
+    for k in knowledge_records:
+        title = k.entity_name or "Untitled Knowledge"
+        data_dict = k.data or {}
+        content = data_dict.get("content") or data_dict.get("text") or json.dumps(data_dict)
+
+        if any(word in title.lower() or word in content.lower()
+               for word in user_query.lower().split()):
+            context_fragments.append(f"[Knowledge (Keyword Match): {title}]\n{content}")
+
+    # 2. Fallback Fetch relevant past thread context memories
+    memory_statement = select(Memory).where(
+        Memory.workspace_id == workspace_id
+    ).order_by(Memory.created_at.desc()).limit(10)
+    result = await session.execute(memory_statement)
+    memory_records = result.scalars().all()
+
+    for m in memory_records:
+        content = m.content or ""
+        if any(word in content.lower() for word in user_query.lower().split()):
+            context_fragments.append(f"[Memory (Keyword Match)]\nMemory: {content} (Category: {m.category})")
+
+    return context_fragments
 
 async def explorer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Explorer Node: Multi-tenant vector RAG and semantic context gatherer.
@@ -32,7 +101,6 @@ async def explorer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     async with get_db_session() as session:
         # Generate text embedding using fastembed Modal service
         from src.core.llm.client import LLMClient
-        from sqlalchemy import text
         
         logger.info("Explorer generating embedding vector for pgvector similarity search...")
         query_vector = await LLMClient.generate_embedding(user_query)
@@ -40,34 +108,7 @@ async def explorer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         vector_search_success = False
         if query_vector:
             try:
-                # 1. Fetch relevant explicit company knowledge using pgvector cosine similarity (<=>)
-                knowledge_statement = select(Knowledge).where(
-                    Knowledge.workspace_id == workspace_id,
-                    Knowledge.embedding != None
-                ).order_by(text("embedding <=> :val")).params(val=query_vector).limit(5)
-                
-                result = await session.execute(knowledge_statement)
-                knowledge_records = result.scalars().all()
-                
-                for k in knowledge_records:
-                    title = k.entity_name or "Untitled Knowledge"
-                    data_dict = k.data or {}
-                    content = data_dict.get("content") or data_dict.get("text") or json.dumps(data_dict)
-                    context_fragments.append(f"[Knowledge File: {title}]\n{content}")
-                    
-                # 2. Fetch relevant past thread context memories using pgvector cosine similarity (<=>)
-                memory_statement = select(Memory).where(
-                    Memory.workspace_id == workspace_id,
-                    Memory.embedding != None
-                ).order_by(text("embedding <=> :val")).params(val=query_vector).limit(5)
-                
-                result = await session.execute(memory_statement)
-                memory_records = result.scalars().all()
-                
-                for m in memory_records:
-                    content = m.content or ""
-                    context_fragments.append(f"[Past Interaction Memory]\nMemory: {content} (Category: {m.category})")
-                    
+                context_fragments = await _perform_vector_search(session, workspace_id, query_vector)
                 vector_search_success = True
                 logger.info(f"Explorer pgvector search successful! Discovered {len(context_fragments)} vector matches.")
             except Exception as e:
@@ -75,34 +116,7 @@ async def explorer_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 
         # Defensive fallback to naive keyword search if vector search is unavailable or fails
         if not vector_search_success:
-            context_fragments = [] # reset
-            # 1. Fallback Fetch explicit company knowledge
-            knowledge_statement = select(Knowledge).where(
-                Knowledge.workspace_id == workspace_id
-            ).limit(5)
-            result = await session.execute(knowledge_statement)
-            knowledge_records = result.scalars().all()
-
-            for k in knowledge_records:
-                title = k.entity_name or "Untitled Knowledge"
-                data_dict = k.data or {}
-                content = data_dict.get("content") or data_dict.get("text") or json.dumps(data_dict)
-                
-                if any(word in title.lower() or word in content.lower() 
-                       for word in user_query.lower().split()):
-                    context_fragments.append(f"[Knowledge (Keyword Match): {title}]\n{content}")
-
-            # 2. Fallback Fetch relevant past thread context memories
-            memory_statement = select(Memory).where(
-                Memory.workspace_id == workspace_id
-            ).order_by(Memory.created_at.desc()).limit(10)
-            result = await session.execute(memory_statement)
-            memory_records = result.scalars().all()
-
-            for m in memory_records:
-                content = m.content or ""
-                if any(word in content.lower() for word in user_query.lower().split()):
-                    context_fragments.append(f"[Memory (Keyword Match)]\nMemory: {content} (Category: {m.category})")
+            context_fragments = await _perform_keyword_search(session, workspace_id, user_query)
 
     # Mark active milestone as completed or in-progress based on whether context was gathered
     updated_milestones = list(milestones)
