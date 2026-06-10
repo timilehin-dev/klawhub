@@ -706,8 +706,10 @@ async def execute(request: Request):
         
         # Auto-promote to heavy if any heavy packages are requested
         heavy_packages = {"torch", "tensorflow", "transformers", "scipy", "fastembed", "spacy", "crawl4ai", "weasyprint", "playwright", "polars"}
-        if any(d.split("==")[0].strip().lower() in heavy_packages for d in deps):
-            memory_tier = "heavy"
+        for d in deps:
+            if d.split("==", 1)[0].strip().lower() in heavy_packages:
+                memory_tier = "heavy"
+                break
             
         if memory_tier == "heavy":
             return await execute_code_heavy.remote.aio(
