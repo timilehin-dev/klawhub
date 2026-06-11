@@ -47,9 +47,23 @@ async def _perform_keyword_search(session, workspace_id: uuid.UUID, user_query: 
     """Fallback keyword search for knowledge and memories."""
     context_fragments = []
 
+    from sqlalchemy import or_
+
+    words = user_query.lower().split()
+    if not words:
+        return []
+
+    def escape_wildcards(text: str) -> str:
+        return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
     # 1. Fallback Fetch explicit company knowledge
+    # We apply a basic content condition for Knowledge as we don't have straightforward JSON searching across DBs easily
+    # But since the goal is optimization, we can pull records by title first as a proxy for relevance
+    # if title isn't sufficient, we can fetch all and python filter. For this optimization we will filter by entity_name DB side
+    knowledge_conditions = [Knowledge.entity_name.ilike(f"%{escape_wildcards(word)}%", escape="\\") for word in words]
     knowledge_statement = select(Knowledge).where(
-        Knowledge.workspace_id == workspace_id
+        Knowledge.workspace_id == workspace_id,
+        or_(*knowledge_conditions)
     ).limit(5)
     result = await session.execute(knowledge_statement)
     knowledge_records = result.scalars().all()
@@ -58,22 +72,20 @@ async def _perform_keyword_search(session, workspace_id: uuid.UUID, user_query: 
         title = k.entity_name or "Untitled Knowledge"
         data_dict = k.data or {}
         content = data_dict.get("content") or data_dict.get("text") or json.dumps(data_dict)
-
-        if any(word in title.lower() or word in content.lower()
-               for word in user_query.lower().split()):
-            context_fragments.append(f"[Knowledge (Keyword Match): {title}]\n{content}")
+        context_fragments.append(f"[Knowledge (Keyword Match): {title}]\n{content}")
 
     # 2. Fallback Fetch relevant past thread context memories
+    memory_conditions = [Memory.content.ilike(f"%{escape_wildcards(word)}%", escape="\\") for word in words]
     memory_statement = select(Memory).where(
-        Memory.workspace_id == workspace_id
+        Memory.workspace_id == workspace_id,
+        or_(*memory_conditions)
     ).order_by(Memory.created_at.desc()).limit(10)
     result = await session.execute(memory_statement)
     memory_records = result.scalars().all()
 
     for m in memory_records:
         content = m.content or ""
-        if any(word in content.lower() for word in user_query.lower().split()):
-            context_fragments.append(f"[Memory (Keyword Match)]\nMemory: {content} (Category: {m.category})")
+        context_fragments.append(f"[Memory (Keyword Match)]\nMemory: {content} (Category: {m.category})")
 
     return context_fragments
 

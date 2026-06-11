@@ -92,20 +92,32 @@ class MemoryControl:
                     logger.error(f"Memory similarity search query error: {e}. Falling back to keyword search...")
             
             # Fallback to naive keyword search
-            statement = select(Memory).where(Memory.workspace_id == workspace_id).limit(10)
+            from sqlalchemy import or_
+            words = query.lower().split()
+            if not words:
+                return []
+
+            def escape_wildcards(text: str) -> str:
+                return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+            conditions = [Memory.content.ilike(f"%{escape_wildcards(word)}%", escape="\\") for word in words]
+
+            statement = select(Memory).where(
+                Memory.workspace_id == workspace_id,
+                or_(*conditions)
+            ).limit(limit)
             result = await session.execute(statement)
-            all_memories = result.scalars().all()
+            matched_memories = result.scalars().all()
             
             matches = []
-            for m in all_memories:
-                if any(word in m.content.lower() for word in query.lower().split()):
-                    matches.append({
-                        "id": str(m.id),
-                        "content": m.content,
-                        "category": m.category,
-                        "created_at": m.created_at.isoformat() if m.created_at else None
-                    })
-            return matches[:limit]
+            for m in matched_memories:
+                matches.append({
+                    "id": str(m.id),
+                    "content": m.content,
+                    "category": m.category,
+                    "created_at": m.created_at.isoformat() if m.created_at else None
+                })
+            return matches
 
     @classmethod
     async def delete_memory(cls, workspace_id: uuid.UUID, memory_id: uuid.UUID) -> Dict[str, Any]:

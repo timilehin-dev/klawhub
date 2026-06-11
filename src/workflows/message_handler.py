@@ -683,16 +683,17 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                         has_question = "?" in parent.get("text", "") or any(kw in thread_text.lower() for kw in ["unresolved", "stuck", "pending", "outstanding", "blocker", "help", "need"])
                         
                         from src.db.models import Task
+                        from sqlalchemy import func
                         async with get_db_session() as session:
-                            stmt = select(Task).where(
+                            stmt = select(func.count(Task.id)).where(
                                 Task.workspace_id == workspace_id,
                                 Task.slack_thread_ts == parent_ts,
                                 Task.status == "pending"
                             )
                             tasks_res = await session.execute(stmt)
-                            pending_tasks = tasks_res.scalars().all()
+                            pending_tasks_count = tasks_res.scalar_one()
                             
-                        if pending_tasks or has_question:
+                        if pending_tasks_count > 0 or has_question:
                             # Verify that Klawhub hasn't already bumped this thread in the last 24h
                             last_bump_by_bot = False
                             for reply in reversed(replies):
@@ -706,8 +707,8 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                                     f"👋 *Hey team! Just checking in — this thread seems to have gone quiet.* \n"
                                     f"• Was this resolved, or is anyone still stuck? \n"
                                 )
-                                if pending_tasks:
-                                    bump_msg += f"• There are *{len(pending_tasks)} pending tasks* still logged for this thread."
+                                if pending_tasks_count > 0:
+                                    bump_msg += f"• There are *{pending_tasks_count} pending tasks* still logged for this thread."
                                     
                                 await slack_client.post_message(
                                     channel_id=channel_id,
