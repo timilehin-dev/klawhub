@@ -360,9 +360,12 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
     slack_files = list(slack_event.get("files", []))
     
     # Merge thread files to avoid missing files uploaded earlier in the thread context
+    slack_file_ids = {sf.get("id") for sf in slack_files if sf.get("id")}
     for f in thread_files:
-        if f.get("id") not in [sf.get("id") for sf in slack_files]:
+        fid = f.get("id")
+        if fid and fid not in slack_file_ids:
             slack_files.append(f)
+            slack_file_ids.add(fid)
 
     if slack_files:
         async def process_slack_files() -> list:
