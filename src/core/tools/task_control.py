@@ -92,7 +92,7 @@ class TaskControl:
             status=valid_status,
         )
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             session.add(new_task)
             await session.commit()
 
@@ -130,7 +130,7 @@ class TaskControl:
         """Lists all tasks securely scoped to the active workspace_id."""
         logger.info(f"Listing tasks for workspace {workspace_id}")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = (
                 select(Task)
                 .where(Task.workspace_id == workspace_id)
@@ -155,7 +155,7 @@ class TaskControl:
         """Retrieves a single task by ID, scoped to the active workspace."""
         logger.info(f"Getting task {task_id} for workspace {workspace_id}")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             task = await cls._get_task_for_workspace(session, workspace_id, task_id)
             if not task:
                 raise ValueError(f"Task with ID '{task_id}' not found in your workspace.")
@@ -182,7 +182,7 @@ class TaskControl:
         valid_status = _validate_status(status)
         logger.info(f"Updating task {task_id} status to {valid_status} in workspace {workspace_id}")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             task = await cls._get_task_for_workspace(session, workspace_id, task_id)
             if not task:
                 raise ValueError(f"Task with ID '{task_id}' not found in your workspace.")
@@ -217,7 +217,7 @@ class TaskControl:
         """Permanently deletes a task after verifying workspace ownership."""
         logger.info(f"Deleting task {task_id} from workspace {workspace_id}")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             task = await cls._get_task_for_workspace(session, workspace_id, task_id)
             if not task:
                 raise ValueError(f"Task with ID '{task_id}' not found in your workspace.")

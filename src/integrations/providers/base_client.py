@@ -33,7 +33,7 @@ class BaseAPIClient(ABC):
     async def _load_credentials(self) -> None:
         """Fetches the integration credentials from the database and decrypts them in-memory."""
         integration = None
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(self.workspace_id)) as session:
             statement = select(Integration).where(
                 Integration.workspace_id == self.workspace_id,
                 Integration.provider == self.provider
@@ -50,7 +50,7 @@ class BaseAPIClient(ABC):
 
     async def _update_stored_credentials(self, new_access_token: str, new_refresh_token: Optional[str], expires_in_seconds: Optional[int]) -> None:
         """Encrypts and commits newly refreshed OAuth tokens to the database."""
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(self.workspace_id)) as session:
             statement = select(Integration).where(
                 Integration.workspace_id == self.workspace_id,
                 Integration.provider == self.provider
@@ -124,7 +124,7 @@ class BaseAPIClient(ABC):
         except Exception as e:
             logger.error(f"Auto token refresh failed for provider '{self.provider}': {str(e)}")
             # Log error into database
-            async with get_db_session() as session:
+            async with get_db_session(workspace_id=str(self.workspace_id)) as session:
                 statement = select(Integration).where(
                     Integration.workspace_id == self.workspace_id,
                     Integration.provider == self.provider

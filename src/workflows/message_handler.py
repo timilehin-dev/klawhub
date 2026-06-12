@@ -133,7 +133,8 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
         return
 
     # Load workspace to fetch custom profile and bot user ID boundary
-    async with get_db_session() as session:
+    # This is a bootstrap query (no workspace_id known yet) - uses bypass_rls.
+    async with get_db_session(bypass_rls=True) as session:
         statement = select(Workspace).where(Workspace.slack_team_id == team_id)
         result = await session.execute(statement)
         workspace = result.scalar_one_or_none()
@@ -191,7 +192,7 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
 
         # Step B: Match against active workspace skills
         async def match_skills() -> list:
-            async with get_db_session() as session:
+            async with get_db_session(workspace_id=str(workspace.id)) as session:
                 stmt = select(Skill).where(Skill.workspace_id == workspace.id, Skill.is_active == True)
                 res = await session.execute(stmt)
                 skills = res.scalars().all()
@@ -219,7 +220,7 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
 
         # Step C: Anti-spam DB check to ensure Klawhub has never proactively responded to this thread
         async def check_proactive_history() -> bool:
-            async with get_db_session() as session:
+            async with get_db_session(workspace_id=str(workspace.id)) as session:
                 stmt = select(AgentState).where(
                     AgentState.workspace_id == workspace.id,
                     AgentState.agent_name == f"proactive_suggestion:{thread_ts}"
@@ -260,7 +261,7 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
         # Step E: Record proactive suggestion and post Block Kit card
         async def post_proactive_suggestion() -> None:
             # Record first to prevent race conditions
-            async with get_db_session() as session:
+            async with get_db_session(workspace_id=str(workspace.id)) as session:
                 record = AgentState(
                     workspace_id=workspace.id,
                     agent_name=f"proactive_suggestion:{thread_ts}",
@@ -586,8 +587,10 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
     logger.info("Executing scheduled cron check.")
     
     # Step 1: Query database for all active schedules
+    # This is a system-wide cron query that needs to see all tenants' schedules.
+    # Uses bypass_rls=True to allow cross-tenant visibility.
     async def fetch_active_schedules() -> list:
-        async with get_db_session() as session:
+        async with get_db_session(bypass_rls=True) as session:
             statement = select(Schedule).join(Workspace).where(
                 Schedule.is_active == True,
                 Workspace.is_active == True
@@ -679,7 +682,7 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                 logger.info(f"Silence Detector: found {len(thread_parents)} active threads to scan.")
                 
                 # Fetch workspace details to get bot user id
-                async with get_db_session() as session:
+                async with get_db_session(workspace_id=str(workspace_id)) as session:
                     workspace = await session.get(Workspace, workspace_id)
                 bot_user_id = workspace.slack_bot_user_id if workspace else None
                 
@@ -698,7 +701,7 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                         has_question = "?" in parent.get("text", "") or any(kw in thread_text.lower() for kw in ["unresolved", "stuck", "pending", "outstanding", "blocker", "help", "need"])
                         
                         from src.db.models import Task
-                        async with get_db_session() as session:
+                        async with get_db_session(workspace_id=str(workspace_id)) as session:
                             stmt = select(Task).where(
                                 Task.workspace_id == workspace_id,
                                 Task.slack_thread_ts == parent_ts,
@@ -732,7 +735,7 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                                 logger.info(f"Gently bumped thread {parent_ts} in channel {channel_id} due to silence.")
                                 
                 # Update database status to success
-                async with get_db_session() as session:
+                async with get_db_session(workspace_id=str(workspace_id)) as session:
                     statement = select(Schedule).where(
                         Schedule.id == sched_id,
                         Schedule.workspace_id == workspace_id
@@ -747,7 +750,7 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                         await session.commit()
             except Exception as e:
                 logger.error(f"Error in Silence Detector cron task: {e}", exc_info=True)
-                async with get_db_session() as session:
+                async with get_db_session(workspace_id=str(workspace_id)) as session:
                     statement = select(Schedule).where(
                         Schedule.id == sched_id,
                         Schedule.workspace_id == workspace_id
@@ -878,7 +881,7 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                                 logger.error(f"Failed to upload generated file '{name}' to Slack: {upload_err}")
                 
             # Update database status to success
-            async with get_db_session() as session:
+            async with get_db_session(workspace_id=str(workspace_id)) as session:
                 statement = select(Schedule).where(
                     Schedule.id == sched_id,
                     Schedule.workspace_id == workspace_id
@@ -910,7 +913,7 @@ async def cron_schedule_runner(ctx: inngest.Context) -> None:
                     logger.error(f"Failed to post error message to thread: {post_err}")
                     
             # Increment failure counter and handle auto-deactivation
-            async with get_db_session() as session:
+            async with get_db_session(workspace_id=str(workspace_id)) as session:
                 statement = select(Schedule).where(
                     Schedule.id == sched_id,
                     Schedule.workspace_id == workspace_id

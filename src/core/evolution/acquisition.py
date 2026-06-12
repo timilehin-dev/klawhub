@@ -93,7 +93,7 @@ class SkillAcquisitionEngine:
             logger.info("AST safety validation passed successfully.")
 
             # Store / Cache in multi-tenant database
-            async with get_db_session() as session:
+            async with get_db_session(workspace_id=str(workspace_id)) as session:
                 stmt = select(Skill).where(Skill.workspace_id == workspace_id, Skill.name == skill_name.lower().strip())
                 existing_skill = (await session.execute(stmt)).scalar_one_or_none()
                 

@@ -139,7 +139,7 @@ async def test_in_memory_thread_tracing(workspace: Workspace):
     logger.info("=== TEST 2: Dynamic In-Memory Thread Tracing ===")
 
     # 1. Create a dummy active skill in DB that matches thread topic
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         pdf_skill = Skill(
             workspace_id=workspace.id,
             name="pdf_generator",
@@ -200,7 +200,7 @@ async def test_in_memory_thread_tracing(workspace: Workspace):
         logger.info("[PASSED] Parent thread crawled and unified in-memory context compiled successfully.")
 
         # 4. Strict Privacy Boundary verification: Ensure database has zero chat messages stored
-        async with get_db_session() as session:
+        async with get_db_session(bypass_rls=True) as session:
             stmt = select(Run)
             runs = (await session.execute(stmt)).scalars().all()
             for r in runs:
@@ -215,7 +215,7 @@ async def test_proactive_intervention(workspace: Workspace):
     logger.info("=== TEST 3: Proactive Slack Intervention Heuristics ===")
 
     # Clear prior states
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         from sqlalchemy import delete
         await session.execute(delete(AgentState).where(AgentState.agent_name.like("proactive_suggestion:%")))
         await session.commit()
@@ -352,7 +352,7 @@ async def main():
         name="Enterprise Workspace",
         is_active=True
     )
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         session.add(workspace)
         await session.commit()
 

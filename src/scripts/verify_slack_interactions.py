@@ -91,7 +91,7 @@ async def bootstrap_db():
 
 async def setup_test_data() -> Workspace:
     """Inserts a registered workspace for interaction tests."""
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         ws = Workspace(
             id=uuid.uuid4(),
             slack_team_id="T_SLACK_TEST",
@@ -517,7 +517,7 @@ async def test_view_submission_settings(workspace: Workspace):
             assert resp.json() == {"response_action": "clear"}
             
             # Verify database workspace identity is persisted
-            async with get_db_session() as session:
+            async with get_db_session(bypass_rls=True) as session:
                 statement = select(Workspace).where(Workspace.id == workspace.id)
                 ws_db = (await session.execute(statement)).scalar_one()
                 assert ws_db.agent_name == "SuperBot"
@@ -686,7 +686,7 @@ async def test_view_submission_task_creation(workspace: Workspace):
             assert resp.status_code == 200
             
             # Verify database has the newly created task
-            async with get_db_session() as session:
+            async with get_db_session(bypass_rls=True) as session:
                 statement = select(Task).where(Task.workspace_id == workspace.id)
                 tasks_db = (await session.execute(statement)).scalars().all()
                 assert len(tasks_db) == 1

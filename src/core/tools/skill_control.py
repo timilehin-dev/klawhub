@@ -30,7 +30,7 @@ class SkillControl:
         clean_name = name.strip().lower().replace(" ", "_")
         logger.info(f"Creating skill '{clean_name}' for workspace {workspace_id}")
         
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             # Enforce unique name per workspace check
             stmt = select(Skill).where(
                 Skill.workspace_id == workspace_id,
@@ -78,7 +78,7 @@ class SkillControl:
         """Lists all skills securely scoped to the active workspace_id."""
         logger.info(f"Listing skills for workspace {workspace_id}")
         
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = select(Skill).where(Skill.workspace_id == workspace_id).order_by(Skill.created_at.desc())
             result = await session.execute(statement)
             skills = result.scalars().all()
@@ -106,7 +106,7 @@ class SkillControl:
         """Toggles a skill's active status securely after verifying workspace ownership."""
         logger.info(f"Toggling active status of skill {skill_id} to {is_active} in workspace {workspace_id}")
         
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = select(Skill).where(
                 Skill.id == skill_id,
                 Skill.workspace_id == workspace_id
@@ -135,7 +135,7 @@ class SkillControl:
         """Permanently deletes a skill record securely after verifying workspace ownership."""
         logger.info(f"Attempting to delete skill {skill_id} in workspace {workspace_id}")
         
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = select(Skill).where(
                 Skill.id == skill_id,
                 Skill.workspace_id == workspace_id

@@ -419,7 +419,7 @@ async def _handle_code_execution(
     # Check database for an explicit approved action first, then fall back to this thread huddle.
     existing_action = None
     approved_action_id = state.get("approved_action_id")
-    async with get_db_session() as session:
+    async with get_db_session(workspace_id=str(ws_uuid)) as session:
         if approved_action_id:
             try:
                 explicit_stmt = select(PendingAction).where(
@@ -477,7 +477,7 @@ async def _handle_code_execution(
                 if word in ["skill", "skills"] and i + 1 < len(words):
                     candidate = words[i+1].strip(",.?!()'`\"")
                     from src.db.models import Skill
-                    async with get_db_session() as session:
+                    async with get_db_session(workspace_id=str(ws_uuid)) as session:
                         stmt = select(Skill).where(
                             Skill.workspace_id == ws_uuid,
                             Skill.name == candidate,
@@ -553,7 +553,7 @@ async def _handle_code_execution(
             status="pending"
         )
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(ws_uuid)) as session:
             session.add(new_action)
             await session.commit()
 
@@ -632,7 +632,7 @@ async def _handle_code_execution(
         result = await sandbox_client.execute_code(python_code, language="python", workspace_id=workspace_id)
 
         # Mark pending action as completed in DB
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(ws_uuid)) as session:
             statement = select(PendingAction).where(PendingAction.id == existing_action.id)
             db_act = (await session.execute(statement)).scalar_one_or_none()
             if db_act:
@@ -725,7 +725,7 @@ async def _get_few_shot_examples(workspace_id: uuid.UUID) -> str:
     from sqlmodel import select
 
     try:
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             # Positive examples: rating == 5, ordered by created_at desc (limit 3)
             pos_stmt = select(WorkflowLearning).where(
                 WorkflowLearning.workspace_id == workspace_id,

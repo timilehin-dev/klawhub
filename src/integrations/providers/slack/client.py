@@ -77,7 +77,7 @@ class SlackClient(BaseAPIClient):
         except Exception:
             # Fall back to workspace-wide bot_token from the 'workspaces' table
             logger.info("No user-scoped Slack integration found. Falling back to workspace bot token...")
-            async with get_db_session() as session:
+            async with get_db_session(workspace_id=str(self.workspace_id)) as session:
                 statement = select(Workspace).where(Workspace.id == self.workspace_id)
                 result = await session.execute(statement)
                 workspace = result.scalar_one_or_none()

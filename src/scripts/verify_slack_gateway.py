@@ -75,7 +75,7 @@ async def bootstrap_db():
 
 async def setup_test_data() -> Workspace:
     """Inserts a registered, active Workspace along with mock runs and tasks for telemetry cards."""
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         # Create Active Workspace
         ws = Workspace(
             id=uuid.uuid4(),

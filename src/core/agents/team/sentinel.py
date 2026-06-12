@@ -29,7 +29,7 @@ async def sentinel_node(state: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"Sentinel processing trigger for workspace {workspace_id}, thread {thread_id}")
 
     # Fetch custom workspace profile from Supabase
-    async with get_db_session() as session:
+    async with get_db_session(workspace_id=str(workspace_id)) as session:
         statement = select(Workspace).where(
             Workspace.id == workspace_id,
             Workspace.is_active == True

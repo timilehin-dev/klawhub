@@ -67,7 +67,7 @@ async def test_dynamic_skill_installation_and_execution():
 
     # 2. Add mock workspace to DB
     workspace_id = uuid.uuid4()
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         ws = Workspace(
             id=workspace_id,
             slack_team_id="T_DOCS",
@@ -123,7 +123,7 @@ pdf_path = document_generator.generate_pdf('<h1>Hi</h1>', 'output.pdf')
             assert result["generated_files"][0]["name"] == "output.pdf"
 
             # 4. Verify that the skill is now saved and cached in the database!
-            async with get_db_session() as session:
+            async with get_db_session(bypass_rls=True) as session:
                 stmt = select(Skill).where(Skill.workspace_id == workspace_id, Skill.name == "document_generator")
                 db_skill = (await session.execute(stmt)).scalar_one_or_none()
 

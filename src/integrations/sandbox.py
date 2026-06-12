@@ -89,7 +89,7 @@ class SandboxClient:
                         from src.db.models import Skill
 
                         normalized_workspace_id = uuid.UUID(str(workspace_id))
-                        async with get_db_session() as session:
+                        async with get_db_session(workspace_id=str(normalized_workspace_id)) as session:
                             stmt = select(Skill).where(Skill.workspace_id == normalized_workspace_id, Skill.is_active == True)
                             db_skills = (await session.execute(stmt)).scalars().all()
                             skills_map = {s.name.lower().strip(): s for s in db_skills}

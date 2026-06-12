@@ -68,7 +68,7 @@ async def test_successful_acquisition():
     logger.info("TEST 2: Verifying dynamic GitHub skill cloning & caching...")
     
     workspace_id = uuid.uuid4()
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         ws = Workspace(
             id=workspace_id,
             slack_team_id="T_TEST_WORKSPACE",
@@ -106,7 +106,7 @@ def handler(x):
         assert success is True, "GitHub skill acquisition returned failure."
 
     # Validate that it is properly stored in the database
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         stmt = select(Skill).where(Skill.workspace_id == workspace_id, Skill.name == "my_math")
         skill = (await session.execute(stmt)).scalar_one_or_none()
         
@@ -145,7 +145,7 @@ def handler(x):
         assert success is False, "AST scanner failed to block unsafe eval code!"
 
     # Verify that it was NOT written to the database
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         stmt = select(Skill).where(Skill.workspace_id == workspace_id, Skill.name == "malicious")
         skill = (await session.execute(stmt)).scalar_one_or_none()
         assert skill is None, "Malicious skill was saved to the database!"
@@ -158,7 +158,7 @@ async def test_sandbox_mounting_and_isolation():
     workspace_b_id = uuid.uuid4()
 
     # Register my_custom_tool for Workspace A
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         ws_a = Workspace(id=workspace_a_id, slack_team_id="T_A", slack_bot_user_id="U_A", bot_token="tok_a", name="WS A")
         ws_b = Workspace(id=workspace_b_id, slack_team_id="T_B", slack_bot_user_id="U_B", bot_token="tok_b", name="WS B")
         session.add(ws_a)

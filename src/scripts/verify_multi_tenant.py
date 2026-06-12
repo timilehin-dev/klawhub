@@ -61,7 +61,7 @@ async def test_multi_tenant_isolation():
 
     logger.info(f"Creating Workspace A (ID: {workspace_a_id}) and Workspace B (ID: {workspace_b_id})...")
     
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         workspace_a = Workspace(
             id=workspace_a_id,
             slack_team_id="T_WORKSPACE_A",
@@ -87,7 +87,7 @@ async def test_multi_tenant_isolation():
     encrypted_token_b = encrypt_token(token_b)
 
     logger.info("Adding encrypted integrations for Workspace A and Workspace B...")
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         integration_a = Integration(
             workspace_id=workspace_a_id,
             provider="slack",
@@ -110,7 +110,7 @@ async def test_multi_tenant_isolation():
 
     # 3. Assert Database-level query isolation
     # Query Workspace A's Slack integration using session scoped to A
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         # Workspace A select
         statement_a = select(Integration).where(
             Integration.workspace_id == workspace_a_id,
@@ -212,7 +212,7 @@ async def test_multi_tenant_isolation():
     # attempting to read Workspace A's state through Workspace B's context.
     logger.info("Simulating cross-tenant database hijacking attack...")
     
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         # Select Workspace A's checkpoint from DB
         stmt = select(AgentState).where(AgentState.workspace_id == workspace_a_id)
         res = await session.execute(stmt)

@@ -67,7 +67,7 @@ class ScheduleControl:
             is_active=True
         )
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             session.add(new_schedule)
             await session.commit()
 
@@ -91,7 +91,7 @@ class ScheduleControl:
         """Lists all active and paused schedules securely scoped to the active workspace_id."""
         logger.info(f"Listing schedules for workspace {workspace_id}")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = select(Schedule).where(Schedule.workspace_id == workspace_id)
             result = await session.execute(statement)
             schedules = result.scalars().all()
@@ -121,7 +121,7 @@ class ScheduleControl:
         status_label = "activate" if is_active else "pause"
         logger.info(f"Attempting to {status_label} schedule {schedule_id} in workspace {workspace_id}")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = select(Schedule).where(
                 Schedule.id == schedule_id,
                 Schedule.workspace_id == workspace_id
@@ -154,7 +154,7 @@ class ScheduleControl:
         """Permanently deletes a schedule record securely after verifying workspace ownership."""
         logger.info(f"Attempting to delete schedule {schedule_id} in workspace {workspace_id}")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             # Check ownership first
             statement = select(Schedule).where(
                 Schedule.id == schedule_id,
@@ -202,7 +202,7 @@ class ScheduleControl:
         if timezone is not None and len(timezone.strip()) > MAX_TIMEZONE_LENGTH:
             raise ValueError(f"Timezone string exceeds {MAX_TIMEZONE_LENGTH} characters.")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = select(Schedule).where(
                 Schedule.id == schedule_id,
                 Schedule.workspace_id == workspace_id

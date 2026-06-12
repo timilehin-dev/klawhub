@@ -94,12 +94,17 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 @asynccontextmanager
-async def get_db_session(workspace_id: str = None) -> AsyncGenerator[AsyncSession, None]:
+async def get_db_session(workspace_id: str = None, bypass_rls: bool = False) -> AsyncGenerator[AsyncSession, None]:
     """Async context manager providing a safe, isolated database session transaction.
     
     Args:
         workspace_id: Optional workspace UUID to set as session variable for RLS.
                       If provided, the session will be scoped to that workspace.
+        bypass_rls: When True, the session bypasses Row Level Security policies. This is
+                    intended ONLY for system-level queries that legitimately need cross-tenant
+                    visibility (e.g., cron jobs scanning all active workspaces, workspace
+                    bootstrapping before the workspace_id is known). Use sparingly and
+                    audit carefully.
     """
     async with AsyncSessionLocal() as session:
         # Set the workspace ID session variable for RLS policies if provided
@@ -111,6 +116,17 @@ async def get_db_session(workspace_id: str = None) -> AsyncGenerator[AsyncSessio
                 )
             except Exception as e:
                 logger.warning(f"Failed to set workspace_id session variable: {e}")
+        
+        if bypass_rls:
+            try:
+                # Set bypass flag for RLS policies. RLS policies check is_system_session()
+                # to allow these specific system queries to operate cross-tenant.
+                await session.execute(
+                    text("SELECT set_config('app.bypass_rls', 'true', true)")
+                )
+                logger.debug("RLS bypass enabled for system-level query")
+            except Exception as e:
+                logger.warning(f"Failed to set RLS bypass flag: {e}")
         
         try:
             yield session

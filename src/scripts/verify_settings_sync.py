@@ -72,7 +72,7 @@ async def create_test_workspace(
 ) -> uuid.UUID:
     """Insert a test workspace and return its UUID."""
     wid = uuid.uuid4()
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         ws = Workspace(
             id=wid,
             slack_team_id=slack_team_id,
@@ -151,7 +151,7 @@ async def test_settings_roundtrip():
         logger.info(f"  Updated settings confirmed: name='{updated['agent_name']}', skills={updated['enabled_skills']}")
 
     # ── Direct DB verification ──
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         ws = await session.get(Workspace, workspace_id)
         assert ws.agent_name == "Atlas Prime"
         assert ws.agent_personality == "You are a decisive, sharp executive assistant who communicates concisely."
@@ -273,7 +273,7 @@ async def test_cross_tenant_settings_isolation():
         assert post_resp.status_code == 200  # This updates Workspace B, not A
 
     # Verify Workspace A is UNTOUCHED
-    async with get_db_session() as session:
+    async with get_db_session(bypass_rls=True) as session:
         ws_a = await session.get(Workspace, ws_a_id)
         assert ws_a.agent_name == "Alpha Bot", f"Workspace A was tampered! Got '{ws_a.agent_name}'"
         assert ws_a.is_active is True, "Workspace A's is_active was tampered!"

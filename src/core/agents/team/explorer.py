@@ -98,7 +98,7 @@ async def explorer_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     context_fragments = []
 
-    async with get_db_session() as session:
+    async with get_db_session(workspace_id=str(workspace_id)) as session:
         # Generate text embedding using fastembed Modal service
         from src.core.llm.client import LLMClient
         

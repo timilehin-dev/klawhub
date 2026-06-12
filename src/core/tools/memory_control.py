@@ -38,7 +38,7 @@ class MemoryControl:
             embedding=embedding if embedding else None
         )
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             session.add(new_memory)
             await session.commit()
             
@@ -67,7 +67,7 @@ class MemoryControl:
         # Generate text embedding
         query_vector = await LLMClient.generate_embedding(query)
         
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             if query_vector:
                 try:
                     statement = select(Memory).where(
@@ -112,7 +112,7 @@ class MemoryControl:
         """Deletes a memory record securely scoped to the active workspace."""
         logger.info(f"Attempting to delete memory {memory_id} in workspace {workspace_id}")
         
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = select(Memory).where(
                 Memory.id == memory_id,
                 Memory.workspace_id == workspace_id
