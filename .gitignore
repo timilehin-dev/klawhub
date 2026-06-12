@@ -9,3 +9,5 @@ node_modules
 scratch/
 .gemini/
 venv/
+__pycache__/
+*.pyc
