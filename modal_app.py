@@ -13,7 +13,6 @@ import glob
 import hmac
 import hashlib
 import time
-import requests
 import asyncio
 import re
 from typing import Optional
