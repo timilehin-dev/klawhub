@@ -171,6 +171,11 @@ def get_session_workspace_id(request: Request) -> Optional[uuid.UUID]:
         logger.warning(f"Failed to decrypt workspace session ID: {str(e)}")
         return None
 
+
+def _read_file_sync(filepath: str) -> str:
+    with open(filepath, "r", encoding="utf-8") as f:
+        return f.read()
+
 # ─────────────────────────────────────────────
 # Page Serving Routes
 # ─────────────────────────────────────────────
@@ -181,8 +186,7 @@ async def serve_index(request: Request):
     filepath = "api/templates/index.html"
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Homepage template not found")
-    with open(filepath, "r", encoding="utf-8") as f:
-        html_content = f.read()
+    html_content = await asyncio.to_thread(_read_file_sync, filepath)
     return HTMLResponse(content=html_content)
 
 
@@ -197,8 +201,7 @@ async def serve_dashboard(request: Request):
     filepath = "api/templates/dashboard.html"
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Dashboard template not found")
-    with open(filepath, "r", encoding="utf-8") as f:
-        html_content = f.read()
+    html_content = await asyncio.to_thread(_read_file_sync, filepath)
     return HTMLResponse(content=html_content)
 
 # ─────────────────────────────────────────────
