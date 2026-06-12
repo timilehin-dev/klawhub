@@ -11,7 +11,6 @@ except ImportError:
 import base64
 import glob
 import hmac
-import hashlib
 import time
 import asyncio
 import re
@@ -122,7 +121,7 @@ def verify_request(request: Request, body: bytes, max_age_seconds: int = 300) ->
         expected_signature = hmac.new(
             expected.encode("utf-8"),
             message,
-            hashlib.sha256
+            "sha256"
         ).hexdigest()
         return hmac.compare_digest(provided_signature, expected_signature)
 
