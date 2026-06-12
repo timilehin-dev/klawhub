@@ -1,4 +1,3 @@
-import json
 import hmac
 import hashlib
 import logging
