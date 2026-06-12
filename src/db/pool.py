@@ -94,9 +94,24 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 @asynccontextmanager
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Async context manager providing a safe, isolated database session transaction."""
+async def get_db_session(workspace_id: str = None) -> AsyncGenerator[AsyncSession, None]:
+    """Async context manager providing a safe, isolated database session transaction.
+    
+    Args:
+        workspace_id: Optional workspace UUID to set as session variable for RLS.
+                      If provided, the session will be scoped to that workspace.
+    """
     async with AsyncSessionLocal() as session:
+        # Set the workspace ID session variable for RLS policies if provided
+        if workspace_id:
+            try:
+                await session.execute(
+                    text("SELECT set_workspace_id(:workspace_id)"),
+                    {"workspace_id": workspace_id}
+                )
+            except Exception as e:
+                logger.warning(f"Failed to set workspace_id session variable: {e}")
+        
         try:
             yield session
             await session.commit()

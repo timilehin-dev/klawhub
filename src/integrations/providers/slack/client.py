@@ -148,14 +148,38 @@ class SlackClient(BaseAPIClient):
         return response.data
 
     async def add_reaction(self, channel_id: str, timestamp: str, name: str) -> Dict[str, Any]:
-        """Attaches an emoji reaction to a specific message in a channel."""
+        """Attaches an emoji reaction to a specific message in a channel.
+        
+        Gracefully handles the case when the reaction already exists on the message.
+        The slack_sdk raises SlackApiError on ok=False responses, so we catch
+        and inspect the error to allow idempotent reaction adds.
+        """
+        from slack_sdk.errors import SlackApiError
+        
         client = await self.get_sdk_client()
-        response = await client.reactions_add(
-            channel=channel_id,
-            timestamp=timestamp,
-            name=name
-        )
-        return response.data
+        try:
+            response = await client.reactions_add(
+                channel=channel_id,
+                timestamp=timestamp,
+                name=name
+            )
+            return response.data
+        except SlackApiError as e:
+            # Slack SDK raises SlackApiError when ok=False
+            error_code = e.response.get("error", "") if hasattr(e, 'response') else str(e)
+            if error_code == "already_reacted":
+                logger.info(f"Reaction '{name}' already exists on message {timestamp}. Skipping.")
+                return {"ok": True, "message": "already_reacted"}
+            # Re-raise other Slack API errors
+            logger.warning(f"Slack API error adding reaction '{name}': {error_code}")
+            raise
+        except Exception as e:
+            # Handle other unexpected errors
+            error_str = str(e)
+            if "already_reacted" in error_str.lower():
+                logger.info(f"Reaction '{name}' already exists on message {timestamp}. Skipping.")
+                return {"ok": True, "message": "already_reacted"}
+            raise
 
     async def remove_reaction(self, channel_id: str, timestamp: str, name: str) -> Dict[str, Any]:
         """Removes an emoji reaction from a specific message."""

@@ -158,6 +158,16 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
 
     slack_client = SlackClient(workspace.id)
 
+    # Step 0: Add "eyes" reaction IMMEDIATELY for instant visual acknowledgement
+    # This runs BEFORE any validation checks to minimize perceived latency
+    async def add_eyes_immediate() -> None:
+        try:
+            await slack_client.add_reaction(channel_id, message_ts, "eyes")
+        except Exception as e:
+            logger.warning(f"Failed to add immediate 'eyes' reaction: {e}")
+            
+    await ctx.step.run("add-eyes-immediate", add_eyes_immediate)
+
     # Detect if user explicitly mentions the bot or if it's a DM
     is_explicit = (
         event_type == "app_mention" or
@@ -408,14 +418,16 @@ async def slack_message_handler(ctx: inngest.Context) -> None:
                 f"User's latest message: {user_query}"
             )
 
-    # Step 1: Add "eyes" reaction for instant visual acknowledgement
-    async def add_eyes() -> None:
+    # Step 1: Add (or verify) "eyes" reaction for visual acknowledgement
+    # This step is redundant with Step 0 but ensures the reaction persists
+    # Handles already_reacted gracefully so no error if Step 0 already added it
+    async def add_eyes_verify() -> None:
         try:
             await slack_client.add_reaction(channel_id, message_ts, "eyes")
         except Exception as e:
-            logger.warning(f"Failed to add 'eyes' reaction: {e}")
+            logger.warning(f"Failed to verify 'eyes' reaction: {e}")
             
-    await ctx.step.run("add-reaction", add_eyes)
+    await ctx.step.run("add-reaction", add_eyes_verify)
 
     # Step 2: Invoke the cognitive agent coworker graph
     async def run_agent() -> dict:

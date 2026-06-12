@@ -4,7 +4,7 @@ import logging
 import uuid
 import base64
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, AsyncIterator, Iterator, Tuple
+from typing import Any, Dict, List, Optional, AsyncIterator, Iterator, Sequence, Tuple
 
 from sqlmodel import select
 from sqlalchemy import delete
@@ -141,7 +141,7 @@ class HMACCheckpointSaver(BaseCheckpointSaver):
         configurable = config.get("configurable", {})
         checkpoint_id = configurable.get("checkpoint_id")
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             if checkpoint_id:
                 agent_name = f"langgraph:{thread_id}:{checkpoint_id}"
                 statement = select(AgentState).where(
@@ -240,7 +240,7 @@ class HMACCheckpointSaver(BaseCheckpointSaver):
         workspace_id, thread_id = self._get_workspace_and_thread(config)
         agent_name_prefix = f"langgraph:{thread_id}:"
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             statement = select(AgentState).where(
                 AgentState.workspace_id == workspace_id,
                 AgentState.agent_name.like(f"{agent_name_prefix}%")
@@ -347,7 +347,7 @@ class HMACCheckpointSaver(BaseCheckpointSaver):
             "signature": signature
         }
 
-        async with get_db_session() as session:
+        async with get_db_session(workspace_id=str(workspace_id)) as session:
             # Check if this exact checkpoint record already exists to perform upsert
             statement = select(AgentState).where(
                 AgentState.workspace_id == workspace_id,
@@ -384,3 +384,97 @@ class HMACCheckpointSaver(BaseCheckpointSaver):
                 "workspace_id": str(workspace_id)
             }
         }
+
+    async def aput_writes(
+        self,
+        config: dict,
+        writes: Sequence[Tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        """Asynchronously persists intermediate writes linked to a checkpoint.
+        
+        This method is required by LangGraph's checkpointing protocol to store
+        intermediate writes (channel updates) that are linked to a parent checkpoint
+        but not yet committed as a full checkpoint. These are typically written
+        during parallel node execution in the graph.
+        
+        Args:
+            config: Configuration of the related checkpoint (contains thread_id, workspace_id, checkpoint_id).
+            writes: Sequence of (channel_name, value) tuples to store.
+            task_id: Identifier for the task creating the writes.
+            task_path: Path of the task creating the writes (optional).
+        """
+        workspace_id, thread_id = self._get_workspace_and_thread(config)
+        configurable = config.get("configurable", {})
+        checkpoint_id = configurable.get("checkpoint_id")
+        
+        if not checkpoint_id:
+            logger.warning("aput_writes called without checkpoint_id in config. Skipping.")
+            return
+            
+        if not writes:
+            return
+        
+        # Serialize the writes payload for storage
+        try:
+            serialized_writes = []
+            for channel, value in writes:
+                try:
+                    w_type, w_bytes = self.serde.dumps_typed(value)
+                    serialized_value = base64.b64encode(
+                        w_type.encode("utf-8") + b":" + w_bytes
+                    ).decode("utf-8")
+                    serialized_writes.append({
+                        "channel": channel,
+                        "value": serialized_value
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to serialize write for channel '{channel}': {e}")
+                    continue
+            
+            if not serialized_writes:
+                return
+            
+            # Create a unique agent_name for these writes
+            writes_key = f"writes:{thread_id}:{checkpoint_id}:{task_id}"
+            
+            secure_writes = {
+                "writes": serialized_writes,
+                "task_id": task_id,
+                "task_path": task_path,
+                "checkpoint_id": checkpoint_id,
+                "thread_id": thread_id
+            }
+            
+            async with get_db_session(workspace_id=str(workspace_id)) as session:
+                # Check if writes record already exists for this task
+                statement = select(AgentState).where(
+                    AgentState.workspace_id == workspace_id,
+                    AgentState.agent_name == writes_key
+                )
+                result = await session.execute(statement)
+                record = result.scalar_one_or_none()
+                
+                if not record:
+                    # Create new writes record
+                    record = AgentState(
+                        workspace_id=workspace_id,
+                        agent_name=writes_key,
+                        state=secure_writes,
+                        last_active_at=datetime.utcnow(),
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow()
+                    )
+                    session.add(record)
+                else:
+                    # Update existing writes record
+                    record.state = secure_writes
+                    record.last_active_at = datetime.utcnow()
+                    record.updated_at = datetime.utcnow()
+                    session.add(record)
+                    
+                logger.debug(f"Persisted {len(serialized_writes)} intermediate writes for task {task_id} in thread {thread_id}")
+                
+        except Exception as e:
+            logger.error(f"Failed to persist checkpoint writes: {e}", exc_info=True)
