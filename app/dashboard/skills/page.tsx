@@ -36,8 +36,8 @@ export default function SkillsCatalog() {
   const [skills, setSkills] = useState<Skill[]>(builtinSkills);
   const [githubUrl, setGithubUrl] = useState("");
   const [showInstaller, setShowInstaller] = useState(false);
-  const [installStatus, setInstallStatus] = useState<Optional<string>>(None);
-  const [selectedDoc, setSelectedDoc] = useState<Optional<Skill>>(None);
+  const [installStatus, setInstallStatus] = useState<string | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<Skill | null>(null);
 
   const fetchCustomSkills = async () => {
     try {
@@ -177,7 +177,7 @@ export default function SkillsCatalog() {
                 <Cpu className="w-5 h-5 text-sleekCyan" /> {selectedDoc.name} Specs
               </h3>
               <button 
-                onClick={() => setSelectedDoc(None)}
+                onClick={() => setSelectedDoc(null)}
                 className="text-gray-400 hover:text-white font-bold"
               >
                 ✕ Close

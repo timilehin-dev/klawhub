@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { 
   Play, CheckCircle, AlertTriangle, Cpu, 
-  BarChart2, Zap, ArrowRight, RefreshCw 
+  BarChart2, Zap, ArrowRight, RefreshCw, Terminal 
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
