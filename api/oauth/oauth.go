@@ -58,6 +58,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	clientID := os.Getenv("SLACK_CLIENT_ID")
 	clientSecret := os.Getenv("SLACK_CLIENT_SECRET")
 	appURL := os.Getenv("NEXT_PUBLIC_APP_URL")
+	if appURL == "" {
+		appURL = "https://klawhub.xyz"
+	}
+
+	// Strip leading "www." so the redirect_uri matches what is configured in
+	// the Slack app (e.g. https://klawhub.xyz/api/oauth instead of www.klawhub.xyz).
+	redirectHost := strings.Replace(appURL, "://www.", "://", 1)
 
 	if clientID == "" || clientSecret == "" {
 		http.Error(w, "Slack OAuth credentials not configured", http.StatusInternalServerError)
@@ -65,7 +72,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange code for access token
-	oauthResp, err := exchangeSlackCode(code, clientID, clientSecret, appURL+"/api/oauth")
+	oauthResp, err := exchangeSlackCode(code, clientID, clientSecret, redirectHost+"/api/oauth")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("OAuth token exchange failed: %v", err), http.StatusInternalServerError)
 		return
@@ -96,8 +103,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Redirect to the dashboard with success message
-	http.Redirect(w, r, appURL+"/dashboard?install=success&team="+oauthResp.Team.Name, http.StatusFound)
+	// Redirect through the Next.js auth bridge that creates/reuses a
+	// Supabase session, then lands on the dashboard.
+	http.Redirect(w, r,
+		redirectHost+"/auth/slack-callback?slack_user_id="+oauthResp.AuthedUser.ID+
+			"&team_id="+oauthResp.Team.ID+
+			"&team_name="+url.QueryEscape(oauthResp.Team.Name),
+		http.StatusFound)
 }
 
 func exchangeSlackCode(code, clientID, clientSecret, redirectURI string) (*SlackOAuthResponse, error) {

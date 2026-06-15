@@ -1,16 +1,36 @@
 "use client";
 
 import React, { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Terminal, Shield, Cpu, RefreshCw, Layers } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 const SLACK_CLIENT_ID = process.env.NEXT_PUBLIC_SLACK_CLIENT_ID || "";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://klawhub.xyz";
 
+/**
+ * Strip leading "www." so the redirect_uri matches what is configured in the
+ * Slack app (e.g. https://klawhub.xyz/api/oauth instead of www.klawhub.xyz).
+ */
+function getRedirectHost(appUrl: string): string {
+  try {
+    const u = new URL(appUrl);
+    if (u.hostname.startsWith("www.")) {
+      u.hostname = u.hostname.slice(4);
+    }
+    return u.origin;
+  } catch {
+    // Fallback: strip "www." manually
+    return appUrl.replace(/(https?:\/\/)www\./, "$1");
+  }
+}
+
 function LandingContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [installStatus, setInstallStatus] = useState<string | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
     const install = searchParams.get("install");
@@ -24,9 +44,42 @@ function LandingContent() {
     }
   }, [searchParams]);
 
+  // If the user already has a Supabase session, redirect straight to dashboard.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!cancelled && session) {
+          router.replace("/dashboard");
+          return;
+        }
+      } catch {
+        // Not logged in — stay on landing page
+      } finally {
+        if (!cancelled) setCheckingAuth(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [router]);
+
+  const redirectHost = getRedirectHost(APP_URL);
+
   const slackOAuthUrl = SLACK_CLIENT_ID
-    ? `https://slack.com/oauth/v2/authorize?client_id=${SLACK_CLIENT_ID}&scope=chat:write,commands,channels:history,channels:read,files:read,files:write,im:history,im:read,im:write,users:read,users:read.email&redirect_uri=${encodeURIComponent(APP_URL + "/api/oauth")}`
+    ? `https://slack.com/oauth/v2/authorize?client_id=${SLACK_CLIENT_ID}&scope=chat:write,commands,channels:history,channels:read,files:read,files:write,im:history,im:read,im:write,users:read,users:read.email&redirect_uri=${encodeURIComponent(redirectHost + "/api/oauth")}`
     : "https://slack.com/oauth/v2/authorize";
+
+  // Show a brief loading indicator while we check auth
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-darkBg">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sleekCyan to-neonPurple animate-pulse" />
+          <p className="text-sm text-gray-400">Loading…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col justify-between p-8 md:p-16 text-gray-200">
@@ -72,12 +125,12 @@ function LandingContent() {
 
         {/* CTA Button Block */}
         <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
-          <Link
-            href="/dashboard"
+          <a
+            href={slackOAuthUrl}
             className="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-sleekCyan to-neonPurple text-darkBg font-bold text-base hover:opacity-95 shadow-[0_0_30px_rgba(0,229,255,0.3)] transition-all duration-300 transform hover:-translate-y-0.5"
           >
             Enter Admin Dashboard
-          </Link>
+          </a>
           <a
             href={slackOAuthUrl}
             target="_blank"
