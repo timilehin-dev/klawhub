@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // ── 1. Create / locate a Supabase auth user ──────────────────────────
+  // ── 1. Ensure a Supabase auth user exists for this Slack user ─────────
   // Use the service-role key (server-only) to bypass RLS and create users
   // without requiring email verification.
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -36,23 +36,17 @@ export async function GET(req: NextRequest) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // Deterministic email so the same Slack user always maps to one auth user.
+  // Deterministic email / password so the same Slack user always maps to
+  // one Supabase auth user.
   const email = `slack-${slackUserId}@klawhub.internal`;
   const password = `klawhub-slack-${slackUserId}-${teamId}`;
 
-  // Try to find an existing user with this email.
-  const { data: existingUsers } = await admin.auth.admin.listUsers({
-    filters: email,
-  });
+  // ── 2. Try signing in first — if the user already exists this succeeds ─
+  let signInResult = await admin.auth.signInWithPassword({ email, password });
 
-  let userId: string;
-
-  const existing = existingUsers?.users?.find((u) => u.email === email);
-  if (existing) {
-    userId = existing.id;
-  } else {
-    // Create a new user via the Admin API (no email confirmation required).
-    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+  // If sign-in failed because the user doesn't exist, create them.
+  if (signInResult.error) {
+    const { error: createErr } = await admin.auth.admin.createUser({
       email,
       password,
       email_confirm: true, // auto-confirm so no verification email is sent
@@ -62,23 +56,21 @@ export async function GET(req: NextRequest) {
         workspace_name: teamName,
       },
     });
-    if (createErr || !created?.user) {
+
+    if (createErr) {
       console.error("Failed to create Supabase user for Slack user:", createErr);
       return NextResponse.redirect(
         requestUrl.origin + "/?install=denied&reason=user_creation_failed"
       );
     }
-    userId = created.user.id;
+
+    // Now sign in with the newly created user.
+    signInResult = await admin.auth.signInWithPassword({ email, password });
   }
 
-  // ── 2. Sign in as that user to obtain a session cookie ────────────────
-  // Use the deterministic password to sign in as the user.
-  const { data: signInData, error: signInErr } = await admin.auth.signInWithPassword({
-    email,
-    password,
-  });
-  if (signInErr || !signInData?.session) {
-    console.error("Failed to sign in for Slack user:", signInErr);
+  const session = signInResult.data?.session;
+  if (!session || signInResult.error) {
+    console.error("Failed to sign in for Slack user:", signInResult.error);
     return NextResponse.redirect(
       requestUrl.origin + "/?install=denied&reason=session_creation_failed"
     );
@@ -88,11 +80,9 @@ export async function GET(req: NextRequest) {
   const cookieStore = cookies();
   const browserSupabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
-  // setSession writes the access_token / refresh_token cookies that the
-  // middleware and client-side auth helpers read.
   await browserSupabase.auth.setSession({
-    access_token: signInData.session.access_token,
-    refresh_token: signInData.session.refresh_token,
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
   });
 
   // ── 4. Redirect to the dashboard ─────────────────────────────────────
