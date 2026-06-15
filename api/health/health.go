@@ -17,7 +17,7 @@ type HealthResponse struct {
 	Version   string    `json:"version"`
 }
 
-func HealthHandler(w http.ResponseWriter, r *http.Request) {
+func Handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -32,9 +32,4 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(res)
-}
-
-// Handler is the Vercel entrypoint
-func Handler(w http.ResponseWriter, r *http.Request) {
-	HealthHandler(w, r)
 }
