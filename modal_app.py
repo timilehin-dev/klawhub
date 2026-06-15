@@ -190,7 +190,7 @@ def _scan_code(code_str: str):
 #  19 Sandbox Functions
 # ═════════════════════════════════════════════════════════════════════════════
 
-@app.function(memory=STANDARD_RAM)
+@app.function(memory=STANDARD_RAM, secrets=[klawhub_secret])
 def run_python_script(code: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     """
     Runs a Python script in a sandboxed namespace.
@@ -212,7 +212,7 @@ def run_python_script(code: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-@app.function(memory=STANDARD_RAM)
+@app.function(memory=STANDARD_RAM, secrets=[klawhub_secret])
 def run_browser_task(instructions: str, url: str) -> str:
     """
     Runs browser automation using Playwright connected to the Lightpanda CDP server.

@@ -3,11 +3,11 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
- * Supabase Auth Middleware
+ * Supabase Auth Middleware — lives at project root.
  *
  * Protects all /dashboard/* routes by verifying the Supabase session.
- * Unauthenticated users are redirected to the landing page with a reason param.
- * The session is also refreshed on every request to keep it alive.
+ * Unauthenticated users are redirected to the landing page.
+ * The session is refreshed on every request to keep it alive.
  */
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();

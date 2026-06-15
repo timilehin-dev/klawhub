@@ -24,7 +24,7 @@ from src.core.tools.skill_runner import run_sandbox_function
 
 @inngest_client.create_function(
     fn_id="execute-workflow",
-    trigger=inngest.Trigger(event="workflow/trigger"),
+    trigger=inngest.TriggerEvent(event="workflow/trigger"),
 )
 async def execute_workflow(ctx: inngest.Context, step: inngest.Step):
     """Runs a workflow's steps sequentially when triggered."""

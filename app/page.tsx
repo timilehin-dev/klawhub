@@ -1,12 +1,42 @@
 "use client";
 
-import React from "react";
+import React, { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Terminal, Shield, Cpu, RefreshCw, Layers } from "lucide-react";
 
-export default function LandingPage() {
+const SLACK_CLIENT_ID = process.env.NEXT_PUBLIC_SLACK_CLIENT_ID || "";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://klawhub.xyz";
+
+function LandingContent() {
+  const searchParams = useSearchParams();
+  const [installStatus, setInstallStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    const install = searchParams.get("install");
+    const reason = searchParams.get("reason");
+    if (install === "success") {
+      setInstallStatus("✅ Slack installed successfully! Redirecting to dashboard...");
+    } else if (install === "denied") {
+      setInstallStatus(`❌ Slack installation failed. Reason: ${reason || "Unknown"}`);
+    } else if (reason === "unauthenticated") {
+      setInstallStatus("⚠️ Please log in to access the dashboard.");
+    }
+  }, [searchParams]);
+
+  const slackOAuthUrl = SLACK_CLIENT_ID
+    ? `https://slack.com/oauth/v2/authorize?client_id=${SLACK_CLIENT_ID}&scope=chat:write,commands,channels:history,channels:read,files:read,files:write,im:history,im:read,im:write,users:read,users:read.email&redirect_uri=${encodeURIComponent(APP_URL + "/api/oauth")}`
+    : "https://slack.com/oauth/v2/authorize";
+
   return (
     <div className="min-h-screen flex flex-col justify-between p-8 md:p-16 text-gray-200">
+      {/* Install status banner */}
+      {installStatus && (
+        <div className="fixed top-0 left-0 right-0 z-50 p-4 text-center text-sm font-medium bg-sleekCyan/10 border-b border-sleekCyan/20 text-sleekCyan">
+          {installStatus}
+        </div>
+      )}
+
       {/* Header navbar */}
       <header className="flex justify-between items-center z-10">
         <div className="flex items-center gap-3">
@@ -49,12 +79,11 @@ export default function LandingPage() {
             Enter Admin Dashboard
           </Link>
           <a
-            href="https://slack.com/oauth/v2/authorize"
+            href={slackOAuthUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="w-full sm:w-auto px-8 py-4 rounded-xl bg-glassPanel hover:bg-white/10 border border-glassBorder transition-all duration-200 font-semibold text-base flex items-center justify-center gap-3"
           >
-            {/* Slack SVG Icon */}
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523 2.528 2.528 0 0 1-2.522-2.523 2.528 2.528 0 0 1 2.522-2.52h2.52v2.52zm1.261 0a2.528 2.528 0 0 1 2.52-2.52h5.043a2.528 2.528 0 0 1 2.522 2.52v5.043a2.528 2.528 0 0 1-2.522 2.52H8.823a2.528 2.528 0 0 1-2.52-2.52v-5.043zM8.823 5.043a2.528 2.528 0 0 1 2.52-2.52 2.528 2.528 0 0 1 2.522 2.52v2.52h-2.522a2.528 2.528 0 0 1-2.52-2.52zm0 1.261a2.528 2.528 0 0 1 2.52 2.52v5.043a2.528 2.528 0 0 1-2.522 2.52H3.78a2.528 2.528 0 0 1-2.52-2.52V8.824a2.528 2.528 0 0 1 2.52-2.52h5.043zm10.135 3.78a2.528 2.528 0 0 1 2.522-2.52 2.528 2.528 0 0 1 2.52 2.52v2.52h-2.52a2.528 2.528 0 0 1-2.522-2.52zm-1.262 0a2.528 2.528 0 0 1-2.52 2.52h-5.043a2.528 2.528 0 0 1-2.522-2.52V5.043a2.528 2.528 0 0 1 2.522-2.52h5.043a2.528 2.528 0 0 1 2.52 2.52v5.043zm-3.78 10.135a2.528 2.528 0 0 1-2.52 2.522 2.528 2.528 0 0 1-2.522-2.522v-2.52h2.522a2.528 2.528 0 0 1 2.52 2.52zm0-1.262a2.528 2.528 0 0 1-2.52-2.52v-5.043a2.528 2.528 0 0 1 2.522-2.52h5.043a2.528 2.528 0 0 1 2.52 2.52v5.043h-5.043z"/>
             </svg>
@@ -82,15 +111,23 @@ export default function LandingPage() {
         </div>
         <div className="glass-panel p-6 rounded-2xl space-y-3">
           <Layers className="w-8 h-8 text-sleekCyan" />
-          <h3 className="font-bold text-lg">Mit-Licensed Stack</h3>
-          <p className="text-gray-400 text-sm">MIT document processing with pdfplumber, WeasyPrint, and Pandoc.</p>
+          <h3 className="font-bold text-lg">Google & GitHub</h3>
+          <p className="text-gray-400 text-sm">Connect Google Workspace and GitHub via real OAuth for calendar, drive, and repos.</p>
         </div>
       </section>
 
       {/* Footer */}
       <footer className="text-center text-xs text-gray-500 pt-8 z-10">
-        © 2026 KlawHub Inc. All rights reserved. Deployed under MIT License.
+        © 2026 KlawHub Inc. All rights reserved.
       </footer>
     </div>
+  );
+}
+
+export default function LandingPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p className="text-gray-400">Loading...</p></div>}>
+      <LandingContent />
+    </Suspense>
   );
 }

@@ -1,0 +1,84 @@
+diff --git a/api/inngest_handler.py b/api/inngest_handler.py
+index a2d3e4f..b5c6d7e 100644
+--- a/api/inngest_handler.py
++++ b/api/inngest_handler.py
+@@ -6,5 +6,13 @@
+ """
++import os
++import sys
++
++# Dynamically add the project root to sys.path so that 'src' imports work
++root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++if root_dir not in sys.path:
++    sys.path.insert(0, root_dir)
++
+ from contextlib import asynccontextmanager
+ from fastapi import FastAPI
+ from inngest.fast_api import serve
+diff --git a/src/workflows/message_handler.py b/src/workflows/message_handler.py
+index a2d3e4f..b5c6d7e 100644
+--- a/src/workflows/message_handler.py
++++ b/src/workflows/message_handler.py
+@@ -20,5 +20,5 @@
+ @inngest_client.create_function(
+     fn_id="handle-slack-message-event",
+-    trigger=inngest.Trigger(event="slack/event"),
++    trigger=inngest.TriggerEvent(event="slack/event"),
+     retries=2,
+     concurrency=50,
+ )
+@@ -118,5 +118,5 @@
+ @inngest_client.create_function(
+     fn_id="handle-slack-slash-command",
+-    trigger=inngest.Trigger(event="slack/command"),
++    trigger=inngest.TriggerEvent(event="slack/command"),
+     retries=2,
+     concurrency=50,
+ )
+diff --git a/src/workflows/proactive_loop.py b/src/workflows/proactive_loop.py
+index a2d3e4f..b5c6d7e 100644
+--- a/src/workflows/proactive_loop.py
++++ b/src/workflows/proactive_loop.py
+@@ -18,5 +18,5 @@
+ @inngest_client.create_function(
+     fn_id="proactive-schedule-loop",
+-    trigger=inngest.Trigger(cron="*/15 * * * *"),  # Every 15 minutes
++    trigger=inngest.TriggerCron(cron="*/15 * * * *"),  # Every 15 minutes
+ )
+diff --git a/src/workflows/skill_installer.py b/src/workflows/skill_installer.py
+index a2d3e4f..b5c6d7e 100644
+--- a/src/workflows/skill_installer.py
++++ b/src/workflows/skill_installer.py
+@@ -19,5 +19,5 @@
+ @inngest_client.create_function(
+     fn_id="install-skill-from-github",
+-    trigger=inngest.Trigger(event="skill/install"),
++    trigger=inngest.TriggerEvent(event="skill/install"),
+ )
+diff --git a/src/workflows/workflow_executor.py b/src/workflows/workflow_executor.py
+index a2d3e4f..b5c6d7e 100644
+--- a/src/workflows/workflow_executor.py
++++ b/src/workflows/workflow_executor.py
+@@ -25,5 +25,5 @@
+ @inngest_client.create_function(
+     fn_id="execute-workflow",
+-    trigger=inngest.Trigger(event="workflow/trigger"),
++    trigger=inngest.TriggerEvent(event="workflow/trigger"),
+ )
+ diff --git a/src/workflows/workspace_installer.py b/src/workflows/workspace_installer.py
+index a2d3e4f..b5c6d7e 100644
+--- a/src/workflows/workspace_installer.py
++++ b/src/workflows/workspace_installer.py
+@@ -13,5 +13,5 @@
+ @inngest_client.create_function(
+     fn_id="handle-workspace-install",
+-    trigger=inngest.Trigger(event="workspace/install"),
++    trigger=inngest.TriggerEvent(event="workspace/install"),
+ )
+diff --git a/tests/conftest.py b/tests/conftest.py
+index a2d3e4f..b5c6d7e 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -4,3 +4,0 @@
+-if not hasattr(inngest, "Trigger"):
+-    inngest.Trigger = lambda *args, **kwargs: inngest.TriggerCron(*args, **kwargs) if "cron" in kwargs else inngest.TriggerEvent(*args, **kwargs)

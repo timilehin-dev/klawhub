@@ -5,46 +5,51 @@ import {
   Play, CheckCircle, AlertTriangle, Cpu, 
   BarChart2, Zap, ArrowRight, RefreshCw, Terminal 
 } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
-
-// Initialize Supabase Client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://sabeiuxrflkndpahuczf.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { useAuth } from "./auth-provider";
+import { supabase } from "@/lib/supabase";
 
 export default function DashboardOverview() {
+  const { session, workspaceId, loading: authLoading } = useAuth();
+
   const [stats, setStats] = useState({
     activeRuns: 0,
     successRate: 100,
     totalTokens: 0,
     skillsCount: 6,
     monthlyLimit: 100,
-    monthlyUsage: 0
+    monthlyUsage: 0,
   });
   
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
-
   const [loading, setLoading] = useState(false);
 
   const fetchRealtimeStats = async () => {
+    if (!workspaceId) return;
     setLoading(true);
     try {
-      // Fetch skills count
+      // Fetch skills count for this workspace
       const { count: skillsCount } = await supabase
         .from("skills")
-        .select("*", { count: 'exact', head: true });
+        .select("*", { count: 'exact', head: true })
+        .eq("workspace_id", workspaceId);
         
-      // Fetch logs
+      // Fetch recent logs for this workspace
       const { data: logs } = await supabase
         .from("usage_logs")
         .select("*")
+        .eq("workspace_id", workspaceId)
         .order("created_at", { ascending: false })
         .limit(10);
 
-      // Fetch all logs to calculate metrics
+      // Fetch all logs for this workspace to calculate metrics
       const { data: allLogs } = await supabase
         .from("usage_logs")
-        .select("status, total_tokens");
+        .select("status, total_tokens, created_at")
+        .eq("workspace_id", workspaceId);
+
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
 
       let successRate = 100.0;
       let totalTokens = 0;
@@ -54,7 +59,12 @@ export default function DashboardOverview() {
         const successCount = allLogs.filter(l => l.status === "success" || l.status === "completed").length;
         successRate = parseFloat(((successCount / allLogs.length) * 100).toFixed(1));
         totalTokens = allLogs.reduce((acc, curr) => acc + (curr.total_tokens || 0), 0);
-        monthlyUsage = allLogs.length;
+
+        // Filter monthly usage by date
+        monthlyUsage = allLogs.filter(l => {
+          const d = new Date(l.created_at);
+          return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+        }).length;
       }
 
       setStats({
@@ -63,11 +73,11 @@ export default function DashboardOverview() {
         totalTokens,
         skillsCount: skillsCount || 6,
         monthlyLimit: 100,
-        monthlyUsage
+        monthlyUsage,
       });
       
       if (logs) {
-        setRecentLogs(logs.map((l, i) => ({
+        setRecentLogs(logs.map((l: any, i: number) => ({
           id: l.id || i,
           agent: l.agent_name || "General",
           action: l.sandbox_function || "Executed Sandbox task",
@@ -84,8 +94,29 @@ export default function DashboardOverview() {
   };
 
   useEffect(() => {
-    fetchRealtimeStats();
-  }, []);
+    if (!authLoading && workspaceId) {
+      fetchRealtimeStats();
+    }
+  }, [authLoading, workspaceId]);
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-pulse text-gray-500">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!workspaceId) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center space-y-2">
+          <AlertTriangle className="w-8 h-8 text-yellow-500 mx-auto" />
+          <p className="text-gray-400 text-sm">No workspace connected. Install KlawHub via Slack first.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -148,7 +179,6 @@ export default function DashboardOverview() {
 
       {/* Main Grid: Telemetry logs */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent runs audit logs */}
         <div className="glass-panel p-6 rounded-2xl lg:col-span-3 space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-bold flex items-center gap-2">
@@ -178,13 +208,17 @@ export default function DashboardOverview() {
                     </td>
                   </tr>
                 ) : (
-                  recentLogs.map((log, i) => (
+                  recentLogs.map((log: any, i: number) => (
                     <tr key={log.id} className="hover:bg-white/5 transition-colors duration-150">
                       <td className="py-3 px-4 font-semibold text-sleekCyan">{log.agent}</td>
                       <td className="py-3 px-4 text-gray-300">{log.action}</td>
                       <td className="py-3 px-4 text-gray-400 text-xs">{log.skill}</td>
                       <td className="py-3 px-4">
-                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-glowGreen/10 border border-glowGreen/20 text-glowGreen font-medium">
+                        <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${
+                          log.status === "success" ? "bg-glowGreen/10 border border-glowGreen/20 text-glowGreen"
+                          : log.status === "error" ? "bg-red-400/10 border border-red-500/20 text-red-400"
+                          : "bg-glowGreen/10 border border-glowGreen/20 text-glowGreen"
+                        }`}>
                           {log.status}
                         </span>
                       </td>

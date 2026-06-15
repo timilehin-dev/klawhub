@@ -5,11 +5,8 @@ import {
   GitFork, GitMerge, Plus, Trash2, Play, 
   Settings, CheckCircle, Info, Edit3 
 } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://sabeiuxrflkndpahuczf.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { useAuth } from "../auth-provider";
+import { supabase } from "@/lib/supabase";
 
 interface Workflow {
   id: string;
@@ -22,6 +19,7 @@ interface Workflow {
 }
 
 export default function WorkflowsDesigner() {
+  const { workspaceId } = useAuth();
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -36,11 +34,13 @@ export default function WorkflowsDesigner() {
   const [errorMsg, setErrorMsg] = useState("");
 
   const fetchWorkflows = async () => {
+    if (!workspaceId) return;
     setLoading(true);
     try {
       const { data } = await supabase
         .from("workflows")
         .select("*")
+        .eq("workspace_id", workspaceId)
         .order("created_at", { ascending: false });
       if (data) {
         setWorkflows(data as Workflow[]);
@@ -74,7 +74,7 @@ export default function WorkflowsDesigner() {
           trigger_config: { filter: "all" },
           steps: parsedSteps,
           is_active: true,
-          workspace_id: "b3196921-28c3-4cc9-964f-fa775f5b3e6b" // Mock uuid
+          workspace_id: workspaceId,
         }]);
 
       if (error) throw error;
@@ -122,8 +122,8 @@ export default function WorkflowsDesigner() {
   };
 
   useEffect(() => {
-    fetchWorkflows();
-  }, []);
+    if (workspaceId) fetchWorkflows();
+  }, [workspaceId]);
 
   return (
     <div className="space-y-8">

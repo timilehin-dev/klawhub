@@ -18,7 +18,7 @@ from src.db.operations import execute_statement
 
 @inngest_client.create_function(
     fn_id="install-skill-from-github",
-    trigger=inngest.Trigger(event="skill/install"),
+    trigger=inngest.TriggerEvent(event="skill/install"),
 )
 async def install_skill_from_github(ctx: inngest.Context, step: inngest.Step):
     """Downloads, verifies, and installs a custom skill from GitHub."""

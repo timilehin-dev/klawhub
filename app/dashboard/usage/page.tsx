@@ -2,23 +2,23 @@
 
 import React, { useEffect, useState } from "react";
 import { BarChart2, Activity, Zap, ShieldCheck } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://sabeiuxrflkndpahuczf.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { useAuth } from "../auth-provider";
+import { supabase } from "@/lib/supabase";
 
 export default function UsageTelemetry() {
-  const [totalTokens, setTotalTokens] = useState(142050);
-  const [promptTokens, setPromptTokens] = useState(105400);
-  const [completionTokens, setCompletionTokens] = useState(36650);
-  const [latency, setLatency] = useState(820); // Average run latency ms
+  const { workspaceId } = useAuth();
+  const [totalTokens, setTotalTokens] = useState(0);
+  const [promptTokens, setPromptTokens] = useState(0);
+  const [completionTokens, setCompletionTokens] = useState(0);
+  const [latency, setLatency] = useState(0);
 
   const fetchUsageLogs = async () => {
+    if (!workspaceId) return;
     try {
       const { data } = await supabase
         .from("usage_logs")
-        .select("prompt_tokens, completion_tokens, latency_ms");
+        .select("prompt_tokens, completion_tokens, latency_ms")
+        .eq("workspace_id", workspaceId);
         
       if (data && data.length > 0) {
         let p_sum = 0;
@@ -40,8 +40,8 @@ export default function UsageTelemetry() {
   };
 
   useEffect(() => {
-    fetchUsageLogs();
-  }, []);
+    if (workspaceId) fetchUsageLogs();
+  }, [workspaceId]);
 
   return (
     <div className="space-y-8">

@@ -5,6 +5,8 @@ Processes `slack/event` and `slack/command` events dispatched by the Go gateway.
 Uses the shared inngest_client from `src.core.inngest_client`.
 """
 import time
+import json
+from src.config import settings
 from src.core.inngest_client import inngest_client
 from src.db.operations import (
     get_workspace_by_slack_team_id,
@@ -19,7 +21,7 @@ import inngest
 
 @inngest_client.create_function(
     fn_id="handle-slack-message-event",
-    trigger=inngest.Trigger(event="slack/event"),
+    trigger=inngest.TriggerEvent(event="slack/event"),
     retries=2,
     concurrency=50,
 )
@@ -72,6 +74,15 @@ async def handle_slack_message_event(ctx: inngest.Context, step: inngest.Step):
         result = await agent_graph.ainvoke(initial_state)
         latency_ms = int((time.monotonic() - t0) * 1000)
 
+        # Compute HMAC signature for agent state integrity
+        import hashlib, hmac as hmac_mod
+        state_payload_str = json.dumps({k: str(v)[:500] for k, v in result.items() if k != "messages"}, sort_keys=True)
+        computed_hmac = hmac_mod.new(
+            settings.HMAC_SECRET.encode() if settings.HMAC_SECRET else b"default",
+            state_payload_str.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
         # Persist agent state for crash recovery
         await save_agent_state(
             workspace_id=workspace_id,
@@ -79,18 +90,22 @@ async def handle_slack_message_event(ctx: inngest.Context, step: inngest.Step):
             channel_id=channel_id,
             agent_name="general",
             state_payload={k: v for k, v in result.items() if k != "messages"},
-            hmac_sig="",
+            hmac_sig=computed_hmac,
         )
 
+        # Extract token usage from LLM response (if available in result)
+        prompt_tokens = result.get("prompt_tokens", 0)
+        completion_tokens = result.get("completion_tokens", 0)
+        
         # Log usage telemetry
         await log_usage(
             workspace_id=workspace_id,
             slack_user_id=inner_event.get("user"),
             agent_name="general",
-            skill_used=None,
+            skill_used=result.get("skill_used"),
             sandbox_function=None,
-            prompt_tokens=0,  # TODO: track from llm_client
-            completion_tokens=0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             latency_ms=latency_ms,
             status="success" if result.get("final_response") else "no_response",
         )
@@ -117,7 +132,7 @@ async def handle_slack_message_event(ctx: inngest.Context, step: inngest.Step):
 
 @inngest_client.create_function(
     fn_id="handle-slack-slash-command",
-    trigger=inngest.Trigger(event="slack/command"),
+    trigger=inngest.TriggerEvent(event="slack/command"),
     retries=2,
     concurrency=50,
 )

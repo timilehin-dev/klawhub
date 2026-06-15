@@ -12,7 +12,7 @@ from src.db.operations import create_workspace, create_workspace_member, seed_bu
 
 @inngest_client.create_function(
     fn_id="handle-workspace-install",
-    trigger=inngest.Trigger(event="workspace/install"),
+    trigger=inngest.TriggerEvent(event="workspace/install"),
 )
 async def handle_workspace_install(ctx: inngest.Context, step: inngest.Step):
     """Encrypts Slack bot token and registers the workspace in Supabase."""

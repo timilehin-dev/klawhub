@@ -5,11 +5,8 @@ import {
   Calendar, Clock, Plus, Trash2, ToggleLeft, 
   ToggleRight, Info, Check, AlertTriangle 
 } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://sabeiuxrflkndpahuczf.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { useAuth } from "../auth-provider";
+import { supabase } from "@/lib/supabase";
 
 interface Schedule {
   id: string;
@@ -22,6 +19,7 @@ interface Schedule {
 }
 
 export default function SchedulesManager() {
+  const { workspaceId } = useAuth();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -35,11 +33,13 @@ export default function SchedulesManager() {
   const [errorMsg, setErrorMsg] = useState("");
 
   const fetchSchedules = async () => {
+    if (!workspaceId) return;
     setLoading(true);
     try {
       const { data } = await supabase
         .from("schedules")
         .select("*")
+        .eq("workspace_id", workspaceId)
         .order("created_at", { ascending: false });
         
       if (data) {
@@ -72,7 +72,7 @@ export default function SchedulesManager() {
           channel_id: channel,
           payload,
           is_active: true,
-          workspace_id: "b3196921-28c3-4cc9-964f-fa775f5b3e6b" // Mock uuid
+          workspace_id: workspaceId,
         }])
         .select();
 
@@ -115,8 +115,8 @@ export default function SchedulesManager() {
   };
 
   useEffect(() => {
-    fetchSchedules();
-  }, []);
+    if (workspaceId) fetchSchedules();
+  }, [workspaceId]);
 
   return (
     <div className="space-y-8">

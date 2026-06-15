@@ -5,11 +5,8 @@ import {
   CheckSquare, Plus, Trash2, Calendar, Play, 
   Pause, Check, AlertCircle, RefreshCw 
 } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://sabeiuxrflkndpahuczf.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { useAuth } from "../auth-provider";
+import { supabase } from "@/lib/supabase";
 
 interface Task {
   id: string;
@@ -23,6 +20,7 @@ interface Task {
 }
 
 export default function WorkspaceTasks() {
+  const { workspaceId } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -35,11 +33,13 @@ export default function WorkspaceTasks() {
   const [errorMsg, setErrorMsg] = useState("");
 
   const fetchTasks = async () => {
+    if (!workspaceId) return;
     setLoading(true);
     try {
       const { data } = await supabase
         .from("tasks")
         .select("*")
+        .eq("workspace_id", workspaceId)
         .order("created_at", { ascending: false });
       if (data) {
         setTasks(data as Task[]);
@@ -69,7 +69,7 @@ export default function WorkspaceTasks() {
           priority,
           status: "pending",
           due_at: dueAt ? new Date(dueAt).toISOString() : null,
-          workspace_id: "b3196921-28c3-4cc9-964f-fa775f5b3e6b" // Mock uuid
+          workspace_id: workspaceId,
         }]);
 
       if (error) throw error;
@@ -111,8 +111,8 @@ export default function WorkspaceTasks() {
   };
 
   useEffect(() => {
-    fetchTasks();
-  }, []);
+    if (workspaceId) fetchTasks();
+  }, [workspaceId]);
 
   const getPriorityColor = (p: string) => {
     if (p === "high") return "text-red-400 bg-red-400/10 border-red-500/20";

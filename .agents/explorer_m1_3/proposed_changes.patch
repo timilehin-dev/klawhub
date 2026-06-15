@@ -1,0 +1,85 @@
+diff --git a/vercel.json b/vercel.json
+index 5c30fb5..c12a7d4 100644
+--- a/vercel.json
++++ b/vercel.json
+@@ -6,7 +6,7 @@
+       "use": "@vercel/go"
+     },
+     {
+-      "src": "api/inngest.py",
++      "src": "api/inngest_handler.py",
+       "use": "@vercel/python"
+     },
+     {
+@@ -20,7 +20,7 @@
+     { "src": "/api/commands","dest": "/api/commands/commands.go"},
+     { "src": "/api/oauth",   "dest": "/api/oauth/oauth.go"   },
+     { "src": "/api/health",  "dest": "/api/health/health.go"  },
+-    { "src": "/api/inngest", "dest": "/api/inngest.py" },
++    { "src": "/api/inngest", "dest": "/api/inngest_handler.py" },
+     { "src": "/(.*)",        "dest": "/$1"              }
+   ]
+ }
+diff --git a/verify_all_27.py b/verify_all_27.py
+index a249d97..b8cd7ef 100644
+--- a/verify_all_27.py
++++ b/verify_all_27.py
+@@ -44,10 +44,10 @@ for wf in ["message_handler", "proactive_loop", "skill_installer", "workflow_ex
+     else:
+         fail("Bug#1-2", "%s does NOT import from shared inngest_client" % wf)
+ 
+-if file_contains("api/inngest.py", "from src.core.inngest_client import inngest_client"):
+-    ok("Bug#1-2: api/inngest.py uses shared inngest_client")
++if file_contains("api/inngest_handler.py", "from src.core.inngest_client import inngest_client"):
++    ok("Bug#1-2: api/inngest_handler.py uses shared inngest_client")
+ else:
+-    fail("Bug#1-2", "api/inngest.py still uses its own client")
++    fail("Bug#1-2", "api/inngest_handler.py still uses its own client")
+ 
+ # ---------------------------------------------------------------------------
+ # BUG #3: No asyncpg connection pooling
+@@ -62,10 +62,10 @@ if file_contains("src/db/operations.py", "pool.acquire()") and file_not_contains
+ else:
+     fail("Bug#3", "db/operations.py still calls asyncpg.connect() directly")
+ 
+-if file_contains("api/inngest.py", "init_db_pool") and file_contains("api/inngest.py", "close_db_pool"):
+-    ok("Bug#3: api/inngest.py initializes pool in lifespan handler")
++if file_contains("api/inngest_handler.py", "init_db_pool") and file_contains("api/inngest_handler.py", "close_db_pool"):
++    ok("Bug#3: api/inngest_handler.py initializes pool in lifespan handler")
+ else:
+-    fail("Bug#3", "api/inngest.py missing pool init/close in lifespan")
++    fail("Bug#3", "api/inngest_handler.py missing pool init/close in lifespan")
+ 
+ # ---------------------------------------------------------------------------
+ # BUG #4: run_python_script has no AST gate
+@@ -201,15 +201,15 @@ if file_exists("api/oauth/oauth.go") and file_contains("api/oauth/oauth.go", "oa
+ else:
+     fail("Missing#16", "api/oauth/oauth.go missing or incomplete")
+ 
+-if file_contains("api/inngest.py", "handle_workspace_install"):
+-    ok("Missing#17: workspace installer registered in api/inngest.py")
++if file_contains("api/inngest_handler.py", "handle_workspace_install"):
++    ok("Missing#17: workspace installer registered in api/inngest_handler.py")
+ else:
+-    fail("Missing#17", "handle_workspace_install not registered in api/inngest.py")
++    fail("Missing#17", "handle_workspace_install not registered in api/inngest_handler.py")
+ 
+-if file_contains("api/inngest.py", "execute_workflow"):
+-    ok("Missing#19: execute_workflow registered in api/inngest.py serve()")
++if file_contains("api/inngest_handler.py", "execute_workflow"):
++    ok("Missing#19: execute_workflow registered in api/inngest_handler.py serve()")
+ else:
+-    fail("Missing#19", "execute_workflow not registered in api/inngest.py")
++    fail("Missing#19", "execute_workflow not registered in api/inngest_handler.py")
+ 
+ # ---------------------------------------------------------------------------
+ # MISSING #18: Lightpanda CDP sandbox execution
+@@ -250,7 +250,7 @@ for pkg in ["asyncpg", "tenacity", "modal>=", "tavily-python", "langchain-core",
+ # ---------------------------------------------------------------------------
+ # Rec#21: Python packages clean import structures
+ # ---------------------------------------------------------------------------
+-files = glob.glob("src/**/*.py", recursive=True) + ["modal_app.py", "api/inngest.py"]
++files = glob.glob("src/**/*.py", recursive=True) + ["modal_app.py", "api/inngest_handler.py"]
+ compile_failed = False
+ for f in files:
+     try:

@@ -32,6 +32,7 @@ from src.core.tools.skill_creator import create_skill_tool
 from src.core.tools.google_tools import (
     list_calendar_events_tool, create_calendar_event_tool,
     list_drive_files_tool,
+    list_gmail_messages_tool, send_gmail_message_tool,
 )
 from src.core.tools.github_tools import (
     list_repos_tool, create_github_issue_tool,
@@ -71,6 +72,8 @@ TOOLS = {
     "list_calendar_events": list_calendar_events_tool,
     "create_calendar_event": create_calendar_event_tool,
     "list_drive_files": list_drive_files_tool,
+    "list_gmail_messages": list_gmail_messages_tool,
+    "send_gmail_message": send_gmail_message_tool,
     # GitHub
     "list_repos": list_repos_tool,
     "create_github_issue": create_github_issue_tool,
@@ -131,6 +134,8 @@ To call a tool, respond with a JSON block inside triple-backtick markdown:
 - list_calendar_events(workspace_id, max_results?)
 - create_calendar_event(workspace_id, summary, start_datetime, end_datetime, description?)
 - list_drive_files(workspace_id, query?)
+- list_gmail_messages(workspace_id, max_results?, query?)
+- send_gmail_message(workspace_id, to, subject, body)
 
 ### GitHub
 - list_repos(workspace_id)
@@ -213,12 +218,13 @@ async def general_node(state: AgentState) -> AgentState:
                     continue
 
                 # Auto-inject workspace_id if missing
-                try:
-                    fn = TOOLS[tool_name]
-                    if "workspace_id" in fn.__code__.co_varnames and "workspace_id" not in tool_args:
+                # Check all parameters for workspace_id, including positional args
+                fn = TOOLS[tool_name]
+                if "workspace_id" not in tool_args:
+                    import inspect
+                    sig = inspect.signature(fn)
+                    if "workspace_id" in sig.parameters:
                         tool_args["workspace_id"] = state["workspace_id"]
-                except AttributeError:
-                    pass
 
                 state["logs"].append(f"→ Calling tool: {tool_name}")
                 tool_result = await TOOLS[tool_name](**tool_args)

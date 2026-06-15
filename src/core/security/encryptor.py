@@ -46,7 +46,9 @@ class Encryptor:
         else:
             plaintext = str(data).encode("utf-8")
 
-        cipher = AES.new(self.key, AES.MODE_GCM)
+        import secrets
+        nonce = secrets.token_bytes(12)
+        cipher = AES.new(self.key, AES.MODE_GCM, nonce=nonce)
         ciphertext, tag = cipher.encrypt_and_digest(plaintext)
         payload = cipher.nonce + tag + ciphertext
         return base64.b64encode(payload).decode("utf-8")

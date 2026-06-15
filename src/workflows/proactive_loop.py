@@ -17,7 +17,7 @@ import inngest
 
 @inngest_client.create_function(
     fn_id="proactive-schedule-loop",
-    trigger=inngest.Trigger(cron="*/15 * * * *"),  # Every 15 minutes
+    trigger=inngest.TriggerCron(cron="*/15 * * * *"),  # Every 15 minutes
 )
 async def proactive_schedule_loop(ctx: inngest.Context, step: inngest.Step):
     """Checks for due schedules, reminders, and silence detectors and fires them."""

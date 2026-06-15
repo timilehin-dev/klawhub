@@ -1,14 +1,16 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Settings, Shield, User, Globe, GitPullRequest, Calendar, Check, RefreshCw } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
+import { Settings, Shield, User, Globe, GitPullRequest, Calendar, Check, RefreshCw, AlertTriangle } from "lucide-react";
+import { useAuth } from "../auth-provider";
+import { supabase } from "@/lib/supabase";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://sabeiuxrflkndpahuczf.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://klawhub.xyz";
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+const GITHUB_CLIENT_ID = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || "";
 
 export default function WorkspaceSettings() {
+  const { session, workspaceId, loading: authLoading } = useAuth();
   const [personaName, setPersonaName] = useState("Klaw");
   const [personaPrompt, setPersonaPrompt] = useState(
     "You are KlawHub, a self-evolving, Slack-first AI coworker. You solve tasks autonomously, run sandbox executions safely, and write reports."
@@ -23,11 +25,12 @@ export default function WorkspaceSettings() {
   });
 
   const loadIntegrations = async () => {
+    if (!workspaceId) return;
     try {
       const { data } = await supabase
         .from("integrations")
         .select("*")
-        .eq("workspace_id", "b3196921-28c3-4cc9-964f-fa775f5b3e6b");
+        .eq("workspace_id", workspaceId);
         
       const newIntegrations = {
         google: { connected: false, email: "" },
@@ -35,11 +38,11 @@ export default function WorkspaceSettings() {
       };
       
       if (data) {
-        data.forEach(item => {
+        data.forEach((item: any) => {
           if (item.provider === "google") {
-            newIntegrations.google = { connected: true, email: item.metadata?.email || "developer@organization.org" };
+            newIntegrations.google = { connected: true, email: item.email || "" };
           } else if (item.provider === "github") {
-            newIntegrations.github = { connected: true, email: item.metadata?.email || "git-dev@organization.org" };
+            newIntegrations.github = { connected: true, email: item.email || "" };
           }
         });
       }
@@ -49,33 +52,54 @@ export default function WorkspaceSettings() {
     }
   };
 
-  const handleConnect = async (provider: string) => {
-    const email = window.prompt(`Enter your ${provider} account email to connect:`);
-    if (!email) return;
-    
-    try {
-      const { error } = await supabase
-        .from("integrations")
-        .insert([{
-          workspace_id: "b3196921-28c3-4cc9-964f-fa775f5b3e6b",
-          provider: provider,
-          access_token: "mock-token",
-          metadata: { email: email }
-        }]);
-      if (error) throw error;
-      loadIntegrations();
-    } catch (e) {
-      console.log("Connect failed:", e);
+  const handleGoogleConnect = () => {
+    if (!GOOGLE_CLIENT_ID) {
+      setMessage("Google Client ID not configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID to env.");
+      return;
     }
+    const scopes = [
+      "https://www.googleapis.com/auth/calendar",
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/drive.file",
+    ].join(" ");
+    
+    const redirectUri = `${APP_URL}/api/oauth/google/callback`;
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: scopes,
+      access_type: "offline",
+      prompt: "consent",
+      state: workspaceId || "",
+    });
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  };
+
+  const handleGitHubConnect = () => {
+    if (!GITHUB_CLIENT_ID) {
+      setMessage("GitHub Client ID not configured. Add NEXT_PUBLIC_GITHUB_CLIENT_ID to env.");
+      return;
+    }
+    const redirectUri = `${APP_URL}/api/oauth/github/callback`;
+    const params = new URLSearchParams({
+      client_id: GITHUB_CLIENT_ID,
+      redirect_uri: redirectUri,
+      scope: "repo user",
+      state: workspaceId || "",
+    });
+    window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;
   };
 
   const handleDisconnect = async (provider: string) => {
+    if (!workspaceId) return;
     if (!confirm(`Are you sure you want to disconnect ${provider}?`)) return;
     try {
       const { error } = await supabase
         .from("integrations")
         .delete()
-        .eq("workspace_id", "b3196921-28c3-4cc9-964f-fa775f5b3e6b")
+        .eq("workspace_id", workspaceId)
         .eq("provider", provider);
       if (error) throw error;
       loadIntegrations();
@@ -85,14 +109,16 @@ export default function WorkspaceSettings() {
   };
 
   const loadSettings = async () => {
+    if (!workspaceId) return;
     try {
       const { data } = await supabase
         .from("workspaces")
         .select("*")
+        .eq("id", workspaceId)
         .limit(1);
         
       if (data && data.length > 0) {
-        const w = data[0];
+        const w = data[0] as any;
         setPersonaName(w.persona_name || "Klaw");
         setPersonaPrompt(w.persona_prompt || "");
         if (w.whitelisted_channels) {
@@ -100,12 +126,13 @@ export default function WorkspaceSettings() {
         }
       }
     } catch (e) {
-      console.log("Could not load database settings, using fallbacks:", e);
+      console.log("Could not load database settings:", e);
     }
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!workspaceId) return;
     setLoading(true);
     setMessage("");
 
@@ -119,7 +146,7 @@ export default function WorkspaceSettings() {
           persona_prompt: personaPrompt,
           whitelisted_channels: channelList
         })
-        .eq("id", "b3196921-28c3-4cc9-964f-fa775f5b3e6b");
+        .eq("id", workspaceId);
 
       if (error) throw error;
       setMessage("Settings saved successfully!");
@@ -131,9 +158,26 @@ export default function WorkspaceSettings() {
   };
 
   useEffect(() => {
-    loadSettings();
-    loadIntegrations();
-  }, []);
+    if (!authLoading && workspaceId) {
+      loadSettings();
+      loadIntegrations();
+    }
+  }, [authLoading, workspaceId]);
+
+  if (authLoading) {
+    return <div className="flex items-center justify-center h-64"><div className="animate-pulse text-gray-500">Loading...</div></div>;
+  }
+
+  if (!workspaceId) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center space-y-2">
+          <AlertTriangle className="w-8 h-8 text-yellow-500 mx-auto" />
+          <p className="text-gray-400 text-sm">No workspace connected.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 max-w-4xl">
@@ -181,7 +225,11 @@ export default function WorkspaceSettings() {
           </div>
 
           {message && (
-            <p className="text-xs text-sleekCyan font-mono bg-sleekCyan/5 p-3 rounded-xl border border-sleekCyan/10">
+            <p className={`text-xs font-mono p-3 rounded-xl border ${
+              message.includes("success") 
+                ? "text-sleekCyan bg-sleekCyan/5 border-sleekCyan/10" 
+                : "text-red-400 bg-red-400/5 border-red-500/10"
+            }`}>
               {message}
             </p>
           )}
@@ -195,7 +243,7 @@ export default function WorkspaceSettings() {
           </button>
         </form>
 
-        {/* Right Info: OAuth Integrations */}
+        {/* Right: OAuth Integrations */}
         <div className="glass-panel p-6 rounded-2xl lg:col-span-1 space-y-6">
           <h3 className="font-bold flex items-center gap-2 text-neonPurple">
             <Shield className="w-4 h-4 text-neonPurple" /> Integrations OAuth
@@ -221,7 +269,7 @@ export default function WorkspaceSettings() {
               <p className="text-[11px] text-gray-400">
                 {integrations.google.connected 
                   ? `Connected as ${integrations.google.email}` 
-                  : "Calendar scheduling and Drive file operations enabled."}
+                  : "Calendar, Drive & Gmail access for scheduling and file operations."}
               </p>
               {integrations.google.connected ? (
                 <button 
@@ -232,10 +280,10 @@ export default function WorkspaceSettings() {
                 </button>
               ) : (
                 <button 
-                  onClick={() => handleConnect("google")}
+                  onClick={handleGoogleConnect}
                   className="w-full py-2 rounded-lg bg-sleekCyan text-darkBg font-bold text-xs hover:opacity-95"
                 >
-                  Connect Google
+                  Connect Google Workspace
                 </button>
               )}
             </div>
@@ -259,7 +307,7 @@ export default function WorkspaceSettings() {
               <p className="text-[11px] text-gray-400">
                 {integrations.github.connected 
                   ? `Connected as ${integrations.github.email}` 
-                  : "Connect to open Pull Requests and create issues autonomously."}
+                  : "Pull Requests, Issues, and repository management via OAuth."}
               </p>
               {integrations.github.connected ? (
                 <button 
@@ -270,8 +318,8 @@ export default function WorkspaceSettings() {
                 </button>
               ) : (
                 <button 
-                  onClick={() => handleConnect("github")}
-                  className="w-full py-2 rounded-lg bg-sleekCyan text-darkBg font-bold text-xs hover:opacity-95"
+                  onClick={handleGitHubConnect}
+                  className="w-full py-2 rounded-lg bg-neonPurple text-darkBg font-bold text-xs hover:opacity-95"
                 >
                   Connect GitHub
                 </button>

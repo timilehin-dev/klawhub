@@ -5,11 +5,8 @@ import {
   Cpu, CheckCircle2, XCircle, Plus, Info, 
   GitFork, Eye, Play, ShieldAlert, Sparkles 
 } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://sabeiuxrflkndpahuczf.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { useAuth } from "../auth-provider";
+import { supabase } from "@/lib/supabase";
 
 interface Skill {
   id: string;
@@ -33,6 +30,7 @@ const builtinSkills: Skill[] = [
 ];
 
 export default function SkillsCatalog() {
+  const { workspaceId } = useAuth();
   const [skills, setSkills] = useState<Skill[]>(builtinSkills);
   const [githubUrl, setGithubUrl] = useState("");
   const [showInstaller, setShowInstaller] = useState(false);
@@ -40,10 +38,12 @@ export default function SkillsCatalog() {
   const [selectedDoc, setSelectedDoc] = useState<Skill | null>(null);
 
   const fetchCustomSkills = async () => {
+    if (!workspaceId) return;
     try {
       const { data } = await supabase
         .from("skills")
         .select("*")
+        .eq("workspace_id", workspaceId)
         .order("created_at", { ascending: false });
         
       if (data && data.length > 0) {
@@ -69,7 +69,7 @@ export default function SkillsCatalog() {
         body: JSON.stringify({
           type: "skill_install",
           github_url: githubUrl,
-          workspace_id: "test-workspace"
+          workspace_id: workspaceId || "test-workspace"
         })
       });
       
