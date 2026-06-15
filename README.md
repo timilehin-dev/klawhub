@@ -48,11 +48,11 @@ Slack Workspace
 ```
 klawhub/
 ├── api/                   # Go serverless endpoints (Vercel)
-│   ├── events.go          # Slack Events API handler
-│   ├── actions.go         # Slack interactive actions
-│   ├── commands.go        # Slack slash commands
-│   ├── oauth.go           # Slack OAuth installation flow
-│   ├── health.go          # Health check endpoint
+│   ├── events/events.go   # Slack Events API handler
+│   ├── actions/actions.go # Slack interactive actions
+│   ├── commands/commands.go # Slack slash commands
+│   ├── oauth/oauth.go     # Slack OAuth installation flow
+│   ├── health/health.go   # Health check endpoint
 │   └── inngest.py         # Python Inngest webhook service
 ├── app/                   # Next.js admin dashboard
 │   ├── page.tsx           # Landing page + Add to Slack
