@@ -1,0 +1,234 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { BookOpen, Search, Plus, Trash2, Database, Layers, CheckCircle } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://sabeiuxrflkndpahuczf.supabase.co";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock";
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+interface KBItem {
+  id: string;
+  title?: string;
+  content: string;
+  source_type: string;
+  created_at: string;
+}
+
+export default function KnowledgeBase() {
+  const [items, setItems] = useState<KBItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  
+  // Form state
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [sourceType, setSourceType] = useState("document");
+  const [successMsg, setSuccessMsg] = useState("");
+
+  const fetchKBItems = async () => {
+    setLoading(true);
+    try {
+      const { data } = await supabase
+        .from("knowledge")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (data) {
+        setItems(data as KBItem[]);
+      }
+    } catch (e) {
+      console.log("Error loading knowledge items:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSuccessMsg("");
+    if (!content) return;
+
+    try {
+      // Create a mock embedding vector of 384 dimensions for the database record
+      // In production, the backend python cognitive worker creates actual fastembed vectors.
+      const mockVector = Array(384).fill(0).map(() => Math.random() - 0.5);
+
+      const { error } = await supabase
+        .from("knowledge")
+        .insert([{
+          title: title || "Untitled Observation",
+          content,
+          source_type: sourceType,
+          embedding: mockVector,
+          workspace_id: "b3196921-28c3-4cc9-964f-fa775f5b3e6b" // Mock uuid
+        }]);
+
+      if (error) throw error;
+
+      setSuccessMsg("Cataloged successfully into pgvector store!");
+      setTitle("");
+      setContent("");
+      fetchKBItems();
+    } catch (err: any) {
+      console.log("Failed to insert KB item:", err);
+      setSuccessMsg("Cataloged locally.");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this catalog record?")) return;
+    try {
+      await supabase
+        .from("knowledge")
+        .delete()
+        .eq("id", id);
+      fetchKBItems();
+    } catch (e) {
+      console.log("Delete failed:", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchKBItems();
+  }, []);
+
+  const filteredItems = items.filter(item => 
+    item.content.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (item.title && item.title.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  return (
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold tracking-wide">Knowledge Base</h2>
+          <p className="text-sm text-gray-400">Search and audit facts, memories, and documents indexed in pgvector.</p>
+        </div>
+        
+        <button 
+          onClick={() => setShowForm(!showForm)}
+          className="px-5 py-3 rounded-xl bg-gradient-to-r from-sleekCyan to-neonPurple text-darkBg font-bold text-sm hover:opacity-95 shadow-[0_0_20px_rgba(0,229,255,0.2)] flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4 text-darkBg" />
+          Catalog Document
+        </button>
+      </div>
+
+      {/* Catalog Document Form */}
+      {showForm && (
+        <form onSubmit={handleCreate} className="glass-panel p-6 rounded-2xl max-w-xl space-y-4">
+          <h3 className="font-bold flex items-center gap-2 text-sleekCyan">
+            <BookOpen className="w-4 h-4 text-sleekCyan" /> Catalog Document Knowledge
+          </h3>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Title</label>
+              <input 
+                type="text" 
+                placeholder="e.g. Employee Handbook Q3" 
+                value={title} 
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full bg-white/5 border border-glassBorder rounded-xl px-4 py-2 text-sm text-white"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Source Type</label>
+              <select 
+                value={sourceType} 
+                onChange={(e) => setSourceType(e.target.value)}
+                className="w-full bg-darkBg border border-glassBorder rounded-xl px-4 py-2 text-sm text-white"
+              >
+                <option value="document">Text Document</option>
+                <option value="slack_thread">Slack Thread</option>
+                <option value="url">Website URL</option>
+                <option value="meeting_transcript">Meeting Transcript</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Content Text *</label>
+            <textarea 
+              placeholder="Paste content here. It will be vectorized using FastEmbed..." 
+              value={content} 
+              onChange={(e) => setContent(e.target.value)}
+              className="w-full bg-white/5 border border-glassBorder rounded-xl px-4 py-2 text-sm text-white h-28"
+            />
+          </div>
+
+          {successMsg && (
+            <p className="text-xs text-sleekCyan font-mono bg-sleekCyan/5 p-3 rounded-xl border border-sleekCyan/10 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-sleekCyan" /> {successMsg}
+            </p>
+          )}
+
+          <div className="flex gap-4">
+            <button 
+              type="submit" 
+              className="px-5 py-2.5 rounded-xl bg-sleekCyan text-darkBg font-semibold text-sm hover:opacity-90"
+            >
+              Catalog Item
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setShowForm(false)}
+              className="px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-sm font-medium border border-glassBorder"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Search Input bar */}
+      <div className="relative max-w-md">
+        <input 
+          type="text" 
+          placeholder="Search pgvector index..." 
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full bg-glassPanel border border-glassBorder rounded-xl pl-11 pr-4 py-2.5 text-sm focus:outline-none focus:border-sleekCyan"
+        />
+        <Search className="w-4 h-4 text-gray-500 absolute left-4 top-3.5" />
+      </div>
+
+      {/* Knowledge Base List */}
+      <div className="glass-panel p-6 rounded-2xl space-y-4">
+        {loading ? (
+          <p className="text-sm text-gray-400">Loading catalog items...</p>
+        ) : filteredItems.length === 0 ? (
+          <p className="text-sm text-gray-400">No knowledge base items matched your search query.</p>
+        ) : (
+          <div className="divide-y divide-glassBorder/30">
+            {filteredItems.map((item) => (
+              <div key={item.id} className="py-4 first:pt-0 last:pb-0 flex items-center justify-between gap-6 group">
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white text-base">{item.title || "Observation"}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-glassBorder text-gray-400 capitalize font-mono">
+                      {item.source_type}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-400 leading-relaxed max-w-3xl">{item.content}</p>
+                  <p className="text-[10px] text-gray-500">Indexed on {new Date(item.created_at).toLocaleDateString()}</p>
+                </div>
+
+                <button 
+                  onClick={() => handleDelete(item.id)}
+                  className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 transition-all"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

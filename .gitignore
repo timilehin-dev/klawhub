@@ -1,11 +1,38 @@
-node_modules 
-.next 
-.env.local 
-*.md
-!README.md
-!ROADMAP.md
-
-.env
-scratch/
-.gemini/
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
 venv/
+.venv/
+
+# === Node / Next.js ===
+node_modules/
+.next/
+out/
+
+# === Environment / Secrets ===
+.env
+.env.local
+.env.*.local
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === Gemini / Agent scratch ===
+.gemini/
+scratch/
+
+# === Internal scripts (not for production) ===
+verify_all_27.py
+
+# === Go ===
+# go.sum is committed for reproducible builds
+
+# === Markdown ===
+# We DO NOT blanket-ignore .md files — documentation matters

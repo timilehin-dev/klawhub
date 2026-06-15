@@ -1,100 +1,70 @@
-from typing import List, Optional
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, AliasChoices
-
+from pydantic import Field
+from typing import Optional
 
 class Settings(BaseSettings):
-    # Base Application Config
-    env: str = Field(default="production", validation_alias="NODE_ENV")
+    # === LLM ===
+    OLLAMA_API_KEY: Optional[str] = None
+    OLLAMA_BASE_URL: str = "https://ollama.com/v1"
+    NEMOTRON_MODEL: str = "nemotron-3-ultra:cloud"
 
-    # Supabase / Postgres Database
-    database_url: str = Field(..., validation_alias="DATABASE_URL")
+    # === Supabase ===
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    DATABASE_URL: str = ""
+    DIRECT_DATABASE_URL: Optional[str] = None
 
-    # Database runtime hardening
-    db_pool_mode: str = Field(default="auto", validation_alias="DB_POOL_MODE")
-    db_pool_size: int = Field(default=5, validation_alias="DB_POOL_SIZE")
-    db_max_overflow: int = Field(default=5, validation_alias="DB_MAX_OVERFLOW")
-    db_pool_recycle_seconds: int = Field(
-        default=1800, validation_alias="DB_POOL_RECYCLE_SECONDS"
-    )
-    run_startup_ddl: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("RUN_STARTUP_DDL", "KLAWHUB_RUN_STARTUP_DDL"),
-    )
+    # === Upstash Redis ===
+    UPSTASH_REDIS_REST_URL: str = ""
+    UPSTASH_REDIS_REST_TOKEN: str = ""
+    UPSTASH_REDIS_URL: str = ""
 
-    # Redis Cache & Checkpointer State
-    upstash_redis_rest_url: str = Field(..., validation_alias="UPSTASH_REDIS_REST_URL")
-    upstash_redis_rest_token: str = Field(
-        ..., validation_alias="UPSTASH_REDIS_REST_TOKEN"
-    )
-    state_signing_key: str = Field(
-        ..., validation_alias=AliasChoices("STATE_SIGNING_KEY", "SLACK_SIGNING_SECRET")
-    )
+    # === Slack ===
+    SLACK_BOT_TOKEN: str = ""
+    SLACK_SIGNING_SECRET: str = ""
+    SLACK_APP_TOKEN: Optional[str] = None
+    SLACK_CLIENT_ID: Optional[str] = None
+    SLACK_CLIENT_SECRET: Optional[str] = None
 
-    # Slack OAuth & Credentials
-    slack_signing_secret: str = Field(..., validation_alias="SLACK_SIGNING_SECRET")
-    slack_bot_token: Optional[str] = Field(
-        default=None, validation_alias="SLACK_BOT_TOKEN"
-    )
+    # === Inngest ===
+    INNGEST_EVENT_KEY: str = ""
+    INNGEST_SIGNING_KEY: Optional[str] = None
+    INNGEST_BASE_URL: Optional[str] = None
 
-    # Modal sandbox webhook client
-    modal_function_url: str = Field(..., validation_alias="MODAL_FUNCTION_URL")
-    modal_webhook_secret: str = Field(..., validation_alias="MODAL_WEBHOOK_SECRET")
+    # === Modal ===
+    MODAL_TOKEN_ID: str = ""
+    MODAL_TOKEN_SECRET: str = ""
 
-    # Resend Email API Key
-    resend_api_key: Optional[str] = Field(
-        default=None, validation_alias="RESEND_API_KEY"
-    )
+    # === Tavily ===
+    TAVILY_API_KEY: str = ""
 
-    # Encryption key for integration credentials storage
-    integration_encryption_key: str = Field(
-        ..., validation_alias="INTEGRATION_ENCRYPTION_KEY"
-    )
+    # === Google OAuth ===
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
 
-    # Rotating Tavily Search Keys (with fallbacks to standard TAVILY_API_KEY)
-    tavily_api_key_1: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("TAVILY_API_KEY_1", "TAVILY_API_KEY"),
-    )
-    tavily_api_key_2: Optional[str] = Field(
-        default=None, validation_alias="TAVILY_API_KEY_2"
-    )
-    tavily_api_key_3: Optional[str] = Field(
-        default=None, validation_alias="TAVILY_API_KEY_3"
-    )
+    # === GitHub App ===
+    GITHUB_APP_ID: Optional[str] = None
+    GITHUB_APP_PRIVATE_KEY: Optional[str] = None
+    GITHUB_APP_CLIENT_ID: Optional[str] = None
+    GITHUB_APP_CLIENT_SECRET: Optional[str] = None
 
-    # Rotating Ollama Keys (with fallbacks to standard OLLAMA_API_KEY)
-    ollama_api_key_1: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("OLLAMA_API_KEY_1", "OLLAMA_API_KEY"),
-    )
-    ollama_api_key_2: Optional[str] = Field(
-        default=None, validation_alias="OLLAMA_API_KEY_2"
-    )
-    ollama_api_key_3: Optional[str] = Field(
-        default=None, validation_alias="OLLAMA_API_KEY_3"
-    )
-    ollama_base_url: str = Field(
-        default="https://api.ollama.com", validation_alias="OLLAMA_BASE_URL"
-    )
+    # === Security ===
+    ENCRYPTION_KEY: str = ""  # 32-byte AES key hex
+    HMAC_SECRET: str = ""     # HMAC signing secret
 
-    # Model config to parse .env.local file if present
+    # === App ===
+    NEXT_PUBLIC_APP_URL: str = ""
+    ENVIRONMENT: str = "production"
+    LOG_LEVEL: str = "info"
+
     model_config = SettingsConfigDict(
-        env_file=".env.local", env_file_encoding="utf-8", extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_file_ignore_missing=True
     )
 
-    @property
-    def tavily_keys(self) -> List[str]:
-        """Returns non-empty Tavily keys as a rotating list."""
-        keys = [self.tavily_api_key_1, self.tavily_api_key_2, self.tavily_api_key_3]
-        return [k for k in keys if k]
-
-    @property
-    def ollama_keys(self) -> List[str]:
-        """Returns non-empty Ollama keys as a rotating list."""
-        keys = [self.ollama_api_key_1, self.ollama_api_key_2, self.ollama_api_key_3]
-        return [k for k in keys if k]
-
-
-# Initialize Settings singleton
+# Global settings instance
 settings = Settings()

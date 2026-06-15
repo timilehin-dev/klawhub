@@ -1,80 +1,131 @@
-# KlawHub Core
+# KlawHub v2
 
-A persistent, workspace-specific, tool-competent, proactive coworker that executes real work, adapts to organizational context, and improves over time — all in Slack.
+> **A self-evolving, Slack-native AI coworker** — not a chatbot.
 
-**KlawHub is not an AI assistant. It is a hire.**
+KlawHub autonomously handles research, document creation, financial modeling, code execution, browser automation, data science, and more. It continuously learns from your organization and creates new capabilities on demand.
 
-## Vision & Architecture
+---
 
-KlawHub operates as a **proactive, multi-tenant AI coworker** based on the following principles:
-- **Tool-First:** No answer without either Tool usage, Retrieved memory, or Skill execution.
-- **Workspace Isolation:** Strict multi-tenant intelligence. Each Slack workspace has its own cognitive environment, memory, and task patterns.
-- **Dynamic Skills:** All capabilities are packaged as reusable skills. The system uses an AST-based dynamic skill system (`DynamicSkillRegistry`) that compiles and executes Python source code at runtime.
-- **Memory-Grounded:** Uses Episodic, Semantic, and Procedural memory to reduce hallucination and increase reliability.
-- **Proactive:** Runs on schedules to monitor tasks, resolve calendar conflicts, and participate in Slack threads unprompted.
+## Architecture
 
-## Tech Stack
+```
+Slack Workspace
+  │
+  ├── Go API Gateway (Vercel) ── HMAC verify + Redis dedupe + Inngest dispatch
+  │
+  ├── Python Cognitive Worker
+  │     ├── General Agent ── intent routing + tool execution
+  │     ├── Planner Agent ── multi-step task orchestration
+  │     └── QA Agent ── DLP firewall + factual validation
+  │
+  ├── Modal Sandbox (8–16 GB RAM)
+  │     ├── Document processing (WeasyPrint, Pandoc, pdfplumber)
+  │     ├── Data science (pandas, scikit-learn, plotly)
+  │     ├── Financial modeling (yfinance, FinanceToolkit)
+  │     ├── OCR (PaddleOCR, Tesseract)
+  │     ├── Browser automation (Lightpanda CDP + Playwright)
+  │     └── Self-evolving skill execution
+  │
+  └── Next.js Admin Dashboard (Vercel)
+```
 
-- **Python 3.x**
-- **FastAPI** & **Uvicorn**
-- **SQLModel** / **SQLAlchemy** + **asyncpg**
-- **PostgreSQL / Supabase** (with **pgvector** for semantic search)
-- **Inngest** (async workflows & scheduling)
-- **LangGraph** (multi-agent orchestration)
-- **Upstash Redis** (cross-thread context memory)
-- **Slack SDK** (UI and communication)
-- **Modal** (sandbox environment)
+## Stack
 
-*Note: The project previously used Node.js/Drizzle ORM but has been migrated to Python/SQLModel. Drizzle ORM is no longer used for database management.*
+| Component            | Technology                                    |
+|----------------------|-----------------------------------------------|
+| API Gateway          | Go serverless functions (Vercel)              |
+| Async Orchestration  | Inngest Cloud (durable queues, step functions)|
+| LLM                  | Nemotron (OpenAI-compatible API)              |
+| Database             | Supabase (Postgres + pgvector + RLS)          |
+| Cache                | Upstash Redis                                 |
+| Sandbox              | Modal (isolated containers, 8–16 GB RAM)      |
+| Browser              | Lightpanda (Zig CDP) + Playwright fallback    |
+| Web Search           | Tavily API                                    |
+| Dashboard            | Next.js 14 + Tailwind + Framer Motion         |
 
-## Golden Rule
+## Project Structure
 
-> **No dead code.** Every feature, function, or service must have ALL its dependencies wired up before merge — tables in Supabase, env vars in Vercel, Inngest events registered, tools in the registry. If it can't run, it doesn't ship.
+```
+klawhub/
+├── api/                   # Go serverless endpoints (Vercel)
+│   ├── events.go          # Slack Events API handler
+│   ├── actions.go         # Slack interactive actions
+│   ├── commands.go        # Slack slash commands
+│   ├── oauth.go           # Slack OAuth installation flow
+│   ├── health.go          # Health check endpoint
+│   └── inngest.py         # Python Inngest webhook service
+├── app/                   # Next.js admin dashboard
+│   ├── page.tsx           # Landing page + Add to Slack
+│   ├── middleware.ts      # Supabase auth guard
+│   └── dashboard/         # Protected admin pages
+├── src/                   # Python cognitive worker
+│   ├── config.py          # Pydantic settings
+│   ├── core/
+│   │   ├── agents/        # LangGraph agent nodes
+│   │   ├── llm/           # Nemotron async client
+│   │   ├── security/      # AST scanner, DLP, AES encryptor
+│   │   └── tools/         # Agent tool registry
+│   ├── db/                # asyncpg pool + CRUD operations
+│   ├── integrations/      # Slack, Tavily clients
+│   └── workflows/         # Inngest workflow handlers
+├── modal_app.py           # Modal sandbox (19 functions)
+├── requirements.txt       # Python dependencies
+├── go.mod                 # Go module definition
+└── vercel.json            # Vercel build + routing config
+```
 
-## Quick Start
+## Built-in Skills
 
-### 1. Clone & Install
+1. **Document Master** — PDF/DOCX/XLSX/CSV/PPTX creation, parsing, editing
+2. **Data Science Lab** — EDA, visualization, ML pipeline
+3. **Financial Modeler** — DCF, technical analysis, market data
+4. **FullStack Engineer** — code gen, lint, test, deploy
+5. **Research Synthesizer** — multi-source deep research
+6. **Scheduler & Automation Engine** — crons, tasks, workflows
+
+## Setup
+
+### Prerequisites
+
+- Python 3.12+
+- Node.js 18+
+- Go 1.22+
+- Vercel CLI
+- Modal account
+- Supabase project
+- Slack App configured
+
+### Environment Variables
+
+Copy `.env.example` to `.env` and fill in all required values:
+
 ```bash
-git clone https://github.com/timilehin-dev/klawhub.git
-cd klawhub
+cp .env.example .env
+```
+
+### Install Dependencies
+
+```bash
+# Python
 pip install -r requirements.txt
+
+# Node.js
+npm install
+
+# Go
+go mod tidy
 ```
 
-### 2. Environment Variables
-Copy `.env.local.example` to `.env.local` and fill in all values. Key requirements include:
-- `UPSTASH_REDIS_REST_URL`
-- Supabase connection details
-- Slack API tokens
+### Deploy
 
-### 3. Database Setup (Supabase)
-Klawhub relies entirely on Supabase for data and vector storage. You must manually apply the migrations and RLS policies via the Supabase dashboard or CLI. **Do not use Drizzle.**
-
-1. **Enable pgvector**: Ensure your Supabase project has the `pgvector` extension enabled.
-2. **Apply Migrations**: Execute the SQL files located in `supabase/migrations/` sequentially.
-3. **Enable Row Level Security (RLS)**: Run the script `supabase/enable_rls.sql` in your Supabase SQL Editor. This script enforces strict multi-tenant workspace isolation.
-
-When querying pgvector columns in code via SQLModel/SQLAlchemy, filters must use `.is_not(None)` instead of `!= None` to properly translate to `IS NOT NULL`.
-
-### 4. Running the App
 ```bash
-# Start the FastAPI server
-uvicorn api.main:app --reload
+# Deploy Modal sandbox
+modal deploy modal_app.py
+
+# Deploy to Vercel
+vercel deploy --prod
 ```
-
-### 5. Running Tests & Verifications
-Testing and verification scripts are located in `src/scripts/`. Execute them with the necessary environment variables:
-```bash
-PYTHONPATH=. python3 src/scripts/verify_multi_tenant.py
-```
-
-## Agent System
-
-- **General Agent:** Interprets intent, selects skills, and coordinates sub-agents.
-- **PM Agent:** Task creation, sprint planning, and reporting.
-- **Analyst Agent:** Data interpretation and KPI tracking.
-- **Research Agent:** Market research and knowledge synthesis.
-- **Engineer Agent:** Code assistance, debugging, repo interaction (using Modal sandbox).
-- **Operations Agent:** Process automation.
 
 ## License
-MIT
+
+Proprietary — All rights reserved.

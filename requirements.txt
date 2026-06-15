@@ -1,19 +1,47 @@
-# Klawhub Core Python Dependencies
+# === Core Framework ===
+pydantic>=2.7.1
+pydantic-settings>=2.2.1
 fastapi>=0.110.0
 uvicorn>=0.28.0
-pydantic>=2.6.0
-pydantic-settings>=2.2.0
-sqlmodel>=0.0.16
+
+# === Database ===
 asyncpg>=0.29.0
-cryptography>=42.0.0
-httpx>=0.27.0
-slack-sdk>=3.27.0
-redis>=5.0.0
+
+# === Inngest (queue / orchestration) ===
 inngest>=0.3.0
+
+# === Slack ===
+slack-sdk>=3.27.1
+
+# === LangGraph (agent orchestration) ===
 langgraph>=0.0.30
-croniter>=2.0.0
-aiosqlite>=0.20.0
-pytz>=2024.1
-nest-asyncio>=1.6.0
-aiohttp>=3.9.3
-pypdf>=4.0.0
+langchain-core>=0.2.0
+
+# === LLM HTTP Client ===
+httpx>=0.27.0
+
+# === Retry logic ===
+tenacity>=8.3.0
+
+# === Cron scheduling ===
+croniter>=2.0.5
+
+# === Security / Encryption ===
+pycryptodome>=3.20.0
+
+# === Modal SDK (sandbox invocation from worker) ===
+modal>=0.62.0
+
+# === Tavily (web search) ===
+tavily-python>=0.3.8
+
+# === Google API (Calendar, Drive) ===
+google-api-python-client>=2.130.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+
+# === GitHub API ===
+PyGithub>=2.3.0
+
+# === Supabase (used in run_skill Modal function lookup) ===
+supabase>=2.4.3

@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-darkBg text-gray-100 antialiased selection:bg-sleekCyan/30 selection:text-sleekCyan;
+    font-family: 'Outfit', 'Inter', sans-serif;
+  }
+}
+
+/* Glassmorphism styling variables */
+.glass-panel {
+  background: rgba(10, 14, 23, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glass-panel-hover {
+  @apply transition-all duration-300 hover:border-sleekCyan/30 hover:shadow-[0_0_20px_rgba(0,229,255,0.15)];
+}
+
+/* Ambient premium gradient background spots */
+.ambient-glow-cyan {
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.15) 0%, transparent 70%);
+  filter: blur(80px);
+}
+
+.ambient-glow-purple {
+  background: radial-gradient(circle, rgba(124, 77, 255, 0.12) 0%, transparent 70%);
+  filter: blur(80px);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(10, 14, 23, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 229, 255, 0.3);
+}
