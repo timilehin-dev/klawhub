@@ -6,7 +6,7 @@ Uses the shared inngest_client — critical for all triggers to be routed correc
 """
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from inngest.fastapi import serve
+from inngest.fast_api import serve
 
 from src.core.inngest_client import inngest_client
 from src.db.client import init_db_pool, close_db_pool

@@ -6,7 +6,7 @@
       "use": "@vercel/go"
     },
     {
-      "src": "api/inngest.py",
+      "src": "api/inngest_handler.py",
       "use": "@vercel/python"
     },
     {
@@ -20,7 +20,7 @@
     { "src": "/api/commands","dest": "/api/commands/commands.go"},
     { "src": "/api/oauth",   "dest": "/api/oauth/oauth.go"   },
     { "src": "/api/health",  "dest": "/api/health/health.go"  },
-    { "src": "/api/inngest", "dest": "/api/inngest.py" },
+    { "src": "/api/inngest", "dest": "/api/inngest_handler.py" },
     { "src": "/(.*)",        "dest": "/$1"              }
   ]
 }

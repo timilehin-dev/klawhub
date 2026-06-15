@@ -2,7 +2,7 @@
 Shared Inngest client module.
 Import `inngest_client` from here in all workflow files.
 Having a single instance ensures all functions are bound to the same app
-and correctly served by the FastAPI `serve()` call in api/inngest.py.
+and correctly served by the FastAPI `serve()` call in api/inngest_handler.py.
 """
 import inngest
 from src.config import settings
