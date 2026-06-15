@@ -47,7 +47,7 @@ export default function SkillsCatalog() {
         .order("created_at", { ascending: false });
         
       if (data && data.length > 0) {
-        setSkills([...builtinSkills, ...data as Skill[]]);
+        setSkills(data as Skill[]);
       }
     } catch (e) {
       console.log("Could not load custom skills (using built-ins):", e);

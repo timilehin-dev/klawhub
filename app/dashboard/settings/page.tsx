@@ -18,9 +18,71 @@ export default function WorkspaceSettings() {
   const [message, setMessage] = useState("");
 
   const [integrations, setIntegrations] = useState({
-    google: { connected: true, email: "developer@organization.org" },
+    google: { connected: false, email: "" },
     github: { connected: false, email: "" }
   });
+
+  const loadIntegrations = async () => {
+    try {
+      const { data } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("workspace_id", "b3196921-28c3-4cc9-964f-fa775f5b3e6b");
+        
+      const newIntegrations = {
+        google: { connected: false, email: "" },
+        github: { connected: false, email: "" }
+      };
+      
+      if (data) {
+        data.forEach(item => {
+          if (item.provider === "google") {
+            newIntegrations.google = { connected: true, email: item.metadata?.email || "developer@organization.org" };
+          } else if (item.provider === "github") {
+            newIntegrations.github = { connected: true, email: item.metadata?.email || "git-dev@organization.org" };
+          }
+        });
+      }
+      setIntegrations(newIntegrations);
+    } catch (e) {
+      console.log("Error loading integrations:", e);
+    }
+  };
+
+  const handleConnect = async (provider: string) => {
+    const email = window.prompt(`Enter your ${provider} account email to connect:`);
+    if (!email) return;
+    
+    try {
+      const { error } = await supabase
+        .from("integrations")
+        .insert([{
+          workspace_id: "b3196921-28c3-4cc9-964f-fa775f5b3e6b",
+          provider: provider,
+          access_token: "mock-token",
+          metadata: { email: email }
+        }]);
+      if (error) throw error;
+      loadIntegrations();
+    } catch (e) {
+      console.log("Connect failed:", e);
+    }
+  };
+
+  const handleDisconnect = async (provider: string) => {
+    if (!confirm(`Are you sure you want to disconnect ${provider}?`)) return;
+    try {
+      const { error } = await supabase
+        .from("integrations")
+        .delete()
+        .eq("workspace_id", "b3196921-28c3-4cc9-964f-fa775f5b3e6b")
+        .eq("provider", provider);
+      if (error) throw error;
+      loadIntegrations();
+    } catch (e) {
+      console.log("Disconnect failed:", e);
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -57,11 +119,12 @@ export default function WorkspaceSettings() {
           persona_prompt: personaPrompt,
           whitelisted_channels: channelList
         })
-        .eq("slack_team_id", "mock-slack-team"); // Updates default team config
+        .eq("id", "b3196921-28c3-4cc9-964f-fa775f5b3e6b");
 
+      if (error) throw error;
       setMessage("Settings saved successfully!");
     } catch (err: any) {
-      setMessage("Settings updated locally (Supabase bypass).");
+      setMessage("Failed to save settings to database.");
     } finally {
       setLoading(false);
     }
@@ -69,6 +132,7 @@ export default function WorkspaceSettings() {
 
   useEffect(() => {
     loadSettings();
+    loadIntegrations();
   }, []);
 
   return (
@@ -144,14 +208,36 @@ export default function WorkspaceSettings() {
                 <span className="font-semibold text-sm flex items-center gap-2 text-white">
                   <Calendar className="w-4 h-4 text-sleekCyan" /> Google Apps
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-glowGreen/10 border border-glowGreen/20 text-glowGreen font-bold uppercase">
-                  Connected
-                </span>
+                {integrations.google.connected ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-glowGreen/10 border border-glowGreen/20 text-glowGreen font-bold uppercase">
+                    Connected
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-400/10 border border-red-500/20 text-red-400 font-bold uppercase">
+                    Disconnected
+                  </span>
+                )}
               </div>
-              <p className="text-[11px] text-gray-400">Calendar scheduling and Drive file operations enabled.</p>
-              <button className="w-full py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-glassBorder text-xs font-medium text-gray-300">
-                Disconnect
-              </button>
+              <p className="text-[11px] text-gray-400">
+                {integrations.google.connected 
+                  ? `Connected as ${integrations.google.email}` 
+                  : "Calendar scheduling and Drive file operations enabled."}
+              </p>
+              {integrations.google.connected ? (
+                <button 
+                  onClick={() => handleDisconnect("google")}
+                  className="w-full py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-glassBorder text-xs font-medium text-gray-300"
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button 
+                  onClick={() => handleConnect("google")}
+                  className="w-full py-2 rounded-lg bg-sleekCyan text-darkBg font-bold text-xs hover:opacity-95"
+                >
+                  Connect Google
+                </button>
+              )}
             </div>
 
             {/* GitHub OAuth */}
@@ -160,14 +246,36 @@ export default function WorkspaceSettings() {
                 <span className="font-semibold text-sm flex items-center gap-2 text-white">
                   <GitPullRequest className="w-4 h-4 text-neonPurple" /> GitHub Dev
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-400/10 border border-red-500/20 text-red-400 font-bold uppercase">
-                  Disconnected
-                </span>
+                {integrations.github.connected ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-glowGreen/10 border border-glowGreen/20 text-glowGreen font-bold uppercase">
+                    Connected
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-400/10 border border-red-500/20 text-red-400 font-bold uppercase">
+                    Disconnected
+                  </span>
+                )}
               </div>
-              <p className="text-[11px] text-gray-400">Connect to open Pull Requests and create issues autonomously.</p>
-              <button className="w-full py-2 rounded-lg bg-sleekCyan text-darkBg font-bold text-xs hover:opacity-95">
-                Connect GitHub
-              </button>
+              <p className="text-[11px] text-gray-400">
+                {integrations.github.connected 
+                  ? `Connected as ${integrations.github.email}` 
+                  : "Connect to open Pull Requests and create issues autonomously."}
+              </p>
+              {integrations.github.connected ? (
+                <button 
+                  onClick={() => handleDisconnect("github")}
+                  className="w-full py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-glassBorder text-xs font-medium text-gray-300"
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button 
+                  onClick={() => handleConnect("github")}
+                  className="w-full py-2 rounded-lg bg-sleekCyan text-darkBg font-bold text-xs hover:opacity-95"
+                >
+                  Connect GitHub
+                </button>
+              )}
             </div>
           </div>
         </div>

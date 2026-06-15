@@ -15,19 +15,14 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export default function DashboardOverview() {
   const [stats, setStats] = useState({
     activeRuns: 0,
-    successRate: 98.4,
-    totalTokens: 142050,
+    successRate: 100,
+    totalTokens: 0,
     skillsCount: 6,
     monthlyLimit: 100,
-    monthlyUsage: 14
+    monthlyUsage: 0
   });
   
-  const [recentLogs, setRecentLogs] = useState([
-    { id: 1, agent: "General", action: "Summarized Invoice PDF", skill: "Document Master", status: "success", time: "5m ago" },
-    { id: 2, agent: "Planner", action: "Headless Scraping of yfinance DCF", skill: "Financial Modeler", status: "success", time: "12m ago" },
-    { id: 3, agent: "General", action: "Executed custom script test", skill: "Skill Creator", status: "success", time: "25m ago" },
-    { id: 4, agent: "QA", action: "Audited outbound report (Redacted)", skill: "DLP Firewall", status: "success", time: "40m ago" }
-  ]);
+  const [recentLogs, setRecentLogs] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
 
@@ -39,34 +34,50 @@ export default function DashboardOverview() {
         .from("skills")
         .select("*", { count: 'exact', head: true });
         
-      // Fetch schedules count
-      const { count: schedulesCount } = await supabase
-        .from("schedules")
-        .select("*", { count: 'exact', head: true });
-
       // Fetch logs
       const { data: logs } = await supabase
         .from("usage_logs")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(5);
+        .limit(10);
 
-      if (skillsCount !== null) {
-        setStats(prev => ({ ...prev, skillsCount: skillsCount || 6 }));
+      // Fetch all logs to calculate metrics
+      const { data: allLogs } = await supabase
+        .from("usage_logs")
+        .select("status, total_tokens");
+
+      let successRate = 100.0;
+      let totalTokens = 0;
+      let monthlyUsage = 0;
+
+      if (allLogs && allLogs.length > 0) {
+        const successCount = allLogs.filter(l => l.status === "success" || l.status === "completed").length;
+        successRate = parseFloat(((successCount / allLogs.length) * 100).toFixed(1));
+        totalTokens = allLogs.reduce((acc, curr) => acc + (curr.total_tokens || 0), 0);
+        monthlyUsage = allLogs.length;
       }
+
+      setStats({
+        activeRuns: 0,
+        successRate,
+        totalTokens,
+        skillsCount: skillsCount || 6,
+        monthlyLimit: 100,
+        monthlyUsage
+      });
       
-      if (logs && logs.length > 0) {
+      if (logs) {
         setRecentLogs(logs.map((l, i) => ({
           id: l.id || i,
           agent: l.agent_name || "General",
           action: l.sandbox_function || "Executed Sandbox task",
           skill: l.skill_used || "Core Engine",
           status: l.status || "success",
-          time: new Date(l.created_at).toLocaleTimeString()
+          time: l.created_at ? new Date(l.created_at).toLocaleTimeString() : "Just now"
         })));
       }
     } catch (e) {
-      console.log("Could not load live stats (using fallback defaults):", e);
+      console.log("Could not load live stats:", e);
     } finally {
       setLoading(false);
     }
@@ -135,43 +146,10 @@ export default function DashboardOverview() {
         </div>
       </div>
 
-      {/* Main Grid: Telemetry & Telemetry logs */}
+      {/* Main Grid: Telemetry logs */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Token consumption audit */}
-        <div className="glass-panel p-6 rounded-2xl lg:col-span-1 space-y-6">
-          <h3 className="text-lg font-bold flex items-center gap-2">
-            <BarChart2 className="w-5 h-5 text-sleekCyan" /> Token Budget Consumption
-          </h3>
-          
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span>Nemotron-Ultra API</span>
-                <span className="text-sleekCyan">{stats.totalTokens.toLocaleString()} / 1,000,000</span>
-              </div>
-              <div className="w-full h-2 rounded-full bg-white/5 overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-sleekCyan to-neonPurple rounded-full" style={{ width: "14%" }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span>Modal Execution Credits</span>
-                <span className="text-glowGreen">$0.00 / $30.00 (Free Tier)</span>
-              </div>
-              <div className="w-full h-2 rounded-full bg-white/5 overflow-hidden">
-                <div className="h-full bg-glowGreen rounded-full" style={{ width: "0%" }} />
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-white/5 border border-glassBorder text-xs text-gray-400 leading-relaxed">
-              💡 **$0 Dev Strategy**: All document processing, OCR, browser automation, and embeddings are performed inside Modal using the free execution tier. Local Vercel functions orchestrate, keeping hosting costs strictly at **$0**.
-            </div>
-          </div>
-        </div>
-
         {/* Recent runs audit logs */}
-        <div className="glass-panel p-6 rounded-2xl lg:col-span-2 space-y-6">
+        <div className="glass-panel p-6 rounded-2xl lg:col-span-3 space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-bold flex items-center gap-2">
               <Terminal className="w-5 h-5 text-neonPurple" /> Live Execution Stream
@@ -193,19 +171,27 @@ export default function DashboardOverview() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-glassBorder/30">
-                {recentLogs.map((log, i) => (
-                  <tr key={log.id} className="hover:bg-white/5 transition-colors duration-150">
-                    <td className="py-3 px-4 font-semibold text-sleekCyan">{log.agent}</td>
-                    <td className="py-3 px-4 text-gray-300">{log.action}</td>
-                    <td className="py-3 px-4 text-gray-400 text-xs">{log.skill}</td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-glowGreen/10 border border-glowGreen/20 text-glowGreen">
-                        {log.status}
-                      </span>
+                {recentLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-gray-500 font-medium">
+                      No recent runs executed. Telemetry stream will populate as your KlawHub agents perform work.
                     </td>
-                    <td className="py-3 px-4 text-right text-gray-500 text-xs">{log.time}</td>
                   </tr>
-                ))}
+                ) : (
+                  recentLogs.map((log, i) => (
+                    <tr key={log.id} className="hover:bg-white/5 transition-colors duration-150">
+                      <td className="py-3 px-4 font-semibold text-sleekCyan">{log.agent}</td>
+                      <td className="py-3 px-4 text-gray-300">{log.action}</td>
+                      <td className="py-3 px-4 text-gray-400 text-xs">{log.skill}</td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-glowGreen/10 border border-glowGreen/20 text-glowGreen font-medium">
+                          {log.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right text-gray-500 text-xs">{log.time}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
