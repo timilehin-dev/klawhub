@@ -167,9 +167,20 @@ async def general_node(state: AgentState) -> AgentState:
     if not any(m["role"] == "system" and "General Agent" in m["content"] for m in messages):
         messages.insert(0, {"role": "system", "content": SYSTEM_INSTRUCTIONS})
 
+    # Track total token consumption across all tool-call iterations
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+
     for _ in range(8):  # Max 8 tool-call iterations
         res = await llm_client.chat_completion(messages, temperature=0.0)
         response_content = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        # Extract token usage from LLM response
+        usage = res.get("usage", {})
+        total_prompt_tokens += usage.get("prompt_tokens", 0) or 0
+        total_completion_tokens += usage.get("completion_tokens", 0) or 0
+        state["prompt_tokens"] = total_prompt_tokens
+        state["completion_tokens"] = total_completion_tokens
 
         # ── Check for Planner delegation ───────────────────────────────────────
         if '"delegate_to_planner": true' in response_content or '"delegate_to_planner":true' in response_content:

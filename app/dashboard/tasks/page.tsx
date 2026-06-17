@@ -87,26 +87,30 @@ export default function WorkspaceTasks() {
 
   const handleUpdateStatus = async (id: string, newStatus: string) => {
     try {
-      await supabase
+      const { error } = await supabase
         .from("tasks")
         .update({ status: newStatus })
         .eq("id", id);
+      if (error) throw error;
       fetchTasks();
-    } catch (e) {
+    } catch (e: any) {
       console.log("Update status failed:", e);
+      setErrorMsg(e.message || "Failed to update task status.");
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this task?")) return;
     try {
-      await supabase
+      const { error } = await supabase
         .from("tasks")
         .delete()
         .eq("id", id);
+      if (error) throw error;
       fetchTasks();
-    } catch (e) {
+    } catch (e: any) {
       console.log("Delete failed:", e);
+      setErrorMsg(e.message || "Failed to delete task.");
     }
   };
 

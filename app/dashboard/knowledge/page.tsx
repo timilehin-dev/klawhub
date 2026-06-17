@@ -79,12 +79,13 @@ export default function KnowledgeBase() {
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this catalog record?")) return;
     try {
-      await supabase
+      const { error } = await supabase
         .from("knowledge")
         .delete()
         .eq("id", id);
+      if (error) throw error;
       fetchKBItems();
-    } catch (e) {
+    } catch (e: any) {
       console.log("Delete failed:", e);
     }
   };

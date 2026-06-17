@@ -92,6 +92,10 @@ export default function WorkflowsDesigner() {
   };
 
   const handleTrigger = async (id: string) => {
+    if (!workspaceId) {
+      console.log("Trigger failed: no workspace");
+      return;
+    }
     try {
       const response = await fetch("/api/events", {
         method: "POST",
@@ -99,7 +103,7 @@ export default function WorkflowsDesigner() {
         body: JSON.stringify({
           type: "workflow_trigger",
           workflow_id: id,
-          workspace_id: "test-workspace"
+          workspace_id: workspaceId,
         })
       });
       alert("Workflow execution triggered asynchronously via Inngest step functions!");
@@ -111,12 +115,13 @@ export default function WorkflowsDesigner() {
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this automation?")) return;
     try {
-      await supabase
+      const { error } = await supabase
         .from("workflows")
         .delete()
         .eq("id", id);
+      if (error) throw error;
       fetchWorkflows();
-    } catch (e) {
+    } catch (e: any) {
       console.log("Delete failed:", e);
     }
   };

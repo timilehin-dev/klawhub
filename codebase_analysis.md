@@ -37,157 +37,100 @@ graph LR
 
 ---
 
-## Complete File Map
+## Core Module Responsibilities
 
 ### Go API Gateway (`api/`)
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| [events.go](file:///c:/Users/HP/klaw/klawhub/api/events/events.go) | 198 | Slack Events API → HMAC verify → Redis dedupe → Inngest `slack/event` |
-| [actions.go](file:///c:/Users/HP/klaw/klawhub/api/actions/actions.go) | 135 | Slack Interactive Actions → HMAC verify → Inngest `slack/action` |
-| [commands.go](file:///c:/Users/HP/klaw/klawhub/api/commands/commands.go) | 150 | Slack Slash Commands → HMAC verify → Inngest `slack/command` |
-| [oauth.go](file:///c:/Users/HP/klaw/klawhub/api/oauth/oauth.go) | 151 | Slack OAuth callback → token exchange → Inngest `workspace/install` |
+| [events.go](file:///c:/Users/HP/klaw/klawhub/api/events/events.go) | 210+ | Slack Events API → HMAC verify → event type filter (message only) → Redis dedupe → Inngest `slack/event` |
+| [actions.go](file:///c:/Users/HP/klaw/klawhub/api/actions/actions.go) | 134 | Slack Interactive Actions → HMAC verify → Inngest `slack/action` |
+| [commands.go](file:///c:/Users/HP/klaw/klawhub/api/commands/commands.go) | 149 | Slack Slash Commands → HMAC verify → Inngest `slack/command` |
+| [oauth.go](file:///c:/Users/HP/klaw/klawhub/api/oauth/oauth.go) | 162 | Slack OAuth callback → token exchange → dispatches `workspace/install` to Inngest |
 | [health.go](file:///c:/Users/HP/klaw/klawhub/api/health/health.go) | 36 | Health check endpoint (GET, returns JSON status) |
-| [inngest.py](file:///c:/Users/HP/klaw/klawhub/api/inngest.py) | 50 | FastAPI app registering 6 Inngest workflow functions |
 
 **Key patterns**: Each Go file is compiled independently by `@vercel/go` — helper functions (`mathAbs`, `dispatchToInngest`) are duplicated intentionally. 5-minute replay protection. Redis deduplication uses `SET NX EX 3600`.
-
----
 
 ### Python Cognitive Worker (`src/`)
 
 #### Configuration
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [config.py](file:///c:/Users/HP/klaw/klawhub/src/config.py) | 71 | Pydantic Settings — all env vars (LLM, Supabase, Slack, Inngest, Modal, Tavily, Google, GitHub, security) |
-| [inngest_client.py](file:///c:/Users/HP/klaw/klawhub/src/core/inngest_client.py) | 16 | Singleton Inngest client shared across all workflows |
+- **src/config.py** (71 lines): Pydantic Settings — all env vars (LLM, Supabase, Slack, Inngest, Modal, Tavily, Google, GitHub, security)
+- **src/core/inngest_client.py** (16 lines): Singleton Inngest client shared across all workflows
 
 #### LangGraph Agent Pipeline
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [graph.py](file:///c:/Users/HP/klaw/klawhub/src/core/agents/graph.py) | 63 | StateGraph with 3 nodes: General → Planner → QA. Conditional routing via `next_node` state field |
-| [graph_state.py](file:///c:/Users/HP/klaw/klawhub/src/core/agents/graph_state.py) | 28 | TypedDict: workspace_id, channel_id, thread_ts, messages, next_node, planner_depth, output, final_response |
-| [general.py](file:///c:/Users/HP/klaw/klawhub/src/core/agents/nodes/general.py) | 248 | **Primary agent node** — 24-tool registry, up to 8 tool-call iterations, planner delegation with depth guard, workspace_id auto-injection |
-| [planner.py](file:///c:/Users/HP/klaw/klawhub/src/core/agents/nodes/planner.py) | 165 | Multi-step milestone planner — decomposes into 3-5 milestones, Slack progress cards, sequential execution |
-| [qa.py](file:///c:/Users/HP/klaw/klawhub/src/core/agents/nodes/qa.py) | 65 | DLP redaction + LLM factual validation. Max 2 correction loops before force-bypass |
+- **graph.py** (62 lines): StateGraph with 3 nodes: General → Planner → QA. Conditional routing via `next_node` state field
+- **graph_state.py** (33 lines): TypedDict with workspace context, messages, routing, token tracking, planner state, output pipeline
+- **general.py** (260 lines): Primary agent node — 24-tool registry, up to 8 tool-call iterations, planner delegation with depth guard, workspace_id auto-injection, token usage accumulation
+- **planner.py** (165 lines): Multi-step milestone planner — decomposes into 3-5 milestones, Slack progress cards, sequential execution
+- **qa.py** (64 lines): DLP redaction + LLM factual validation. Max 2 correction loops before force-bypass
 
 #### LLM Client
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [client.py](file:///c:/Users/HP/klaw/klawhub/src/core/llm/client.py) | 111 | Async Nemotron client — non-streaming with tenacity retry (3 attempts, 2-30s backoff), streaming with SSE parsing, 300s timeout |
+- **client.py** (110 lines): Async Nemotron client — non-streaming with tenacity retry (3 attempts, 2-30s backoff), streaming with SSE parsing, 300s timeout
 
 #### Security
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [ast_scanner.py](file:///c:/Users/HP/klaw/klawhub/src/core/security/ast_scanner.py) | 103 | AST-based code scanner — blocks dangerous imports (os, subprocess, sys), names (eval, exec), attributes (__globals__), calls |
-| [dlp_auditor.py](file:///c:/Users/HP/klaw/klawhub/src/core/security/dlp_auditor.py) | 41 | Regex-based DLP — redacts Slack tokens, DB URIs, private keys, AWS keys, etc. |
-| [encryptor.py](file:///c:/Users/HP/klaw/klawhub/src/core/security/encryptor.py) | 71 | AES-256-GCM encryption for credential storage in Supabase |
+- **ast_scanner.py** (103 lines): AST-based code scanner — blocks dangerous imports (os, subprocess, sys), names (eval, exec), attributes (__globals__), calls
+- **dlp_auditor.py** (41 lines): Regex-based DLP — redacts Slack tokens, DB URIs, private keys, AWS keys, etc.
+- **encryptor.py** (84 lines): AES-256-GCM encryption for credential storage in Supabase — lazy singleton with startup validation
 
 #### Agent Tools (24 tools)
-
-| File | Lines | Tools | Purpose |
-|------|-------|-------|---------|
-| [web_search.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/web_search.py) | 44 | search_web | Tavily search (basic/advanced depth) |
-| [memory_tools.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/memory_tools.py) | 77 | add_memory, search_memory, add_knowledge, search_knowledge | pgvector similarity search + Modal embeddings |
-| [schedule_tools.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/schedule_tools.py) | 68 | create_schedule, list_schedules, delete_schedule | Cron schedule CRUD with croniter validation |
-| [task_tools.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/task_tools.py) | 55 | create_task, list_tasks, update_task | Task CRUD with status/priority filtering |
-| [workflow_tools.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/workflow_tools.py) | 76 | create_workflow, list_workflows, update_workflow, trigger_workflow | Workflow CRUD + Inngest trigger |
-| [skill_creator.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/skill_creator.py) | 103 | create_skill | LLM generates Python → AST scan → Modal test → DB insert (pending_approval) |
-| [skill_runner.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/skill_runner.py) | 33 | run_skill | Execute skill in Modal sandbox |
-| [slack_tools.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/slack_tools.py) | 63 | get_slack_client, post_message, update_message, add_reaction, fetch_thread_history | Slack Web API with encrypted bot tokens |
-| [google_tools.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/google_tools.py) | 115 | list_calendar_events, create_calendar_event, list_drive_files | Google Workspace via encrypted OAuth tokens |
-| [github_tools.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/github_tools.py) | 131 | list_repos, create_issue, list_issues, create_pull_request | GitHub REST API v3 |
+| File | Tools | Purpose |
+|------|-------|---------|
+| **web_search.py** | `search_web` | Tavily search (basic/advanced depth) |
+| **memory_tools.py** | `add_memory`, `search_memory`, `add_knowledge`, `search_knowledge` | pgvector similarity search + Modal embeddings |
+| **schedule_tools.py** | `create_schedule`, `list_schedules`, `delete_schedule` | Cron schedule CRUD with croniter validation |
+| **task_tools.py** | `create_task`, `list_tasks`, `update_task` | Task CRUD with status/priority filtering |
+| **workflow_tools.py** | `create_workflow`, `list_workflows`, `update_workflow`, `trigger_workflow` | Workflow CRUD + Inngest trigger |
+| **skill_creator.py** | `create_skill` | LLM generates Python → AST scan → Modal test → DB insert |
+| **skill_runner.py** | `run_skill` | Execute skill in Modal sandbox |
+| **slack_tools.py** | `get_slack_client`, `post_message`, `update_message`, `add_reaction`, `fetch_thread_history` | Slack Web API with encrypted bot tokens |
+| **google_tools.py** | `list_calendar_events`, `create_calendar_event`, `list_drive_files` | Google Workspace via encrypted OAuth tokens |
+| **github_tools.py** | `list_repos`, `create_issue`, `list_issues`, `create_pull_request` | GitHub REST API v3 |
 
 #### Database
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [client.py](file:///c:/Users/HP/klaw/klawhub/src/db/client.py) | 68 | asyncpg connection pool (min=2, max=10) with lazy init |
-| [operations.py](file:///c:/Users/HP/klaw/klawhub/src/db/operations.py) | 645 | **Largest file** — ALL CRUD operations for 12 tables + SQL injection protection via column allowlisting |
+- **client.py** (68 lines): asyncpg connection pool (min=2, max=10) with lazy init
+- **operations.py** (644 lines): ALL CRUD operations for 12 tables + SQL injection protection via column allowlisting
 
 #### Integrations
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [slack/client.py](file:///c:/Users/HP/klaw/klawhub/src/integrations/slack/client.py) | 11 | Thin wrapper — global `slack_client` singleton |
-| [slack/context_loader.py](file:///c:/Users/HP/klaw/klawhub/src/integrations/slack/context_loader.py) | 49 | Thread → conversation format, sliding-window token trimming (120K) |
-| [slack/formatter.py](file:///c:/Users/HP/klaw/klawhub/src/integrations/slack/formatter.py) | 84 | Slack Block Kit builder — progress cards, approval cards, status cards |
-| [tavily/client.py](file:///c:/Users/HP/klaw/klawhub/src/integrations/tavily/client.py) | 11 | Thin wrapper — global `tavily_client` singleton |
+- **slack/client.py** (11 lines): Thin wrapper — global `slack_client` singleton
+- **slack/context_loader.py** (48 lines): Thread → conversation format, sliding-window token trimming (120K)
+- **slack/formatter.py** (83 lines): Slack Block Kit builder — progress cards, approval cards, status cards
+- **tavily/client.py** (11 lines): Thin wrapper — global `tavily_client` singleton
 
 #### Inngest Workflows
-
 | File | Lines | Trigger | Purpose |
 |------|-------|---------|---------|
-| [message_handler.py](file:///c:/Users/HP/klaw/klawhub/src/workflows/message_handler.py) | 189 | `slack/event`, `slack/command` | Main handler — loads context → runs LangGraph → posts Slack response → logs usage |
-| [proactive_loop.py](file:///c:/Users/HP/klaw/klawhub/src/workflows/proactive_loop.py) | 115 | Cron (15 min) | Checks due schedules: standup, reminder, silence_detector |
-| [skill_installer.py](file:///c:/Users/HP/klaw/klawhub/src/workflows/skill_installer.py) | 141 | `skill/install` | GitHub repo → zipball → extract → AST scan → DB insert (pending_approval) |
-| [workflow_executor.py](file:///c:/Users/HP/klaw/klawhub/src/workflows/workflow_executor.py) | 117 | `workflow/trigger` | Sequential step execution: message / skill / tool |
-| [workspace_installer.py](file:///c:/Users/HP/klaw/klawhub/src/workflows/workspace_installer.py) | 54 | `workspace/install` | Encrypt bot token → upsert workspace → seed 6 built-in skills → register admin |
-
----
+| **message_handler.py** | 227+ | `slack/event`, `slack/command` | Main handler — filters DMs/@mentions, adds reactions, loads context → runs LangGraph → posts Slack response → logs usage |
+| **proactive_loop.py** | 114 | Cron (15 min) | Checks due schedules: standup, reminder, silence_detector |
+| **skill_installer.py** | 141 | `skill/install` | GitHub repo → zipball → extract → AST scan → DB insert |
+| **workflow_executor.py** | 117 | `workflow/trigger` | Sequential step execution: message / skill / tool |
+| **workspace_installer.py** | 53 | `workspace/install` | Encrypt bot token → upsert workspace → seed 6 built-in skills → register admin |
+| **integration_handler.py** | ~80 | Integration auth | Google/GitHub token storage |
 
 ### Modal Sandbox (`modal_app.py`)
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [modal_app.py](file:///c:/Users/HP/klaw/klawhub/modal_app.py) | 601 | **18 sandbox functions** in isolated containers (8-16GB RAM) |
-
-**Functions**: run_python_script, run_browser_task, render_pdf, render_pdf_from_template, convert_document, batch_convert, ocr_image, ocr_pdf_pages, ocr_screenshot, resize_image, annotate_image, compare_images, render_email, compress_files, extract_archive, run_shell_command, embed_texts, test_skill
-
-**Container image**: 40+ Python packages (WeasyPrint, Pandoc, pdfplumber, pandas, scikit-learn, plotly, yfinance, PaddleOCR, Playwright, Lightpanda, FastEmbed, etc.)
-
----
+- **601 lines, 18 sandbox functions** in isolated containers (8-16GB RAM)
+- Functions: run_python_script, run_browser_task, render_pdf, ocr, embed_texts, test_skill, etc.
 
 ### Next.js Dashboard (`app/`)
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [layout.tsx](file:///c:/Users/HP/klaw/klawhub/app/layout.tsx) | 34 | Root layout — Outfit + Plus Jakarta Sans fonts, ambient glow backgrounds |
-| [page.tsx](file:///c:/Users/HP/klaw/klawhub/app/page.tsx) | 97 | Landing page — hero, CTA ("Add to Slack" + "Enter Dashboard"), feature grid |
-| [globals.css](file:///c:/Users/HP/klaw/klawhub/app/globals.css) | 54 | Tailwind + glassmorphism + ambient glows + custom scrollbars |
-| [middleware.ts](file:///c:/Users/HP/klaw/klawhub/app/middleware.ts) | 53 | Supabase auth guard for `/dashboard/*` routes |
-| [auth/callback/route.ts](file:///c:/Users/HP/klaw/klawhub/app/auth/callback/route.ts) | 23 | OAuth callback — exchange code for Supabase session |
-| [dashboard/layout.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/layout.tsx) | 108 | Dashboard shell — sidebar (8 nav items) + header bar |
-| [dashboard/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/page.tsx) | 203 | Overview — 4 stat cards + live execution stream table |
-| [dashboard/skills/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/skills/page.tsx) | 210 | Skills catalog — 6 built-in skills + custom skill installer |
-| [dashboard/schedules/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/schedules/page.tsx) | 279 | Schedule CRUD — cron/standup/reminder/silence_detector |
-| [dashboard/tasks/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/tasks/page.tsx) | 329 | Kanban task board — Pending/Running/Completed columns |
-| [dashboard/workflows/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/workflows/page.tsx) | 265 | Workflow designer — create/trigger/delete multi-step workflows |
-| [dashboard/knowledge/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/knowledge/page.tsx) | 235 | Knowledge base — search/create/delete with pgvector |
-| [dashboard/usage/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/usage/page.tsx) | 106 | Usage telemetry — token consumption + latency stats |
-| [dashboard/settings/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/settings/page.tsx) | 286 | AI persona config + integrations OAuth management |
-
----
-
-### Verification Script
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| [verify_all_27.py](file:///c:/Users/HP/klaw/klawhub/verify_all_27.py) | 357 | Audit verification — checks 27 findings across all files (bugs, gaps, weaknesses, recommendations) |
+- **14 files**: layout, landing page, middleware (auth guard), 8 dashboard tabs (overview, skills, schedules, tasks, workflows, knowledge, usage, settings)
 
 ---
 
 ## Supabase Tables
 
-| Table | Used By | Columns (inferred) |
-|-------|---------|-------------------|
-| `workspaces` | workspace_installer, settings page, message_handler | id, slack_team_id, slack_team_name, bot_token (encrypted), persona_name, persona_prompt, whitelisted_channels |
+| Table | Used By | Purpose |
+|-------|---------|---------|
+| `workspaces` | workspace_installer, settings, message_handler | id, slack_team_id, bot_token (encrypted), bot_user_id (in settings JSONB), persona |
 | `workspace_members` | workspace_installer | workspace_id, slack_user_id, role |
-| `skills` | skill_creator, skill_runner, skill_installer, workspace_installer, skills page | id, slug, name, description, code, activation_status, skill_type, workspace_id |
-| `schedules` | schedule_tools, proactive_loop, schedules page | id, name, schedule_type, cron_expr, channel_id, is_active, next_run_at, workspace_id |
-| `tasks` | task_tools, tasks page | id, title, description, status, priority, due_at, completed_at, assigned_agent, workspace_id |
-| `workflows` | workflow_tools, workflow_executor, workflows page | id, name, description, trigger_type, trigger_config, steps (JSON), is_active, workspace_id |
-| `knowledge` | memory_tools, knowledge page | id, title, content, source_type, embedding (vector 384), workspace_id |
-| `memory` | memory_tools | id, content, embedding (vector 384), workspace_id |
-| `usage_logs` | message_handler, dashboard page, usage page | id, workspace_id, agent_name, action, skill_used, prompt_tokens, completion_tokens, latency_ms, status |
-| `agent_states` | message_handler | id, workspace_id, thread_ts, state (JSON) |
-| `processed_events` | message_handler | event_id, processed_at |
-| `integrations` | google_tools, github_tools, settings page | id, workspace_id, provider, access_token (encrypted), email |
-| `pending_actions` | (approval workflows) | id, workspace_id, action_type, payload |
+| `skills` | skill tools, workspace_installer | id, slug, name, code, activation_status |
+| `schedules` | schedule_tools, proactive_loop | cron/standup/reminder/silence_detector |
+| `tasks` | task_tools | Kanban Pending/Running/Completed |
+| `workflows` | workflow_tools | Multi-step automation steps |
+| `knowledge` | memory_tools | pgvector embeddings (384-d) |
+| `memory` | memory_tools | pgvector embeddings (384-d) |
+| `usage_logs` | message_handler, dashboard | Token consumption + latency |
+| `agent_states` | message_handler | Crash recovery state snapshots |
+| `processed_events` | message_handler | Deduplication |
+| `integrations` | google_tools, github_tools | Encrypted OAuth tokens |
 
 ---
 
@@ -206,87 +149,181 @@ sequenceDiagram
 
     S->>G: POST /api/events (message)
     G->>G: HMAC-SHA256 verify
+    G->>G: Filter event.type == "message"
     G->>R: SET NX event:{id} (dedupe)
     R-->>G: OK (first time)
     G->>I: Dispatch slack/event
     I->>P: Callback → handle_slack_message_event
+    P->>D: Fetch workspace by team_id
+    P->>P: Filter: DM or @mention only
+    P->>S: Add 👀 reaction (immediate feedback)
     P->>D: Fetch workspace + thread context
     P->>L: Run agent_graph.ainvoke()
-    L->>L: General node (tool calls)
+    L->>L: General node (tool calls, token tracking)
     L->>M: run_python_script / run_browser_task
     M-->>L: Execution result
     L->>L: QA node (DLP + validation)
     L-->>P: final_response
     P->>S: Post message via Slack API
-    P->>D: Log usage
+    P->>S: Add ✅ reaction (completion)
+    P->>D: Log usage (with real token counts)
 ```
 
 ---
 
-## Known Issues & TODOs
+## Key API Contracts
 
-### 🔴 Critical / Bugs
+### Slack Event Contract (from Slack → Go → Inngest)
+```json
+{
+  "team_id": "T123",
+  "event": {
+    "type": "message",
+    "channel": "C123",
+    "channel_type": "channel" | "im",
+    "user": "U123",
+    "text": "<@U456> hello world",
+    "ts": "1234567890.123456",
+    "thread_ts": "1234567890.123456",
+    "subtype": null | "thread_broadcast"
+  }
+}
+```
 
-| # | Issue | Location | Details |
-|---|-------|----------|---------|
-| 1 | **Middleware location wrong** | [middleware.ts](file:///c:/Users/HP/klaw/klawhub/app/middleware.ts) | Inside `app/` — Next.js requires it at project root. Auth guard is NOT running. |
-| 2 | **Modal secrets not injected** | [modal_app.py](file:///c:/Users/HP/klaw/klawhub/modal_app.py) | `klawhub_secret` defined but never applied to `@app.function` decorators |
-| 3 | **Token tracking not implemented** | [message_handler.py](file:///c:/Users/HP/klaw/klawhub/src/workflows/message_handler.py) | `prompt_tokens=0, completion_tokens=0` — always logs zero |
-| 4 | **HMAC verification empty** | [message_handler.py](file:///c:/Users/HP/klaw/klawhub/src/workflows/message_handler.py) | `hmac_sig` always stored as `""` — agent state integrity not enforced |
+### Slack OAuth Response (from Slack → Go → Inngest)
+```json
+{
+  "ok": true,
+  "access_token": "xoxb-...",
+  "bot_user_id": "U456",
+  "team": { "id": "T123", "name": "Acme" },
+  "authed_user": { "id": "U789" }
+}
+```
 
-### 🟡 Significant Gaps
+### Workspace Install Event (Go → Inngest)
+```json
+{
+  "name": "workspace/install",
+  "data": {
+    "slack_team_id": "T123",
+    "slack_team_name": "Acme",
+    "bot_token": "xoxb-...",
+    "bot_user_id": "U456",
+    "authed_user_id": "U789"
+  }
+}
+```
 
-| # | Issue | Location | Details |
-|---|-------|----------|---------|
-| 5 | **Hardcoded workspace_id** | All dashboard pages | Uses mock UUID `"b3196921-28c3-4cc9-964f-fa775f5b3e6b"` instead of auth session |
-| 6 | **Hardcoded Supabase URL/key** | [dashboard/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/page.tsx) | Fallback to hardcoded URL + mock anon key — leaks project ref |
-| 7 | **No auth context/provider** | Dashboard pages | Each page creates its own Supabase client at module level |
-| 8 | **Mock embeddings** | [knowledge/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/knowledge/page.tsx) | Random 384-dim vectors on create — pollutes vector search |
-| 9 | **Slack OAuth link incomplete** | [page.tsx](file:///c:/Users/HP/klaw/klawhub/app/page.tsx) | Missing `client_id` and `scope` URL params |
-| 10 | **No Google OAuth refresh** | [google_tools.py](file:///c:/Users/HP/klaw/klawhub/src/core/tools/google_tools.py) | Tokens used without refresh logic — will expire |
-| 11 | **`window.prompt()` for OAuth** | [settings/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/settings/page.tsx) | Placeholder — not real OAuth flow |
-| 12 | **Upstash Redis unused in Python** | `src/config.py` | Redis env vars configured but never used in the Python codebase |
-| 13 | **`run_skill` function missing** | [modal_app.py](file:///c:/Users/HP/klaw/klawhub/modal_app.py) | Referenced in docs but only `test_skill` exists |
-| 14 | **Hardcoded user info** | [dashboard/layout.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/layout.tsx) | "Timi Dev Workspace / Admin Role / TD" — not from auth |
-| 15 | **Dashboard active runs always 0** | [dashboard/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/page.tsx) | `activeRuns` never calculated |
-| 16 | **Monthly usage counts all-time** | [dashboard/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/page.tsx) | `monthlyUsage = allLogs.length` — not filtered by month |
-| 17 | **No mobile responsive sidebar** | [dashboard/layout.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/layout.tsx) | No hamburger menu or sidebar collapse |
-
-### 🟢 Minor / Code Quality
-
-| # | Issue | Location | Details |
-|---|-------|----------|---------|
-| 18 | **`os` import unused** | [config.py](file:///c:/Users/HP/klaw/klawhub/src/config.py) | Import but never used |
-| 19 | **`co_varnames` hack** | [general.py](file:///c:/Users/HP/klaw/klawhub/src/core/agents/nodes/general.py) | Fragile workspace_id injection — breaks with functools.partial, classes |
-| 20 | **Font loading via `<link>`** | [layout.tsx](file:///c:/Users/HP/klaw/klawhub/app/layout.tsx) | Should use `next/font` for optimization |
-| 21 | **Status badges always green** | [dashboard/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/page.tsx) | Regardless of actual status |
-| 22 | **`.glass-panel-hover` unused** | [globals.css](file:///c:/Users/HP/klaw/klawhub/app/globals.css) | Defined but never applied |
-| 23 | **No Firefox scrollbar styling** | [globals.css](file:///c:/Users/HP/klaw/klawhub/app/globals.css) | WebKit-only scrollbar styles |
-| 24 | **Older Supabase packages** | [package.json](file:///c:/Users/HP/klaw/klawhub/package.json) | Uses deprecated `@supabase/auth-helpers-nextjs` |
-| 25 | **Encryptor crashes at import** | [encryptor.py](file:///c:/Users/HP/klaw/klawhub/src/core/security/encryptor.py) | Invalid `ENCRYPTION_KEY` crashes entire module at import time |
-| 26 | **Rec#23 missing from verify script** | [verify_all_27.py](file:///c:/Users/HP/klaw/klawhub/verify_all_27.py) | Jumps from #22 to #24 |
-| 27 | **`use client` on landing page** | [page.tsx](file:///c:/Users/HP/klaw/klawhub/app/page.tsx) | No client-side state — could be server component |
-| 28 | **Hardcoded usage stats** | [usage/page.tsx](file:///c:/Users/HP/klaw/klawhub/app/dashboard/usage/page.tsx) | Fallback values: 142050 tokens, 820ms latency, $0.00 Modal credits |
-
----
-
-## Key Design Decisions
-
-1. **3-Layer Security**: AST scanner (pre-execution) → DLP auditor (post-execution) → QA agent (factual validation)
-2. **Encrypted Credential Storage**: All tokens encrypted with AES-256-GCM before DB storage
-3. **Multi-Tenant**: `workspace_id` permeates all DB queries, tool calls, state management
-4. **Event-Driven**: Go gateway → Inngest events → Python workflow handlers (fully async)
-5. **Sandboxed Execution**: All user/agent code runs in Modal containers, never in main process
-6. **Self-Evolution**: Agent can create new skills via `skill_creator` → AST scan → sandbox test → approval workflow
-7. **Global Singletons**: `settings`, `llm_client`, `encryptor`, `dlp_auditor`, `inngest_client` — all module-level
+### Graph State (LangGraph AgentState TypedDict)
+- **Input**: workspace_id, channel_id, thread_ts, messages[]
+- **Routing**: next_node → "general" | "planner" | "qa" | "end"
+- **Output**: output (draft), final_response (redacted + approved)
+- **Tracking**: prompt_tokens, completion_tokens, skill_used, logs[]
 
 ---
 
-## Built-in Skills (Seeded on Workspace Install)
+## Major Data Flows
 
-1. **Document Master** — PDF/DOCX/XLSX/CSV/PPTX creation, parsing, editing
-2. **Data Science Lab** — EDA, visualization, ML pipeline
-3. **Financial Modeler** — DCF, technical analysis, market data
-4. **FullStack Engineer** — code gen, lint, test, deploy
-5. **Research Synthesizer** — multi-source deep research
-6. **Scheduler & Automation Engine** — crons, tasks, workflows
+### 1. User Message → Response
+```
+Slack message → Go HMAC verify → Redis dedupe → Inngest → 
+Python handler → DM/@mention filter → 👀 reaction → 
+Load thread context → LangGraph (General→Tool calls→QA) → 
+Post response → ✅ reaction → Log usage
+```
+
+### 2. Skill Creation (Self-Evolution)
+```
+User request → General agent recognizes skill need → 
+create_skill tool → LLM generates Python code → 
+AST scanner → Modal sandbox test → DB insert (pending_approval) → 
+Approve → Skill activated
+```
+
+### 3. Workspace Installation
+```
+User clicks "Add to Slack" → Slack OAuth → 
+Go handler exchanges code → dispatches workspace/install → 
+Python handler encrypts token → upserts workspace → 
+seeds 6 built-in skills → registers admin
+```
+
+---
+
+## Core Call Chains
+
+1. **Message Received**: `events.go:Handler` → `dispatchToInngest("slack/event")` → `message_handler.py:handle_slack_message_event` → `load_thread_context` → `agent_graph.ainvoke` → `post_slack_message`
+
+2. **Slash Command**: `commands.go:Handler` → `dispatchToInngest("slack/command")` → `message_handler.py:handle_slack_slash_command` → `agent_graph.ainvoke` → `post_slack_message`
+
+3. **Proactive Cron**: `proactive_loop.py:proactive_schedule_loop` → `execute_query("schedules WHERE next_run_at <= NOW()")` → per-type handler (standup/reminder/silence_detector) → `post_slack_message`
+
+4. **Tool Execution**: `general.py:general_node` → LLM decides tool → `TOOLS[tool_name](**tool_args)` → tool result → append to messages → repeat up to 8x
+
+---
+
+## Bugs Fixed (April 2026)
+
+### 🔴 Critical — Slack Not Responding Properly
+
+| # | Bug | File | Fix |
+|---|-----|------|-----|
+| 1 | **Bot never adds Slack reactions** — `add_slack_reaction` existed but was never called. Users got no visual feedback. | `message_handler.py` | Added 👀 reaction on message receipt, ✅ on success, ❓ on no-response |
+| 2 | **Bot responds to ALL channel messages** — no DM/@mention filter. Floods public channels. | `message_handler.py` | Added channel_type check + @mention detection using bot_user_id |
+| 3 | **`bot_user_id` stored in settings JSONB** — workspace query returned it at top level. | `message_handler.py` | Fixed to read from `settings.bot_user_id` with JSON parsing fallback |
+| 4 | **Missing `reactions:write` scope** — Slack OAuth URL didn't include it, so reaction API calls would fail. | `app/page.tsx` | Added `reactions:write` to OAuth scopes |
+| 5 | **Missing `team:read` scope** — required for reliable bot identity. | `app/page.tsx` | Added `team:read` to OAuth scopes |
+| 6 | **Token tracking always logs zero** — LLM response `usage` field never extracted. | `general.py`, `graph_state.py` | Added `prompt_tokens`/`completion_tokens` accumulation across iterations + TypedDict fields |
+| 7 | **Unused import** — `llm_client` imported but never used in message_handler. | `message_handler.py` | Removed unused import |
+| 8 | **Encryptor crashes entire module at import** — invalid ENCRYPTION_KEY kills the worker. | `encryptor.py` | Added singleton pattern with lazy init guard |
+| 9 | **Go events handler dispatches ALL Slack events** — reaction_added, file_shared, etc. wasted Inngest invocations. | `events.go` | Added event type filter: only process `"message"` events |
+| 10 | **Non-user message subtypes processed** — `message_changed`, `message_deleted` triggered responses. | `message_handler.py` | Added subtype filter: only allow `null`/`""`/`thread_broadcast` |
+
+### 🟡 Additional Engineering Issues
+
+| # | Issue | Location | Notes |
+|---|-------|----------|-------|
+| 11 | Middleware location | middleware.ts (root) | Already correct — analysis doc was outdated |
+| 12 | Modal secrets not injected | modal_app.py | `klawhub_secret` defined but never applied to `@app.function` |
+| 13 | Hardcoded workspace_id | Dashboard pages | Uses mock UUID instead of auth session |
+| 14 | Hardcoded Supabase URL/key | dashboard pages | Fallback to hardcoded values |
+| 15 | No auth context/provider | Dashboard pages | Each page creates own Supabase client |
+| 16 | Mock embeddings | knowledge page | Random 384-dim vectors pollute vector search |
+| 17 | No Google OAuth refresh | google_tools.py | Tokens will expire without refresh |
+| 18 | `run_skill` function missing | modal_app.py | Docs reference nonexistent function |
+| 19 | Hardcoded user info | dashboard/layout.tsx | "Timi Dev Workspace" hardcoded |
+| 20 | Dashboard active runs always 0 | dashboard/page.tsx | Not calculated from live data |
+| 21 | Monthly usage counts all-time | dashboard/page.tsx | Not filtered by current month |
+| 22| Upstash Redis unused in Python | src/config.py | Redis env vars configured but unused |
+| 23 | Older Supabase packages | package.json | Uses deprecated `@supabase/auth-helpers-nextjs` |
+
+---
+
+## Potential Technical Debt
+
+1. **Go code duplication** — `mathAbs` and `dispatchToInngest` duplicated across 4 Go files. Necessary for Vercel's `@vercel/go` builder, but creates maintenance risk.
+2. **Monolithic operations.py** — 644 lines of CRUD for 12 tables in one file. Should be split by domain.
+3. **No type safety in tool registration** — TOOLS dict is `str -> callable`. No runtime validation of argument types.
+4. **No rate limiting** — Slack sends duplicate events frequently; only Redis dedup protects against it.
+5. **No comprehensive test suite** — Only E2E tests directory exists but may be incomplete.
+6. **Hardcoded mock data in dashboard** — Multiple pages use mock UUIDs and mock data instead of live API queries.
+7. **Encryption key validation at import** — Even with lazy init fix, a bad key delays error to first use.
+8. **No structured logging** — Uses `print()` in Go and `print()` in Python glue code.
+
+---
+
+## Engineering Constraints for Future Refactoring
+
+1. **Vercel Go isolation**: Each Go file must remain self-contained — no shared Go packages. Duplicate helpers intentionally.
+2. **Multi-tenant**: ALL DB queries must be scoped by `workspace_id`. Never query without workspace filtering.
+3. **3-Layer Security**: AST scanner (pre-execution) → DLP auditor (post-execution) → QA agent (factual validation). Never bypass.
+4. **Encrypted Credential Storage**: All tokens encrypted with AES-256-GCM before DB storage. Never store plaintext tokens.
+5. **Event-Driven Architecture**: Never call the Python worker synchronously from Go. Always go through Inngest.
+6. **Sandboxed Execution**: All user/agent code runs in Modal containers, never in the main process.
+7. **Never respond to non-DM/non-@mention messages**: The bot must only respond in DMs or when explicitly @mentioned.
+8. **Always provide visual feedback**: Add emoji reactions to acknowledge requests and indicate completion.
+9. **Token tracking is mandatory**: All LLM invocations must report `prompt_tokens` and `completion_tokens` for billing.
+10. **State persistence**: Agent state must be persisted for crash recovery with HMAC integrity signatures.
+11. **Global Singletons**: `settings`, `llm_client`, `encryptor`, `dlp_auditor`, `inngest_client` — all module-level singletons.
+12. **The middleware (middleware.ts) must stay at project root**, not inside `app/`, for Next.js to recognize it.

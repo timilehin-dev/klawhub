@@ -25,3 +25,8 @@ class AgentState(TypedDict):
     # Output pipeline
     output: str                 # Draft answer from General Agent
     final_response: str         # DLP-redacted, QA-approved answer
+
+    # Token usage tracking (populated by general_node)
+    prompt_tokens: int          # Total prompt tokens across all iterations
+    completion_tokens: int      # Total completion tokens across all iterations
+    skill_used: Optional[str]   # Name of the skill used (if any)

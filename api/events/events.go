@@ -80,7 +80,22 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Upstash Redis REST Deduplication
+	// 3. Filter to only relevant event types — ignore non-message events
+	var parsedBody map[string]interface{}
+	if err := json.Unmarshal(rawBody, &parsedBody); err == nil {
+		if innerEvent, ok := parsedBody["event"].(map[string]interface{}); ok {
+			eventType, _ := innerEvent["type"].(string)
+			// Only process message events. Ignore: reaction_added, file_shared,
+			// member_joined_channel, app_mention (message already covers this), etc.
+			if eventType != "message" {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("ignored"))
+				return
+			}
+		}
+	}
+
+	// 4. Upstash Redis REST Deduplication
 	redisURL := os.Getenv("UPSTASH_REDIS_REST_URL")
 	redisToken := os.Getenv("UPSTASH_REDIS_REST_TOKEN")
 	if redisURL != "" && redisToken != "" && slackReq.EventID != "" {

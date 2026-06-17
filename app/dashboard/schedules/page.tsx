@@ -91,26 +91,30 @@ export default function SchedulesManager() {
 
   const handleToggle = async (id: string, current: boolean) => {
     try {
-      await supabase
+      const { error } = await supabase
         .from("schedules")
         .update({ is_active: !current })
         .eq("id", id);
+      if (error) throw error;
       fetchSchedules();
-    } catch (e) {
+    } catch (e: any) {
       console.log("Toggle failed:", e);
+      setErrorMsg(e.message || "Failed to toggle schedule.");
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this schedule?")) return;
     try {
-      await supabase
+      const { error } = await supabase
         .from("schedules")
         .delete()
         .eq("id", id);
+      if (error) throw error;
       fetchSchedules();
-    } catch (e) {
+    } catch (e: any) {
       console.log("Delete failed:", e);
+      setErrorMsg(e.message || "Failed to delete schedule.");
     }
   };
 

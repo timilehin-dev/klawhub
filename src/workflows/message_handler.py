@@ -15,7 +15,7 @@ from src.db.operations import (
 )
 from src.integrations.slack.context_loader import load_thread_context
 from src.core.agents.graph import agent_graph
-from src.core.tools.slack_tools import post_slack_message
+from src.core.tools.slack_tools import post_slack_message, add_slack_reaction
 import inngest
 
 
@@ -44,11 +44,40 @@ async def handle_slack_message_event(ctx: inngest.Context, step: inngest.Step):
     if inner_event.get("bot_id") or inner_event.get("app_id"):
         return {"status": "ignored", "reason": "Bot message ignored"}
 
+    # Ignore non-user message subtypes (message_changed, message_deleted, etc.)
+    msg_subtype = inner_event.get("subtype")
+    if msg_subtype and msg_subtype not in ("", None, "thread_broadcast"):
+        return {"status": "ignored", "reason": f"Non-user message subtype: {msg_subtype}"}
+
+    channel_type = inner_event.get("channel_type", "")
+    event_text = inner_event.get("text", "")
+
+    # bot_user_id is stored in the settings JSONB column
+    settings = workspace.get("settings", {})
+    if isinstance(settings, str):
+        try:
+            settings = json.loads(settings)
+        except (json.JSONDecodeError, TypeError):
+            settings = {}
+    bot_user_id = settings.get("bot_user_id", "")
+
+    # Only respond if:
+    # 1. It's a DM (IM channel), OR
+    # 2. The bot is @-mentioned in the message
+    if channel_type != "im" and bot_user_id and f"<@{bot_user_id}>" not in event_text and f"<@ {bot_user_id}>" not in event_text:
+        return {"status": "ignored", "reason": "Not a DM or mention"}
+
     channel_id = inner_event.get("channel")
     ts = inner_event.get("ts")
     thread_ts = inner_event.get("thread_ts") or ts
 
-    # 2. Load the thread context (sliding-window trimmed)
+    # 2. Add 👀 reaction to acknowledge receipt
+    await step.run(
+        "add-reaction-processing",
+        lambda: add_slack_reaction(workspace_id, channel_id, ts, "eyes")
+    )
+
+    # 3. Load the thread context (sliding-window trimmed)
     messages = await step.run(
         "load-thread-context",
         lambda: load_thread_context(workspace_id, channel_id, thread_ts)
@@ -125,8 +154,18 @@ async def handle_slack_message_event(ctx: inngest.Context, step: inngest.Step):
                 thread_ts=thread_ts,
             )
         )
+        # 5. Replace 👀 with ✅ to indicate completion
+        await step.run(
+            "add-reaction-done",
+            lambda: add_slack_reaction(workspace_id, channel_id, ts, "white_check_mark")
+        )
         return {"status": "success", "logs": state_result.get("logs", [])}
 
+    # 5. Replace 👀 with ❓ to indicate no response generated
+    await step.run(
+        "add-reaction-no-response",
+        lambda: add_slack_reaction(workspace_id, channel_id, ts, "question")
+    )
     return {"status": "no_response", "logs": state_result.get("logs", [])}
 
 

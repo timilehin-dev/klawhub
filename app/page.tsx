@@ -65,8 +65,10 @@ function LandingContent() {
 
   const redirectHost = getRedirectHost(APP_URL);
 
+  // reactions:write and team:read are required for the bot to add emoji reactions
+  // and respond only to @mentions/DMs (via bot_user_id lookup)
   const slackOAuthUrl = SLACK_CLIENT_ID
-    ? `https://slack.com/oauth/v2/authorize?client_id=${SLACK_CLIENT_ID}&scope=chat:write,commands,channels:history,channels:read,files:read,files:write,im:history,im:read,im:write,users:read,users:read.email&redirect_uri=${encodeURIComponent(redirectHost + "/api/oauth")}`
+    ? `https://slack.com/oauth/v2/authorize?client_id=${SLACK_CLIENT_ID}&scope=chat:write,commands,channels:history,channels:read,files:read,files:write,im:history,im:read,im:write,reactions:write,team:read,users:read,users:read.email&redirect_uri=${encodeURIComponent(redirectHost + "/api/oauth")}`
     : "https://slack.com/oauth/v2/authorize";
 
   // Show a brief loading indicator while we check auth
