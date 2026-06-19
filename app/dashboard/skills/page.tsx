@@ -6,7 +6,7 @@ import {
   GitFork, Eye, Play, ShieldAlert, Sparkles 
 } from "lucide-react";
 import { useAuth } from "../auth-provider";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/supabase";
 
 interface Skill {
   id: string;
@@ -21,12 +21,12 @@ interface Skill {
 }
 
 const builtinSkills: Skill[] = [
-  { id: "b1", name: "Document Master", slug: "document_master", description: "MIT-licensed doc parsing (pdfplumber), conversion (Pandoc), HTML -> PDF (WeasyPrint), and OCR (PaddleOCR).", skill_type: "builtin", activation_status: "active", ram_gb: 8, documentation: "Uses pdfplumber, pypdf, docx, openpyxl, pptx, reportlab, WeasyPrint, and Pandoc." },
-  { id: "b2", name: "Data Science Lab", slug: "data_science", description: "Exploratory analysis, statistical regression, training models, and interactive visualizations (Plotly/Seaborn).", skill_type: "builtin", activation_status: "active", ram_gb: 16, documentation: "Uses pandas, polars, numpy, matplotlib, seaborn, plotly, scikit-learn, scipy, statsmodels." },
-  { id: "b3", name: "Financial Modeler", slug: "financial_modeler", description: "Discounted Cash Flows, scenario analysis, yfinance market data, pandas-ta indicators, and FinanceToolkit ratios.", skill_type: "builtin", activation_status: "active", ram_gb: 16, documentation: "Uses yfinance, pandas-ta, FinanceToolkit, openpyxl, WeasyPrint." },
-  { id: "b4", name: "FullStack Engineer", slug: "fullstack_engineer", description: "Scaffolding projects, running Pytest, code reviews, formatting (Black), and PR creation via GitPython.", skill_type: "builtin", activation_status: "active", ram_gb: 16, documentation: "Uses pytest, black, pylint, gitpython, cookiecutter." },
-  { id: "b5", name: "Research Synthesizer", slug: "research_synthesizer", description: "Multi-step web search (Tavily), citation scoring, footnotes compiler, and Markdown syntheses.", skill_type: "builtin", activation_status: "active", ram_gb: 8, documentation: "Uses tavily-python, markitdown, WeasyPrint." },
-  { id: "b6", name: "Scheduler & Automation", slug: "automation_engine", description: "Manage crons, track workspace tasks, trigger event-driven workflows, and automate followups.", skill_type: "builtin", activation_status: "active", ram_gb: 8, documentation: "Uses croniter, pydantic, supabase." }
+  { id: "b1", name: "Document Master", slug: "document_master", description: "Professional document creation, parsing, and editing across all formats (PDF, Word, Excel, PPTX, Markdown).", skill_type: "builtin", activation_status: "active", ram_gb: 8, documentation: "Actions: render_pdf (html+css → pdf_b64) and convert (content, from_format, to_format → converted). Uses WeasyPrint, Pandoc, pdfplumber, pypdf, python-docx, openpyxl, python-pptx, reportlab." },
+  { id: "b2", name: "Data Science Lab", slug: "data_science", description: "End-to-end data analysis, visualization, and machine learning using Pandas, Polars, Numpy, Scikit-Learn.", skill_type: "builtin", activation_status: "active", ram_gb: 16, documentation: "Takes a dataset (list of dicts) and returns descriptive statistics. Uses pandas, polars, numpy, matplotlib, seaborn, plotly, scikit-learn, scipy, statsmodels." },
+  { id: "b3", name: "Financial Modeler", slug: "financial_modeler", description: "Professional financial analysis, market intelligence, valuation, and scenario modeling.", skill_type: "builtin", activation_status: "active", ram_gb: 16, documentation: "Takes a ticker symbol and returns price, P/E, market cap, and analyst recommendation. Uses yfinance, pandas-ta, FinanceToolkit, openpyxl, WeasyPrint." },
+  { id: "b4", name: "FullStack Engineer", slug: "fullstack_engineer", description: "Complete software development helper — scaffolding, linting, formatting, debugging, and testing.", skill_type: "builtin", activation_status: "active", ram_gb: 16, documentation: "Actions: run_command (command + args → subprocess output). Uses black, pylint, pytest, httpx, gitpython, cookiecutter." },
+  { id: "b5", name: "Research Synthesizer", slug: "research_synthesizer", description: "Deep multi-step web research, fact-checking, literature review, and source ranking.", skill_type: "builtin", activation_status: "active", ram_gb: 8, documentation: "Takes a query string and returns summarized web research. Uses tavily-python, markitdown, WeasyPrint." },
+  { id: "b6", name: "Scheduler & Automation Engine", slug: "automation_engine", description: "Orchestrates multi-step workspace schedules, tasks, and event-driven automation rules.", skill_type: "builtin", activation_status: "active", ram_gb: 8, documentation: "Takes an action name and returns execution status. Uses croniter, pydantic." }
 ];
 
 export default function SkillsCatalog() {
@@ -40,11 +40,7 @@ export default function SkillsCatalog() {
   const fetchCustomSkills = async () => {
     if (!workspaceId) return;
     try {
-      const { data } = await supabase
-        .from("skills")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false });
+      const data = await apiFetch<Skill[]>(`/api/dashboard/skills?workspace_id=${encodeURIComponent(workspaceId)}`);
         
       if (data && data.length > 0) {
         setSkills(data as Skill[]);

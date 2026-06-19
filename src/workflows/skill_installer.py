@@ -11,6 +11,7 @@ import io
 import zipfile
 import httpx
 import inngest
+from src.config import settings
 from src.core.inngest_client import inngest_client
 from src.core.security.ast_scanner import scan_code
 from src.db.operations import execute_statement
@@ -40,6 +41,8 @@ async def install_skill_from_github(ctx: inngest.Context, step: inngest.Step):
     # 1. Download zipball — return base64 string (JSON-serializable, not BytesIO)
     async def download_repo() -> str:
         headers = {"User-Agent": "KlawHub-Worker"}
+        if settings.GITHUB_PAT:
+            headers["Authorization"] = f"token {settings.GITHUB_PAT}"
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(zipball_url, headers=headers, follow_redirects=True)
             if resp.status_code != 200:

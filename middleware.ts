@@ -20,8 +20,37 @@ export async function middleware(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
 
+  // Keep old dashboard URLs working while exposing a flatter console URL model.
+  if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) {
+    const redirectUrl = req.nextUrl.clone();
+    const rest = pathname.replace(/^\/dashboard\/?/, "");
+    const legacyMap: Record<string, string> = {
+      "": "/overview",
+      workflows: "/workflow",
+      settings: "/settings",
+      skills: "/skills",
+      schedules: "/schedules",
+      tasks: "/tasks",
+      knowledge: "/knowledge",
+      usage: "/usage",
+    };
+    redirectUrl.pathname = legacyMap[rest] || `/overview`;
+    return NextResponse.redirect(redirectUrl, 308);
+  }
+
+  const protectedPaths = [
+    "/overview",
+    "/skills",
+    "/schedules",
+    "/tasks",
+    "/workflow",
+    "/knowledge",
+    "/usage",
+    "/settings",
+  ];
+
   // Protect all /dashboard routes
-  if (pathname.startsWith("/dashboard")) {
+  if (protectedPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
     if (!session) {
       const redirectUrl = req.nextUrl.clone();
       redirectUrl.pathname = "/";

@@ -51,7 +51,7 @@ function LandingContent() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!cancelled && session) {
-          router.replace("/dashboard");
+          router.replace("/overview");
           return;
         }
       } catch {
@@ -101,7 +101,7 @@ function LandingContent() {
           <h1 className="font-bold text-xl leading-none tracking-wider">KLAWHUB</h1>
         </div>
         <Link 
-          href="/dashboard" 
+          href="/overview" 
           className="px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-glassBorder transition-all duration-200 text-sm font-medium"
         >
           Console Login

@@ -2,7 +2,7 @@
 
 ## Architecture
 - Next.js frontend in `app/` (with layouts, pages, middlewares, and routes).
-- FastAPI + Inngest backend in `api/inngest.py` and Python modules in `src/`.
+- FastAPI + Inngest backend in `api/inngest_handler.py` and Python modules in `src/`.
 - Go oauth callback handler in `api/oauth/oauth.go`.
 - Supabase PostgreSQL database managed via client in `src/db/client.py` and operations in `src/db/operations.py`.
 

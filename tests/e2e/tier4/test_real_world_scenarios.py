@@ -211,6 +211,136 @@ def handler(workspace_id: str, inputs: dict) -> dict:
     assert active_skill is not None
     assert active_skill["activation_status"] == "active"
 
+
+# 4b. Custom Skill Installer with Private Repo PAT
+@respx.mock
+@pytest.mark.anyio
+async def test_private_repo_skill_installer_with_pat(client):
+    """Scenario 4b: Install custom skill from a private GitHub repo using GITHUB_PAT."""
+    ws_id = "b3196921-28c3-4cc9-964f-fa775f5b3e6b"
+    
+    # Set GITHUB_PAT env var for this test
+    import os
+    os.environ["GITHUB_PAT"] = "ghp_mock_pat_token_12345"
+    # Reimport settings to pick up the new env var
+    from src.config import settings
+    assert settings.GITHUB_PAT == "ghp_mock_pat_token_12345"
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("skill_private_tool.py", """
+def handler(workspace_id: str, inputs: dict) -> dict:
+    return {"data": inputs.get("secret")}
+""")
+        zip_file.writestr("requirements.txt", "")
+        zip_file.writestr("SKILL.md", "# Private Tool")
+    zip_content = zip_buffer.getvalue()
+    
+    # Mock GitHub API — verify Authorization header includes the PAT
+    def verify_pat(request):
+        auth = request.headers.get("Authorization", "")
+        assert "token ghp_mock_pat_token_12345" in auth, f"Missing PAT in Authorization header: {auth}"
+        return httpx.Response(200, content=zip_content)
+    
+    respx.get("https://api.github.com/repos/org/private-repo/zipball/main").mock(
+        side_effect=verify_pat
+    )
+    
+    from src.workflows.skill_installer import install_skill_from_github
+    from inngest import Step
+    
+    class MockEvent:
+        def __init__(self, data):
+            self.data = data
+            self.name = "skill/install"
+            self.id = "evt-456"
+            self.ts = 67890
+    class MockContext:
+        def __init__(self, data):
+            self.event = MockEvent(data)
+            self.run_id = "run-456"
+            self.attempt = 0
+    
+    ctx = MockContext({
+        "workspace_id": ws_id,
+        "github_url": "https://github.com/org/private-repo",
+        "created_by": "U_ADMIN"
+    })
+    
+    class MockStep(Step):
+        def __init__(self):
+            pass
+        async def run(self, id: str, fn, *args, **kwargs):
+            return await fn()
+    
+    step = MockStep()
+    result = await install_skill_from_github(ctx, step)
+    
+    assert result["status"] == "success"
+    assert result["skill_slug"] == "private_tool"
+    assert any(s["slug"] == "private_tool" for s in MOCK_DB["skills"])
+    
+    # Clean up
+    del os.environ["GITHUB_PAT"]
+
+
+# 4c. Custom Skill Installer — AST rejection of dangerous code
+@respx.mock
+@pytest.mark.anyio
+async def test_custom_skill_ast_rejection(client):
+    """Scenario 4c: Verify AST scanner rejects dangerous code (eval, exec, subprocess)."""
+    ws_id = "b3196921-28c3-4cc9-964f-fa775f5b3e6b"
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
+        # Dangerous code using eval()
+        zip_file.writestr("skill_malicious.py", """
+def handler(workspace_id: str, inputs: dict) -> dict:
+    result = eval(inputs.get("code", ""))
+    return {"result": result}
+""")
+        zip_file.writestr("requirements.txt", "")
+    zip_content = zip_buffer.getvalue()
+    
+    respx.get("https://api.github.com/repos/org/malicious/zipball/main").mock(
+        return_value=httpx.Response(200, content=zip_content)
+    )
+    
+    from src.workflows.skill_installer import install_skill_from_github
+    
+    class MockEvent:
+        def __init__(self, data):
+            self.data = data
+            self.name = "skill/install"
+            self.id = "evt-789"
+            self.ts = 99999
+    class MockContext:
+        def __init__(self, data):
+            self.event = MockEvent(data)
+            self.run_id = "run-789"
+            self.attempt = 0
+    
+    ctx = MockContext({
+        "workspace_id": ws_id,
+        "github_url": "https://github.com/org/malicious",
+        "created_by": "U_ADMIN"
+    })
+    
+    from inngest import Step
+    class MockStep(Step):
+        def __init__(self):
+            pass
+        async def run(self, id: str, fn, *args, **kwargs):
+            return await fn()
+    
+    step = MockStep()
+    result = await install_skill_from_github(ctx, step)
+    
+    # The AST scanner should reject the dangerous code
+    assert result["status"] == "failed"
+    assert "AST" in result.get("reason", "")
+    assert len(MOCK_DB["skills"]) == 0
+
 # 5. Multi-tenant Workspace Isolation Scenario
 @pytest.mark.anyio
 async def test_multi_tenant_workspace_isolation_scenario(client):

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { BarChart2, Activity, Zap, ShieldCheck } from "lucide-react";
 import { useAuth } from "../auth-provider";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/supabase";
 
 export default function UsageTelemetry() {
   const { workspaceId } = useAuth();
@@ -15,10 +15,7 @@ export default function UsageTelemetry() {
   const fetchUsageLogs = async () => {
     if (!workspaceId) return;
     try {
-      const { data } = await supabase
-        .from("usage_logs")
-        .select("prompt_tokens, completion_tokens, latency_ms")
-        .eq("workspace_id", workspaceId);
+      const data = await apiFetch<any[]>(`/api/dashboard/usage?workspace_id=${encodeURIComponent(workspaceId)}&select=prompt_tokens,completion_tokens,latency_ms`);
         
       if (data && data.length > 0) {
         let p_sum = 0;

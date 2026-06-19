@@ -18,5 +18,5 @@ export async function GET(req: NextRequest) {
   }
 
   // Redirect to dashboard after successful auth
-  return NextResponse.redirect(requestUrl.origin + "/dashboard");
+  return NextResponse.redirect(requestUrl.origin + "/overview");
 }

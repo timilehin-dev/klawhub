@@ -6,7 +6,7 @@ import {
   ToggleRight, Info, Check, AlertTriangle 
 } from "lucide-react";
 import { useAuth } from "../auth-provider";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/supabase";
 
 interface Schedule {
   id: string;
@@ -36,15 +36,8 @@ export default function SchedulesManager() {
     if (!workspaceId) return;
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from("schedules")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false });
-        
-      if (data) {
-        setSchedules(data as Schedule[]);
-      }
+      const data = await apiFetch<Schedule[]>(`/api/dashboard/schedules?workspace_id=${encodeURIComponent(workspaceId)}`);
+      setSchedules(data);
     } catch (e) {
       console.log("Error loading schedules:", e);
     } finally {
@@ -63,20 +56,17 @@ export default function SchedulesManager() {
 
     try {
       const payload = { text: text || "Schedule reminder" };
-      const { data, error } = await supabase
-        .from("schedules")
-        .insert([{
+      await apiFetch(`/api/dashboard/schedules?workspace_id=${encodeURIComponent(workspaceId || "")}`, {
+        method: "POST",
+        body: JSON.stringify({
           name,
           schedule_type: type,
           cron_expr: cron,
           channel_id: channel,
           payload,
           is_active: true,
-          workspace_id: workspaceId,
-        }])
-        .select();
-
-      if (error) throw error;
+        }),
+      });
 
       setShowForm(false);
       setName("");
@@ -91,11 +81,10 @@ export default function SchedulesManager() {
 
   const handleToggle = async (id: string, current: boolean) => {
     try {
-      const { error } = await supabase
-        .from("schedules")
-        .update({ is_active: !current })
-        .eq("id", id);
-      if (error) throw error;
+      await apiFetch(`/api/dashboard/schedules/${id}?workspace_id=${encodeURIComponent(workspaceId || "")}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active: !current }),
+      });
       fetchSchedules();
     } catch (e: any) {
       console.log("Toggle failed:", e);
@@ -106,11 +95,9 @@ export default function SchedulesManager() {
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this schedule?")) return;
     try {
-      const { error } = await supabase
-        .from("schedules")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
+      await apiFetch(`/api/dashboard/schedules/${id}?workspace_id=${encodeURIComponent(workspaceId || "")}`, {
+        method: "DELETE",
+      });
       fetchSchedules();
     } catch (e: any) {
       console.log("Delete failed:", e);

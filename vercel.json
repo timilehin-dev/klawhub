@@ -15,14 +15,17 @@
     }
   ],
   "routes": [
-    { "src": "/api/events",             "dest": "/api/events/events.go"       },
-    { "src": "/api/actions",            "dest": "/api/actions/actions.go"     },
-    { "src": "/api/commands",           "dest": "/api/commands/commands.go"   },
-    { "src": "/api/oauth",             "dest": "/api/oauth/oauth.go"         },
-    { "src": "/api/oauth/google",      "dest": "/api/oauth/google/google.go" },
-    { "src": "/api/oauth/github",      "dest": "/api/oauth/github/github.go" },
-    { "src": "/api/health",            "dest": "/api/health/health.go"       },
-    { "src": "/api/inngest",           "dest": "/api/inngest_handler.py"     },
-    { "src": "/(.*)",                  "dest": "/$1"                         }
+    { "src": "/api/events",               "dest": "/api/events/events.go"         },
+    { "src": "/api/actions",              "dest": "/api/actions/actions.go"       },
+    { "src": "/api/commands",             "dest": "/api/commands/commands.go"     },
+    { "src": "/api/oauth",               "dest": "/api/oauth/oauth.go"           },
+    { "src": "/api/oauth/google",        "dest": "/api/oauth/google/google.go"   },
+    { "src": "/api/oauth/google/callback", "dest": "/api/oauth/google/google.go" },
+    { "src": "/api/oauth/github",        "dest": "/api/oauth/github/github.go"   },
+    { "src": "/api/oauth/github/callback", "dest": "/api/oauth/github/github.go" },
+    { "src": "/api/dashboard/(.*)",       "dest": "/api/dashboard/dashboard.go"   },
+    { "src": "/api/health",              "dest": "/api/health/health.go"         },
+    { "src": "/api/inngest",             "dest": "/api/inngest_handler.py"       },
+    { "src": "/(.*)",                    "dest": "/$1"                           }
   ]
 }

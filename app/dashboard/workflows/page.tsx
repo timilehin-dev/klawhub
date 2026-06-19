@@ -6,7 +6,7 @@ import {
   Settings, CheckCircle, Info, Edit3 
 } from "lucide-react";
 import { useAuth } from "../auth-provider";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/supabase";
 
 interface Workflow {
   id: string;
@@ -37,14 +37,8 @@ export default function WorkflowsDesigner() {
     if (!workspaceId) return;
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from("workflows")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false });
-      if (data) {
-        setWorkflows(data as Workflow[]);
-      }
+      const data = await apiFetch<Workflow[]>(`/api/dashboard/workflows?workspace_id=${encodeURIComponent(workspaceId)}`);
+      setWorkflows(data);
     } catch (e) {
       console.log("Error loading workflows:", e);
     } finally {
@@ -65,19 +59,17 @@ export default function WorkflowsDesigner() {
       // Validate steps JSON
       const parsedSteps = JSON.parse(stepsInput);
       
-      const { error } = await supabase
-        .from("workflows")
-        .insert([{
+      await apiFetch(`/api/dashboard/workflows?workspace_id=${encodeURIComponent(workspaceId || "")}`, {
+        method: "POST",
+        body: JSON.stringify({
           name,
           description,
           trigger_type: triggerType,
           trigger_config: { filter: "all" },
           steps: parsedSteps,
           is_active: true,
-          workspace_id: workspaceId,
-        }]);
-
-      if (error) throw error;
+        }),
+      });
 
       setShowForm(false);
       setName("");
@@ -115,11 +107,9 @@ export default function WorkflowsDesigner() {
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this automation?")) return;
     try {
-      const { error } = await supabase
-        .from("workflows")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
+      await apiFetch(`/api/dashboard/workflows/${id}?workspace_id=${encodeURIComponent(workspaceId || "")}`, {
+        method: "DELETE",
+      });
       fetchWorkflows();
     } catch (e: any) {
       console.log("Delete failed:", e);

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Settings, Shield, User, Globe, GitPullRequest, Calendar, Check, RefreshCw, AlertTriangle } from "lucide-react";
 import { useAuth } from "../auth-provider";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/supabase";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://klawhub.xyz";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
@@ -27,10 +27,7 @@ export default function WorkspaceSettings() {
   const loadIntegrations = async () => {
     if (!workspaceId) return;
     try {
-      const { data } = await supabase
-        .from("integrations")
-        .select("*")
-        .eq("workspace_id", workspaceId);
+      const data = await apiFetch<any[]>(`/api/dashboard/integrations?workspace_id=${encodeURIComponent(workspaceId)}`);
         
       const newIntegrations = {
         google: { connected: false, email: "" },
@@ -96,12 +93,9 @@ export default function WorkspaceSettings() {
     if (!workspaceId) return;
     if (!confirm(`Are you sure you want to disconnect ${provider}?`)) return;
     try {
-      const { error } = await supabase
-        .from("integrations")
-        .delete()
-        .eq("workspace_id", workspaceId)
-        .eq("provider", provider);
-      if (error) throw error;
+      await apiFetch(`/api/dashboard/integrations?workspace_id=${encodeURIComponent(workspaceId)}&provider=${encodeURIComponent(provider)}`, {
+        method: "DELETE",
+      });
       loadIntegrations();
     } catch (e) {
       console.log("Disconnect failed:", e);
@@ -111,11 +105,7 @@ export default function WorkspaceSettings() {
   const loadSettings = async () => {
     if (!workspaceId) return;
     try {
-      const { data } = await supabase
-        .from("workspaces")
-        .select("*")
-        .eq("id", workspaceId)
-        .limit(1);
+      const data = await apiFetch<any[]>(`/api/dashboard/settings?workspace_id=${encodeURIComponent(workspaceId)}&limit=1`);
         
       if (data && data.length > 0) {
         const w = data[0] as any;
@@ -139,16 +129,14 @@ export default function WorkspaceSettings() {
     try {
       const channelList = channels.split(",").map(c => c.trim()).filter(Boolean);
       
-      const { error } = await supabase
-        .from("workspaces")
-        .update({
+      await apiFetch(`/api/dashboard/settings/${workspaceId}?workspace_id=${encodeURIComponent(workspaceId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
           persona_name: personaName,
           persona_prompt: personaPrompt,
           whitelisted_channels: channelList
-        })
-        .eq("id", workspaceId);
-
-      if (error) throw error;
+        }),
+      });
       setMessage("Settings saved successfully!");
     } catch (err: any) {
       setMessage("Failed to save settings to database.");

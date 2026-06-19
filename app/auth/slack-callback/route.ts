@@ -30,11 +30,31 @@ export async function GET(req: NextRequest) {
   // ── 1. Ensure a Supabase auth user exists for this Slack user ─────────
   // Use the service-role key (server-only) to bypass RLS and create users
   // without requiring email verification.
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  // The Go OAuth handler dispatches workspace/install asynchronously through
+  // Inngest. Retry briefly so the dashboard session can carry the real
+  // workspace UUID instead of the Slack team ID.
+  let workspaceUuid: string | null = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { data } = await admin
+      .from("workspaces")
+      .select("id")
+      .eq("slack_team_id", teamId)
+      .limit(1)
+      .maybeSingle();
+
+    if (data?.id) {
+      workspaceUuid = data.id;
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
 
   // Deterministic email / password so the same Slack user always maps to
   // one Supabase auth user.
@@ -52,7 +72,8 @@ export async function GET(req: NextRequest) {
       email_confirm: true, // auto-confirm so no verification email is sent
       user_metadata: {
         slack_user_id: slackUserId,
-        workspace_id: teamId,
+        slack_team_id: teamId,
+        ...(workspaceUuid ? { workspace_id: workspaceUuid } : {}),
         workspace_name: teamName,
       },
     });
@@ -66,6 +87,20 @@ export async function GET(req: NextRequest) {
 
     // Now sign in with the newly created user.
     signInResult = await admin.auth.signInWithPassword({ email, password });
+  }
+
+  // Existing users may have been created before the real workspace UUID was
+  // available. Patch metadata when the UUID is now known.
+  if (workspaceUuid && signInResult.data?.user?.id) {
+    await admin.auth.admin.updateUserById(signInResult.data.user.id, {
+      user_metadata: {
+        ...signInResult.data.user.user_metadata,
+        slack_user_id: slackUserId,
+        slack_team_id: teamId,
+        workspace_id: workspaceUuid,
+        workspace_name: teamName,
+      },
+    });
   }
 
   const session = signInResult.data?.session;
@@ -87,6 +122,6 @@ export async function GET(req: NextRequest) {
 
   // ── 4. Redirect to the dashboard ─────────────────────────────────────
   return NextResponse.redirect(
-    requestUrl.origin + "/dashboard?install=success&team=" + encodeURIComponent(teamName)
+    requestUrl.origin + "/overview?install=success&team=" + encodeURIComponent(teamName)
   );
 }

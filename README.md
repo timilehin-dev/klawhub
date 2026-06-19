@@ -53,7 +53,7 @@ klawhub/
 │   ├── commands/commands.go # Slack slash commands
 │   ├── oauth/oauth.go     # Slack OAuth installation flow
 │   ├── health/health.go   # Health check endpoint
-│   └── inngest.py         # Python Inngest webhook service
+│   └── inngest_handler.py # Python Inngest webhook service
 ├── app/                   # Next.js admin dashboard
 │   ├── page.tsx           # Landing page + Add to Slack
 │   ├── middleware.ts      # Supabase auth guard

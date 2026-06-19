@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     GITHUB_APP_PRIVATE_KEY: Optional[str] = None
     GITHUB_APP_CLIENT_ID: Optional[str] = None
     GITHUB_APP_CLIENT_SECRET: Optional[str] = None
+    GITHUB_PAT: Optional[str] = None  # Optional PAT for private repo access
 
     # === Security ===
     ENCRYPTION_KEY: str = ""  # 32-byte AES key hex

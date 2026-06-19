@@ -71,8 +71,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		_ = dispatchGitHubEvent(inngestKey, payloadBytes)
 	}
 
-	// Redirect to settings page
-	http.Redirect(w, r, appURL+"/dashboard/settings?github=connected", http.StatusFound)
+	// Redirect to settings page (new flat path)
+	http.Redirect(w, r, appURL+"/settings?github=connected", http.StatusFound)
 }
 
 func exchangeGitHubCode(code, clientID, clientSecret string) (*GitHubTokenResp, error) {

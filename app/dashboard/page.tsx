@@ -6,7 +6,7 @@ import {
   BarChart2, Zap, ArrowRight, RefreshCw, Terminal 
 } from "lucide-react";
 import { useAuth } from "./auth-provider";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/supabase";
 
 export default function DashboardOverview() {
   const { session, workspaceId, loading: authLoading } = useAuth();
@@ -28,24 +28,14 @@ export default function DashboardOverview() {
     setLoading(true);
     try {
       // Fetch skills count for this workspace
-      const { count: skillsCount } = await supabase
-        .from("skills")
-        .select("*", { count: 'exact', head: true })
-        .eq("workspace_id", workspaceId);
+      const skillsData = await apiFetch<any[]>(`/api/dashboard/skills?workspace_id=${encodeURIComponent(workspaceId)}&select=id`);
+      const skillsCount = skillsData.length;
         
       // Fetch recent logs for this workspace
-      const { data: logs } = await supabase
-        .from("usage_logs")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false })
-        .limit(10);
+      const logs = await apiFetch<any[]>(`/api/dashboard/usage?workspace_id=${encodeURIComponent(workspaceId)}&limit=10`);
 
       // Fetch all logs for this workspace to calculate metrics
-      const { data: allLogs } = await supabase
-        .from("usage_logs")
-        .select("status, total_tokens, created_at")
-        .eq("workspace_id", workspaceId);
+      const allLogs = await apiFetch<any[]>(`/api/dashboard/usage?workspace_id=${encodeURIComponent(workspaceId)}&select=status,total_tokens,created_at`);
 
       const now = new Date();
       const currentMonth = now.getMonth();

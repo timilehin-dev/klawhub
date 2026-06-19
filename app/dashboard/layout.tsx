@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { AuthProvider, useAuth } from "./auth-provider";
 import { supabase } from "@/lib/supabase";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 interface SidebarItem {
   name: string;
@@ -17,14 +18,14 @@ interface SidebarItem {
 }
 
 const sidebarItems: SidebarItem[] = [
-  { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Skills Catalog", href: "/dashboard/skills", icon: Cpu },
-  { name: "Schedules & Crons", href: "/dashboard/schedules", icon: Calendar },
-  { name: "Workspace Tasks", href: "/dashboard/tasks", icon: CheckSquare },
-  { name: "Automations & Workflows", href: "/dashboard/workflows", icon: GitMerge },
-  { name: "Knowledge base", href: "/dashboard/knowledge", icon: BookOpen },
-  { name: "Usage & Telemetry", href: "/dashboard/usage", icon: BarChart2 },
-  { name: "Settings", href: "/dashboard/settings", icon: Settings }
+  { name: "Overview", href: "/overview", icon: LayoutDashboard },
+  { name: "Skills Catalog", href: "/skills", icon: Cpu },
+  { name: "Schedules & Crons", href: "/schedules", icon: Calendar },
+  { name: "Workspace Tasks", href: "/tasks", icon: CheckSquare },
+  { name: "Automations & Workflows", href: "/workflow", icon: GitMerge },
+  { name: "Knowledge base", href: "/knowledge", icon: BookOpen },
+  { name: "Usage & Telemetry", href: "/usage", icon: BarChart2 },
+  { name: "Settings", href: "/settings", icon: Settings }
 ];
 
 function DashboardContent({
@@ -141,7 +142,9 @@ function DashboardContent({
 
         {/* Dynamic Page Content */}
         <main className="flex-1 p-8 overflow-y-auto z-10">
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

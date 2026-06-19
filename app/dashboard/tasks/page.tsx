@@ -6,7 +6,7 @@ import {
   Pause, Check, AlertCircle, RefreshCw 
 } from "lucide-react";
 import { useAuth } from "../auth-provider";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/supabase";
 
 interface Task {
   id: string;
@@ -36,14 +36,8 @@ export default function WorkspaceTasks() {
     if (!workspaceId) return;
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from("tasks")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false });
-      if (data) {
-        setTasks(data as Task[]);
-      }
+      const data = await apiFetch<Task[]>(`/api/dashboard/tasks?workspace_id=${encodeURIComponent(workspaceId)}`);
+      setTasks(data);
     } catch (e) {
       console.log("Error loading tasks:", e);
     } finally {
@@ -61,18 +55,16 @@ export default function WorkspaceTasks() {
     }
 
     try {
-      const { error } = await supabase
-        .from("tasks")
-        .insert([{
+      await apiFetch(`/api/dashboard/tasks?workspace_id=${encodeURIComponent(workspaceId || "")}`, {
+        method: "POST",
+        body: JSON.stringify({
           title,
           description,
           priority,
           status: "pending",
           due_at: dueAt ? new Date(dueAt).toISOString() : null,
-          workspace_id: workspaceId,
-        }]);
-
-      if (error) throw error;
+        }),
+      });
 
       setShowForm(false);
       setTitle("");
@@ -87,11 +79,10 @@ export default function WorkspaceTasks() {
 
   const handleUpdateStatus = async (id: string, newStatus: string) => {
     try {
-      const { error } = await supabase
-        .from("tasks")
-        .update({ status: newStatus })
-        .eq("id", id);
-      if (error) throw error;
+      await apiFetch(`/api/dashboard/tasks/${id}?workspace_id=${encodeURIComponent(workspaceId || "")}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: newStatus }),
+      });
       fetchTasks();
     } catch (e: any) {
       console.log("Update status failed:", e);
@@ -102,11 +93,9 @@ export default function WorkspaceTasks() {
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this task?")) return;
     try {
-      const { error } = await supabase
-        .from("tasks")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
+      await apiFetch(`/api/dashboard/tasks/${id}?workspace_id=${encodeURIComponent(workspaceId || "")}`, {
+        method: "DELETE",
+      });
       fetchTasks();
     } catch (e: any) {
       console.log("Delete failed:", e);

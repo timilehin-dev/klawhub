@@ -136,12 +136,12 @@ _BLOCKED_IMPORTS = {
     "ctypes", "multiprocessing", "threading", "signal", "gc",
     "importlib", "pkgutil", "site",
 }
-_BLOCKED_NAMES = {"eval", "exec", "__import__", "compile", "open", "input"}
+_BLOCKED_NAMES = {"eval", "exec", "__import__", "compile", "open", "input", "breakpoint"}
 _BLOCKED_ATTRS = {
     "__globals__", "__code__", "__builtins__", "__subclasses__",
-    "__import__", "__loader__", "__spec__", "__reduce__",
+    "__import__", "__loader__", "__spec__", "__reduce__", "__reduce_ex__",
 }
-_BLOCKED_CALLS = {"globals", "locals", "eval", "exec", "__import__", "open"}
+_BLOCKED_CALLS = {"globals", "locals", "eval", "exec", "__import__", "open", "compile", "getattr", "setattr", "delattr"}
 
 
 class _ModalASTScanner(ast.NodeVisitor):
@@ -208,6 +208,42 @@ def run_python_script(code: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     try:
         exec(code, {}, local_scope)  # noqa: S102 — intentional, post-AST-scan
         return {"success": True, "output": local_scope.get("output", {})}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.function(memory=COMPLEX_RAM, timeout=600, secrets=[klawhub_secret])
+def run_skill(code: str, workspace_id: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Executes a KlawHub skill module with the required handler contract:
+        handler(workspace_id: str, inputs: dict) -> dict
+
+    This is intentionally distinct from run_python_script:
+    - validates the skill handler contract before invocation
+    - passes workspace_id explicitly for tenant-scoped skill behavior
+    - uses the higher-memory/longer-timeout profile for real workloads
+    - normalizes non-JSON-serializable return values for safe transport
+    """
+    is_safe, errors = _scan_code(code)
+    if not is_safe:
+        return {
+            "success": False,
+            "error": "Skill code failed security scan: " + "; ".join(errors),
+        }
+
+    local_scope: Dict[str, Any] = {}
+    try:
+        exec(code, {}, local_scope)  # noqa: S102 — intentional, post-AST-scan
+        handler = local_scope.get("handler")
+        if not callable(handler):
+            return {
+                "success": False,
+                "error": "Skill entrypoint 'handler(workspace_id, inputs)' not found.",
+            }
+
+        result = handler(workspace_id, inputs or {})
+        normalized = json.loads(json.dumps(result, default=str))
+        return {"success": True, "output": normalized}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -597,4 +633,3 @@ def main():
     test_code = "output['res'] = 'Hello from Modal sandbox!'"
     res = run_python_script.remote(test_code, {})
     print(f"Test Run Result: {res}")
-

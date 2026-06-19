@@ -19,7 +19,7 @@ import inngest
 from src.core.inngest_client import inngest_client
 from src.db.operations import get_workflow_by_id, log_usage
 from src.core.tools.slack_tools import post_slack_message
-from src.core.tools.skill_runner import run_sandbox_function
+from src.core.tools.skill_runner import run_skill_tool
 
 
 @inngest_client.create_function(
@@ -75,7 +75,7 @@ async def execute_workflow(ctx: inngest.Context, step: inngest.Step):
             skill_inputs = {**wf_step.get("args", {}), **input_data}
 
             async def run_skill_step(ws=workspace_id, s=slug, inp=skill_inputs):
-                return await run_sandbox_function("run_skill", s, ws, inp)
+                return await run_skill_tool(s, ws, inp)
 
             result = await step.run(step_label, run_skill_step)
             results.append({"step": idx + 1, "type": "skill", "slug": slug, "result": result})

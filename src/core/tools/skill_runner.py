@@ -26,7 +26,7 @@ async def run_skill_tool(slug: str, workspace_id: str, inputs: Dict[str, Any]) -
         if not code:
             return f"Error: No code found for skill '{slug}'."
             
-        res = await run_sandbox_function("run_python_script", code, inputs)
+        res = await run_sandbox_function("run_skill", code, workspace_id, inputs)
         return f"Skill {slug} executed successfully. Result:\n{res}"
     except Exception as e:
         return f"Error executing skill {slug} in sandbox: {str(e)}"

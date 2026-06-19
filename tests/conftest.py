@@ -326,7 +326,9 @@ def mock_execute_sql(query: str, *args, return_type: str = "status"):
     # 17. UPDATE tasks
     elif "UPDATE tasks SET" in query_clean:
         task_id = args[0]
-        cols_match = re.findall(r"(\w+)\s*=\s*\$\d+", query_clean)
+        # Extract only SET clause columns (exclude WHERE clause from regex matching)
+        set_clause = query_clean.split("WHERE")[0] if "WHERE" in query_clean else query_clean
+        cols_match = re.findall(r"(\w+)\s*=\s*\$\d+", set_clause)
         tk = None
         for t in MOCK_DB["tasks"]:
             if str(t["id"]) == str(task_id):
