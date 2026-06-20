@@ -61,7 +61,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	slackSig := r.Header.Get("X-Slack-Signature")
 
 	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
-	if err != nil || dispatch.MathAbs(time.Now().Unix()-timestamp) > 300 {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "events: failed to parse X-Slack-Request-Timestamp %q: %v\n", timestampStr, err)
+		http.Error(w, "Invalid timestamp or replay attack detected", http.StatusUnauthorized)
+		return
+	}
+	if dispatch.MathAbs(time.Now().Unix()-timestamp) > 300 {
+		fmt.Fprintf(os.Stderr, "events: timestamp too old: now=%d timestamp=%d diff=%d\n", time.Now().Unix(), timestamp, dispatch.MathAbs(time.Now().Unix()-timestamp))
 		http.Error(w, "Invalid timestamp or replay attack detected", http.StatusUnauthorized)
 		return
 	}
@@ -72,6 +78,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	expectedSig := "v0:" + hex.EncodeToString(mac.Sum(nil))
 
 	if !hmac.Equal([]byte(slackSig), []byte(expectedSig)) {
+		fmt.Fprintf(os.Stderr, "events: signature mismatch: timestamp=%s expected=%s received=%s body_len=%d\n",
+			timestampStr, expectedSig[:12], slackSig[:12], len(rawBody))
 		http.Error(w, "Invalid request signature", http.StatusUnauthorized)
 		return
 	}

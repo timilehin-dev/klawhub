@@ -23,7 +23,7 @@ import inngest
     fn_id="handle-slack-message-event",
     trigger=inngest.TriggerEvent(event="slack/event"),
     retries=2,
-    concurrency=50,
+    concurrency=[inngest.Concurrency(limit=50)],
 )
 async def handle_slack_message_event(ctx: inngest.Context, step: inngest.Step):
     event_payload = ctx.event.data
@@ -173,7 +173,7 @@ async def handle_slack_message_event(ctx: inngest.Context, step: inngest.Step):
     fn_id="handle-slack-slash-command",
     trigger=inngest.TriggerEvent(event="slack/command"),
     retries=2,
-    concurrency=50,
+    concurrency=[inngest.Concurrency(limit=50)],
 )
 async def handle_slack_slash_command(ctx: inngest.Context, step: inngest.Step):
     cmd_payload = ctx.event.data
