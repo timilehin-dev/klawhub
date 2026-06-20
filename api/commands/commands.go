@@ -1,5 +1,5 @@
 // NOTE: This file is compiled independently by Vercel as a serverless function.
-// Shared utility functions are imported from api/common/dispatch.
+// Shared utility functions are imported from pkg/dispatch.
 package handler
 
 import (
@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/timilehin-dev/klawhub/api/common/dispatch"
+	"github.com/timilehin-dev/klawhub/pkg/dispatch"
 )
 
 func Handler(w http.ResponseWriter, r *http.Request) {
