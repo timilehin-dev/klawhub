@@ -555,8 +555,8 @@ Automation runner.
             """
             INSERT INTO skills
               (workspace_id, name, slug, description, skill_type, entry_file, code,
-               requirements, documentation, version, created_by, activation_status)
-            VALUES ($1::uuid, $2, $3, $4, 'builtin', $5, $6, $7, $8, '1.0.0', 'system', 'active')
+               requirements, documentation, supporting_files, version, created_by, activation_status)
+            VALUES ($1::uuid, $2, $3, $4, 'builtin', $5, $6, $7, $8, '', '1.0.0', 'system', 'active')
             ON CONFLICT (workspace_id, slug, version) DO NOTHING
             """,
             workspace_id, s["name"], s["slug"], s["description"],

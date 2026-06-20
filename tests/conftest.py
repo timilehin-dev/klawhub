@@ -478,15 +478,23 @@ def mock_execute_sql(query: str, *args, return_type: str = "status"):
         return [] if return_type == "query" else None
 
     # 28. INSERT INTO skills
+    # Column order: workspace_id, name, slug, description, skill_type, entry_file,
+    #               code, requirements, documentation, supporting_files, version,
+    #               created_by, activation_status
     elif "INSERT INTO skills" in query_clean:
         ws_id = args[0]
         name = args[1]
         slug = args[2]
         description = args[3]
-        entry_file = args[4]
-        code = args[5]
-        requirements = args[6]
-        documentation = args[7]
+        skill_type = args[4]
+        entry_file = args[5] if len(args) > 5 else ""
+        code = args[6] if len(args) > 6 else ""
+        requirements = args[7] if len(args) > 7 else ""
+        documentation = args[8] if len(args) > 8 else ""
+        supporting_files = args[9] if len(args) > 9 else ""
+        version = args[10] if len(args) > 10 else "1.0.0"
+        created_by = args[11] if len(args) > 11 else "system"
+        activation_status = args[12] if len(args) > 12 else "active"
         
         existing = None
         for s in MOCK_DB["skills"]:
@@ -498,6 +506,8 @@ def mock_execute_sql(query: str, *args, return_type: str = "status"):
             existing["code"] = code
             existing["requirements"] = requirements
             existing["documentation"] = documentation
+            existing["supporting_files"] = supporting_files
+            existing["skill_type"] = skill_type
             existing["updated_at"] = datetime.now()
         else:
             MOCK_DB["skills"].append({
@@ -505,11 +515,15 @@ def mock_execute_sql(query: str, *args, return_type: str = "status"):
                 "name": name,
                 "slug": slug,
                 "description": description,
+                "skill_type": skill_type,
                 "entry_file": entry_file,
                 "code": code,
                 "requirements": requirements,
                 "documentation": documentation,
-                "activation_status": "active" if len(args) == 8 else "pending_approval",
+                "supporting_files": supporting_files,
+                "version": version,
+                "created_by": created_by,
+                "activation_status": activation_status,
                 "created_at": datetime.now(),
                 "updated_at": datetime.now()
             })

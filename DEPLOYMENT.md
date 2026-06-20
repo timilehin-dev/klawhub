@@ -1,6 +1,6 @@
 # KlawHub Vercel Deployment Guide
 
-> **Replace `https://klawhub.vercel.app`** with your actual Vercel deployment domain throughout this guide.
+> **Replace `https://klawhub.xyz`** with your actual Vercel deployment domain throughout this guide.
 
 ---
 
@@ -48,7 +48,7 @@ Set **all** of the following in **Vercel → Project Settings → Environment Va
 | `TAVILY_API_KEY` | [tavily.com](https://tavily.com) → API Keys | Python research tools |
 | `ENCRYPTION_KEY` | Run: `openssl rand -hex 32` (64 hex chars) | Python Encryptor (AES-256-GCM) |
 | `HMAC_SECRET` | Run: `openssl rand -hex 32` (64 hex chars) | Python agent state integrity |
-| `NEXT_PUBLIC_APP_URL` | `https://klawhub.vercel.app` (no trailing slash) | OAuth redirect URIs, landing page "Add to Slack" button |
+| `NEXT_PUBLIC_APP_URL` | `https://klawhub.xyz` (no trailing slash) | OAuth redirect URIs, landing page "Add to Slack" button |
 | `UPSTASH_REDIS_REST_URL` | [Upstash Console](https://console.upstash.com) → Redis Database → REST URL | Go Slack events deduplication |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash → Redis Database → REST Token | Go Slack events deduplication |
 | `UPSTASH_REDIS_URL` | Upstash → Redis Database → `rediss://...` URI | Python Redis client |
@@ -127,7 +127,7 @@ Create or configure your app at [api.slack.com/apps](https://api.slack.com/apps)
 
 **Redirect URL:** (must match exactly)
 ```
-https://klawhub.vercel.app/api/oauth
+https://klawhub.xyz/api/oauth
 ```
 
 **Bot Token Scopes:**
@@ -153,7 +153,7 @@ users:read.email    Read user email addresses
 
 **Request URL:**
 ```
-https://klawhub.vercel.app/api/events
+https://klawhub.xyz/api/events
 ```
 
 **Subscribe to bot events:**
@@ -169,7 +169,7 @@ app_mention         Bot @mentions
 
 **Request URL:**
 ```
-https://klawhub.vercel.app/api/commands
+https://klawhub.xyz/api/commands
 ```
 
 | Command | Description |
@@ -182,7 +182,7 @@ Add one or more commands pointing to the same Request URL. The command payload i
 
 **Request URL:**
 ```
-https://klawhub.vercel.app/api/actions
+https://klawhub.xyz/api/actions
 ```
 
 Enable **Interactivity** and point to the URL above. This handles button clicks, modal submissions, and message actions dispatched as `slack/action` events.
@@ -197,7 +197,7 @@ Enable **Interactivity** and point to the URL above. This handles button clicks,
 2. Create an **OAuth 2.0 Client ID** (Web application)
 3. **Authorized redirect URIs:**
    ```
-   https://klawhub.vercel.app/api/oauth/google/callback
+   https://klawhub.xyz/api/oauth/google/callback
    ```
 4. Copy **Client ID** → `GOOGLE_CLIENT_ID` + `NEXT_PUBLIC_GOOGLE_CLIENT_ID`
 5. Copy **Client Secret** → `GOOGLE_CLIENT_SECRET`
@@ -215,7 +215,7 @@ You can use either a **GitHub OAuth App** or a **GitHub App**:
 1. Go to GitHub → Settings → Developer Settings → OAuth Apps → New OAuth App
 2. **Authorization callback URL:**
    ```
-   https://klawhub.vercel.app/api/oauth/github/callback
+   https://klawhub.xyz/api/oauth/github/callback
    ```
 3. Copy **Client ID** → `GITHUB_APP_CLIENT_ID` + `NEXT_PUBLIC_GITHUB_CLIENT_ID`
 4. Copy **Client Secret** → `GITHUB_APP_CLIENT_SECRET`
@@ -225,7 +225,7 @@ You can use either a **GitHub OAuth App** or a **GitHub App**:
 1. Go to GitHub → Settings → Developer Settings → GitHub Apps → New GitHub App
 2. **Callback URL:**
    ```
-   https://klawhub.vercel.app/api/oauth/github/callback
+   https://klawhub.xyz/api/oauth/github/callback
    ```
 3. Copy **App ID** → `GITHUB_APP_ID`
 4. Generate a **private key** (.pem) → paste contents into `GITHUB_APP_PRIVATE_KEY`
@@ -239,7 +239,7 @@ You can use either a **GitHub OAuth App** or a **GitHub App**:
 1. Create an account at [inngest.com](https://www.inngest.com)
 2. Create a new app → note the **Event Key** and **Signing Key**
 3. Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` in Vercel env vars
-4. The Inngest SDK endpoint is: `https://klawhub.vercel.app/api/inngest`
+4. The Inngest SDK endpoint is: `https://klawhub.xyz/api/inngest`
 5. No need to configure this URL in Inngest Cloud — the SDK sends events via the Event Key, and the signing key is used to verify webhooks automatically
 
 ### Registered Inngest Functions
@@ -302,6 +302,7 @@ CREATE TABLE skills (
   code TEXT,
   requirements TEXT,
   documentation TEXT,
+  supporting_files TEXT DEFAULT '', -- JSON object of supporting assets
   version TEXT DEFAULT '1.0.0',
   created_by TEXT DEFAULT 'system',
   activation_status TEXT DEFAULT 'pending_approval',
@@ -509,21 +510,21 @@ All important URLs for reference (replace domain):
 
 ```
 # Slack App Configuration
-OAuth Redirect URL:           https://klawhub.vercel.app/api/oauth
-Event Subscription URL:       https://klawhub.vercel.app/api/events
-Slash Command URL:            https://klawhub.vercel.app/api/commands
-Interactivity Request URL:    https://klawhub.vercel.app/api/actions
+OAuth Redirect URL:           https://klawhub.xyz/api/oauth
+Event Subscription URL:       https://klawhub.xyz/api/events
+Slash Command URL:            https://klawhub.xyz/api/commands
+Interactivity Request URL:    https://klawhub.xyz/api/actions
 
 # OAuth Callbacks
-Google OAuth Redirect URI:    https://klawhub.vercel.app/api/oauth/google/callback
-GitHub OAuth Callback URL:    https://klawhub.vercel.app/api/oauth/github/callback
+Google OAuth Redirect URI:    https://klawhub.xyz/api/oauth/google/callback
+GitHub OAuth Callback URL:    https://klawhub.xyz/api/oauth/github/callback
 
 # Inngest
-Inngest SDK Endpoint:         https://klawhub.vercel.app/api/inngest
+Inngest SDK Endpoint:         https://klawhub.xyz/api/inngest
 
 # Health Check
-Health Endpoint:              https://klawhub.vercel.app/api/health
+Health Endpoint:              https://klawhub.xyz/api/health
 
 # Dashboard (after login)
-Console Home:                 https://klawhub.vercel.app/overview
+Console Home:                 https://klawhub.xyz/overview
 ```

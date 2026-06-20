@@ -31,7 +31,26 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Verify Slack request signature
+	// 1. Read raw body once, restore for later use
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewBuffer(rawBody))
+
+	// 2. Check for Slack URL Verification Challenge FIRST (before signature
+	//    verification) because Slack's initial URL verification handshake
+	//    may not include the X-Slack-Signature header.
+	var slackReq SlackChallenge
+	if err := json.Unmarshal(rawBody, &slackReq); err == nil && slackReq.Type == "url_verification" {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(slackReq.Challenge))
+		return
+	}
+
+	// 3. Verify Slack request signature (for all other events)
 	signingSecret := os.Getenv("SLACK_SIGNING_SECRET")
 	if signingSecret == "" {
 		http.Error(w, "Signing secret not configured", http.StatusInternalServerError)
@@ -47,13 +66,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawBody, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		return
-	}
-	r.Body = io.NopCloser(bytes.NewBuffer(rawBody))
-
 	sigBase := fmt.Sprintf("v0:%s:%s", timestampStr, string(rawBody))
 	mac := hmac.New(sha256.New, []byte(signingSecret))
 	mac.Write([]byte(sigBase))
@@ -64,22 +76,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Parse basic details for URL challenge & Deduplication
-	var slackReq SlackChallenge
-	if err := json.Unmarshal(rawBody, &slackReq); err != nil {
-		http.Error(w, "Failed to parse body", http.StatusBadRequest)
-		return
-	}
-
-	// Handle Slack URL Verification Challenge
-	if slackReq.Type == "url_verification" {
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(slackReq.Challenge))
-		return
-	}
-
-	// 3. Filter to only relevant event types — ignore non-message events
+	// 4. Filter to only relevant event types — ignore non-message events
 	var parsedBody map[string]interface{}
 	if err := json.Unmarshal(rawBody, &parsedBody); err == nil {
 		if innerEvent, ok := parsedBody["event"].(map[string]interface{}); ok {
@@ -94,7 +91,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 4. Upstash Redis REST Deduplication
+	// 5. Upstash Redis REST Deduplication
 	redisURL := os.Getenv("UPSTASH_REDIS_REST_URL")
 	redisToken := os.Getenv("UPSTASH_REDIS_REST_TOKEN")
 	if redisURL != "" && redisToken != "" && slackReq.EventID != "" {
@@ -110,7 +107,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 4. Dispatch event to Inngest
+	// 6. Dispatch event to Inngest
 	inngestKey := os.Getenv("INNGEST_EVENT_KEY")
 	if inngestKey != "" {
 		err := dispatch.DispatchToInngest(inngestKey, "slack/event", rawBody)
@@ -121,7 +118,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. ACK back to Slack
+	// 7. ACK back to Slack
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }

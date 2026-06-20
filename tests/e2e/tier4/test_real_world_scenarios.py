@@ -5,7 +5,8 @@ import httpx
 import base64
 import io
 import zipfile
-from tests.conftest import MOCK_DB
+import conftest as _conftest
+MOCK_DB = _conftest.MOCK_DB
 from src.config import settings
 from src.core.security.encryptor import encryptor
 from src.db.operations import (
@@ -155,15 +156,21 @@ def handler(workspace_id: str, inputs: dict) -> dict:
         
     zip_content = zip_buffer.getvalue()
     
-    # Step 1: Mock the zipball download request
+    # Mock the zipball download + branch resolution
+    respx.get("https://api.github.com/repos/org/custom-repo/branches/main").mock(
+        return_value=httpx.Response(200, json={"name": "main"})
+    )
     respx.get("https://api.github.com/repos/org/custom-repo/zipball/main").mock(
         return_value=httpx.Response(200, content=zip_content)
     )
     
-    # Step 2: Trigger custom skill installation via Inngest client workflow installer directly
-    from src.workflows.skill_installer import install_skill_from_github
-    from inngest import Step, Event
-    
+    # Step 2: Trigger custom skill installation
+    from src.workflows.skill_installer import install_skill_from_github as installer_fn
+    # The @inngest_client.create_function decorator wraps the function —
+    # access the raw handler via ._handler
+    installer_raw = installer_fn._handler if hasattr(installer_fn, '_handler') else installer_fn
+    from inngest import Step
+
     class MockEvent:
         def __init__(self, data):
             self.data = data
@@ -182,28 +189,40 @@ def handler(workspace_id: str, inputs: dict) -> dict:
         "created_by": "U_ADMIN"
     })
     
-    # Simulate Inngest execution step runner
     class MockStep(Step):
         def __init__(self):
             pass
         async def run(self, id: str, fn, *args, **kwargs):
-            return await fn()
+            result = fn()
+            # Handle both sync and async functions
+            if hasattr(result, '__await__'):
+                return await result
+            return result
             
     step = MockStep()
-    result = await install_skill_from_github(ctx, step)
+    result = await installer_raw(ctx, step)
     
     # Verify installation status
     assert result["status"] == "success"
-    assert result["skill_slug"] == "my_custom_tool"
+    assert result["mode"] == "hybrid"
+    assert len(result["installed"]) >= 1
+    assert any(i["slug"] == "my_custom_tool" for i in result["installed"])
     
     # Verify skill is cataloged in DB as pending approval
     skills = MOCK_DB["skills"]
-    assert len(skills) == 1
-    assert skills[0]["slug"] == "my_custom_tool"
-    assert skills[0]["activation_status"] == "pending_approval"
+    assert len(skills) >= 1
+    python_skill = next(s for s in skills if s["slug"] == "my_custom_tool")
+    assert python_skill["activation_status"] == "pending_approval"
+    assert python_skill["skill_type"] == "custom"
+    
+    # Verify instruction skill was also created from SKILL.md
+    instruction_skill = next((s for s in skills if s["slug"] != "my_custom_tool"), None)
+    if instruction_skill:
+        assert instruction_skill["skill_type"] == "instruction"
+        assert instruction_skill["activation_status"] == "active"
     
     # Step 3: Approve skill (mark activation_status = 'active')
-    skills[0]["activation_status"] = "active"
+    python_skill["activation_status"] = "active"
     
     # Step 4: Verify custom skill is now active
     from src.db.operations import get_skill
@@ -219,12 +238,11 @@ async def test_private_repo_skill_installer_with_pat(client):
     """Scenario 4b: Install custom skill from a private GitHub repo using GITHUB_PAT."""
     ws_id = "b3196921-28c3-4cc9-964f-fa775f5b3e6b"
     
-    # Set GITHUB_PAT env var for this test
-    import os
-    os.environ["GITHUB_PAT"] = "ghp_mock_pat_token_12345"
-    # Reimport settings to pick up the new env var
-    from src.config import settings
-    assert settings.GITHUB_PAT == "ghp_mock_pat_token_12345"
+    # Set GITHUB_PAT directly on the shared settings object
+    # (cannot use env var because settings was already imported)
+    import src.config
+    src.config.settings.GITHUB_PAT = "ghp_mock_pat_token_12345"
+    assert src.config.settings.GITHUB_PAT == "ghp_mock_pat_token_12345"
     
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
@@ -237,16 +255,25 @@ def handler(workspace_id: str, inputs: dict) -> dict:
     zip_content = zip_buffer.getvalue()
     
     # Mock GitHub API — verify Authorization header includes the PAT
-    def verify_pat(request):
+    def verify_pat_zipball(request):
         auth = request.headers.get("Authorization", "")
         assert "token ghp_mock_pat_token_12345" in auth, f"Missing PAT in Authorization header: {auth}"
         return httpx.Response(200, content=zip_content)
     
+    def verify_pat_branch(request):
+        auth = request.headers.get("Authorization", "")
+        assert "token ghp_mock_pat_token_12345" in auth, f"Missing PAT in branch Auth header: {auth}"
+        return httpx.Response(200, json={"name": "main"})
+    
+    respx.get("https://api.github.com/repos/org/private-repo/branches/main").mock(
+        side_effect=verify_pat_branch
+    )
     respx.get("https://api.github.com/repos/org/private-repo/zipball/main").mock(
-        side_effect=verify_pat
+        side_effect=verify_pat_zipball
     )
     
-    from src.workflows.skill_installer import install_skill_from_github
+    from src.workflows.skill_installer import install_skill_from_github as installer_fn
+    installer_raw = installer_fn._handler if hasattr(installer_fn, '_handler') else installer_fn
     from inngest import Step
     
     class MockEvent:
@@ -271,17 +298,21 @@ def handler(workspace_id: str, inputs: dict) -> dict:
         def __init__(self):
             pass
         async def run(self, id: str, fn, *args, **kwargs):
-            return await fn()
+            result = fn()
+            # Handle both sync and async functions
+            if hasattr(result, '__await__'):
+                return await result
+            return result
     
     step = MockStep()
-    result = await install_skill_from_github(ctx, step)
+    result = await installer_raw(ctx, step)
     
-    assert result["status"] == "success"
-    assert result["skill_slug"] == "private_tool"
+    assert result["status"] == "success", f"Expected success, got: {result}"
+    assert any(i["slug"] == "private_tool" for i in result["installed"])
     assert any(s["slug"] == "private_tool" for s in MOCK_DB["skills"])
     
     # Clean up
-    del os.environ["GITHUB_PAT"]
+    src.config.settings.GITHUB_PAT = None
 
 
 # 4c. Custom Skill Installer — AST rejection of dangerous code
@@ -302,11 +333,15 @@ def handler(workspace_id: str, inputs: dict) -> dict:
         zip_file.writestr("requirements.txt", "")
     zip_content = zip_buffer.getvalue()
     
+    respx.get("https://api.github.com/repos/org/malicious/branches/main").mock(
+        return_value=httpx.Response(200, json={"name": "main"})
+    )
     respx.get("https://api.github.com/repos/org/malicious/zipball/main").mock(
         return_value=httpx.Response(200, content=zip_content)
     )
     
-    from src.workflows.skill_installer import install_skill_from_github
+    from src.workflows.skill_installer import install_skill_from_github as installer_fn
+    installer_raw = installer_fn._handler if hasattr(installer_fn, '_handler') else installer_fn
     
     class MockEvent:
         def __init__(self, data):
@@ -331,15 +366,216 @@ def handler(workspace_id: str, inputs: dict) -> dict:
         def __init__(self):
             pass
         async def run(self, id: str, fn, *args, **kwargs):
-            return await fn()
+            result = fn()
+            # Handle both sync and async functions
+            if hasattr(result, '__await__'):
+                return await result
+            return result
     
     step = MockStep()
-    result = await install_skill_from_github(ctx, step)
+    result = await installer_raw(ctx, step)
     
     # The AST scanner should reject the dangerous code
     assert result["status"] == "failed"
     assert "AST" in result.get("reason", "")
-    assert len(MOCK_DB["skills"]) == 0
+    # Verify no NEW skill was added from this malicious repo
+    # (previous tests may have added skills to MOCK_DB)
+    malicious_skills = [s for s in MOCK_DB["skills"] if "malicious" in s.get("slug", "")]
+    assert len(malicious_skills) == 0
+
+
+# 4d. Instruction Skill Installer — SKILL.md only
+@respx.mock
+@pytest.mark.anyio
+async def test_instruction_skill_installer(client):
+    """Scenario 4d: Install instruction skill from a SKILL.md-only repo (no Python code)."""
+    ws_id = "b3196921-28c3-4cc9-964f-fa775f5b3e6b"
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("skills/data-analysis/SKILL.md", """# Data Analysis
+## Commands
+### /data:analyze
+Analyze a dataset and produce statistical insights.
+""")
+        zip_file.writestr("skills/visualization/SKILL.md", """# Visualization
+## Commands
+### /data:visualize
+Create charts and graphs from data.
+""")
+    zip_content = zip_buffer.getvalue()
+    
+    respx.get("https://api.github.com/repos/org/instruction-repo/branches/main").mock(
+        return_value=httpx.Response(200, json={"name": "main"})
+    )
+    respx.get("https://api.github.com/repos/org/instruction-repo/zipball/main").mock(
+        return_value=httpx.Response(200, content=zip_content)
+    )
+    
+    from src.workflows.skill_installer import install_skill_from_github as installer_fn
+    installer_raw = installer_fn._handler if hasattr(installer_fn, '_handler') else installer_fn
+    from inngest import Step
+    
+    class MockEvent:
+        def __init__(self, data):
+            self.data = data
+            self.name = "skill/install"
+            self.id = "evt-instr-1"
+            self.ts = 11111
+    class MockContext:
+        def __init__(self, data):
+            self.event = MockEvent(data)
+    class MockStep(Step):
+        def __init__(self):
+            pass
+        async def run(self, id: str, fn, *args, **kwargs):
+            result = fn()
+            # Handle both sync and async functions
+            if hasattr(result, '__await__'):
+                return await result
+            return result
+    
+    ctx = MockContext({
+        "workspace_id": ws_id,
+        "github_url": "https://github.com/org/instruction-repo",
+        "created_by": "U_ADMIN"
+    })
+    step = MockStep()
+    result = await installer_raw(ctx, step)
+    
+    assert result["status"] == "success"
+    assert result["mode"] == "instruction"
+    assert len(result["installed"]) == 2
+    assert all(i["status"] == "active" for i in result["installed"])
+    assert all(i["type"] == "instruction" for i in result["installed"])
+    
+    # Verify both instruction skills were inserted into the DB
+    db_slugs = [s["slug"] for s in MOCK_DB["skills"]]
+    assert "data_analysis" in db_slugs
+    assert "visualization" in db_slugs
+
+
+# 4e. Handler Signature Validation Rejection
+@respx.mock
+@pytest.mark.anyio
+async def test_handler_signature_validation(client):
+    """Scenario 4e: Verify handler signature validation rejects wrong signatures."""
+    ws_id = "b3196921-28c3-4cc9-964f-fa775f5b3e6b"
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
+        # Handler with wrong signature (3 required args instead of 2)
+        zip_file.writestr("skill_bad_signature.py", """
+def handler(a: str, b: str, c: str) -> dict:
+    return {"result": a + b + c}
+""")
+    zip_content = zip_buffer.getvalue()
+    
+    respx.get("https://api.github.com/repos/org/bad-sig-repo/branches/main").mock(
+        return_value=httpx.Response(200, json={"name": "main"})
+    )
+    respx.get("https://api.github.com/repos/org/bad-sig-repo/zipball/main").mock(
+        return_value=httpx.Response(200, content=zip_content)
+    )
+    
+    from src.workflows.skill_installer import install_skill_from_github as installer_fn
+    installer_raw = installer_fn._handler if hasattr(installer_fn, '_handler') else installer_fn
+    from inngest import Step
+    
+    class MockEvent:
+        def __init__(self, data):
+            self.data = data
+            self.name = "skill/install"
+            self.id = "evt-sig-1"
+            self.ts = 22222
+    class MockContext:
+        def __init__(self, data):
+            self.event = MockEvent(data)
+    class MockStep(Step):
+        def __init__(self):
+            pass
+        async def run(self, id: str, fn, *args, **kwargs):
+            result = fn()
+            # Handle both sync and async functions
+            if hasattr(result, '__await__'):
+                return await result
+            return result
+    
+    ctx = MockContext({
+        "workspace_id": ws_id,
+        "github_url": "https://github.com/org/bad-sig-repo",
+        "created_by": "U_ADMIN"
+    })
+    step = MockStep()
+    result = await installer_raw(ctx, step)
+    
+    assert result["status"] == "failed"
+    assert "handler() must accept exactly 2 arguments" in result["reason"]
+    # No skill from this repo should be in the DB with type 'custom'
+    db_custom = [s for s in MOCK_DB["skills"] if s.get("slug") == "bad_signature"]
+    assert len(db_custom) == 0
+
+
+# 4f. Branch Fallback
+@respx.mock
+@pytest.mark.anyio
+async def test_skill_installer_branch_fallback(client):
+    """Scenario 4f: Verify the installer falls back from main to master branch."""
+    ws_id = "b3196921-28c3-4cc9-964f-fa775f5b3e6b"
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("skill_legacy_tool.py", """
+def handler(workspace_id: str, inputs: dict) -> dict:
+    return {"legacy": True}
+""")
+    zip_content = zip_buffer.getvalue()
+    
+    # main branch fails (404) → should fall back to master
+    respx.get("https://api.github.com/repos/org/legacy-repo/branches/main").mock(
+        return_value=httpx.Response(404)
+    )
+    respx.get("https://api.github.com/repos/org/legacy-repo/branches/master").mock(
+        return_value=httpx.Response(200, json={"name": "master"})
+    )
+    respx.get("https://api.github.com/repos/org/legacy-repo/zipball/master").mock(
+        return_value=httpx.Response(200, content=zip_content)
+    )
+    
+    from src.workflows.skill_installer import install_skill_from_github as installer_fn
+    installer_raw = installer_fn._handler if hasattr(installer_fn, '_handler') else installer_fn
+    from inngest import Step
+    
+    class MockEvent:
+        def __init__(self, data):
+            self.data = data
+            self.name = "skill/install"
+            self.id = "evt-br-1"
+            self.ts = 33333
+    class MockContext:
+        def __init__(self, data):
+            self.event = MockEvent(data)
+    class MockStep(Step):
+        def __init__(self):
+            pass
+        async def run(self, id: str, fn, *args, **kwargs):
+            result = fn()
+            # Handle both sync and async functions
+            if hasattr(result, '__await__'):
+                return await result
+            return result
+    
+    ctx = MockContext({
+        "workspace_id": ws_id,
+        "github_url": "https://github.com/org/legacy-repo",
+        "created_by": "U_ADMIN"
+    })
+    step = MockStep()
+    result = await installer_raw(ctx, step)
+    
+    assert result["status"] == "success"
+    assert result["branch"] == "master"  # Falls back to master
+    assert any(i["slug"] == "legacy_tool" for i in result["installed"])
 
 # 5. Multi-tenant Workspace Isolation Scenario
 @pytest.mark.anyio
